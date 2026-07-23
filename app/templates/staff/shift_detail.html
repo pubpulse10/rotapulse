@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Shift — {{ shift['shift_date']|uk_date }}{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>{{ shift['shift_date']|uk_date }} — {{ shift['start_time'] }} to {{ shift['end_time'] }}</h1>
+
+  {% if not attendance or not attendance['clock_in_at'] %}
+    <form id="clock-in-form" method="post" action="{{ url_for('staff_portal.clock_in', shift_id=shift['id']) }}" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="lat" id="clock-in-lat">
+      <input type="hidden" name="lng" id="clock-in-lng">
+      <label for="clock-in-photo">Photo (optional)</label>
+      <input type="file" id="clock-in-photo" name="photo" accept="image/*" capture="user">
+      <button type="submit" class="btn-primary btn-large" onclick="return captureLocation('clock-in-form')">Clock in</button>
+    </form>
+  {% elif not attendance['clock_out_at'] %}
+    <p class="hint">Clocked in at {{ attendance['clock_in_at'] }}.</p>
+    <form id="clock-out-form" method="post" action="{{ url_for('staff_portal.clock_out', shift_id=shift['id']) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="lat" id="clock-out-lat">
+      <input type="hidden" name="lng" id="clock-out-lng">
+      <button type="submit" class="btn-primary btn-large" onclick="return captureLocation('clock-out-form')">Clock out</button>
+    </form>
+  {% else %}
+    <p class="hint">Clocked in {{ attendance['clock_in_at'] }}, clocked out {{ attendance['clock_out_at'] }}.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Request a swap</h2>
+  <form method="post" action="{{ url_for('staff_portal.request_swap', shift_id=shift['id']) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="to_person_id">Colleague's person ID</label>
+    <input type="number" id="to_person_id" name="to_person_id" required>
+    <p class="hint">Ask your admin for the colleague's ID, or use the staff list.</p>
+    <button type="submit" class="btn-secondary">Request swap</button>
+  </form>
+</div>
+
+<script>
+function captureLocation(formId) {
+  const form = document.getElementById(formId);
+  if (!navigator.geolocation) {
+    return true; // no geolocation support — submit without coordinates, server flags "not confirmed"
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      form.querySelector('input[name=lat]').value = pos.coords.latitude;
+      form.querySelector('input[name=lng]').value = pos.coords.longitude;
+      form.submit();
+    },
+    () => { form.submit(); }, // permission declined — still submit, server flags "not confirmed"
+    { timeout: 5000 }
+  );
+  return false; // wait for the async geolocation callback to submit
+}
+</script>
+{% endblock %}

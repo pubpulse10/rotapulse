@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Staff — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Staff</h1>
+  <p><a href="{{ url_for('admin_config.pending_approval') }}">View pending approvals</a></p>
+  <table>
+    <tr><th>Name</th><th>Role</th><th>Permission</th><th>Status</th><th>Pay rate</th><th></th><th></th></tr>
+    {% for member in staff %}
+      <tr>
+        <td>{{ member['name'] }}</td>
+        <td>{{ member['role_name'] or '—' }}</td>
+        <td>{{ member['permission_level'] }}</td>
+        <td>{{ member['display_status'] }}</td>
+        <td>£{{ '%.2f'|format(member['hourly_pay_rate'] or 0) }}</td>
+        <td><a href="{{ url_for('admin_config.edit_staff', membership_id=member['membership_id']) }}">Edit</a></td>
+        <td>
+          {% if member['membership_status'] == 'active' %}
+            <form method="post" action="{{ url_for('admin_config.mark_left', membership_id=member['membership_id']) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="link-button">Mark left</button>
+            </form>
+          {% else %}
+            <form method="post" action="{{ url_for('admin_config.erase_staff', membership_id=member['membership_id']) }}"
+                  onsubmit="return confirm('Erase this person\'s sensitive personal data? This cannot be undone.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="link-button">Erase data</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+
+  <h2>Invite someone new</h2>
+  <form method="post" action="{{ url_for('admin_config.create_staff') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" required>
+    <label for="role_id">Role</label>
+    <select id="role_id" name="role_id">
+      <option value="">—</option>
+      {% for role in roles %}<option value="{{ role['id'] }}">{{ role['name'] }}</option>{% endfor %}
+    </select>
+    <label for="permission_level">Permission</label>
+    <select id="permission_level" name="permission_level">
+      <option value="staff">Staff</option>
+      <option value="rota_admin">Rota admin</option>
+    </select>
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email">
+    <label for="mobile">Mobile</label>
+    <input type="text" id="mobile" name="mobile">
+    <label for="invite_method">Invite via</label>
+    <select id="invite_method" name="invite_method">
+      <option value="email">Email</option>
+      <option value="sms">SMS</option>
+    </select>
+    <button type="submit" class="btn-primary">Send invite</button>
+  </form>
+</div>
+{% endblock %}

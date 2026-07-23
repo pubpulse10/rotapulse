@@ -1,0 +1,280 @@
+:root {
+  --color-bg: #f4f5f7;
+  --color-surface: #ffffff;
+  --color-text: #1a1d21;
+  --color-muted: #6b7280;
+  --color-primary: #06223b;
+  --color-primary-dark: #041627;
+  --color-accent: #1d8a4c;
+  --color-error: #c0392b;
+  --color-leave: #8e5bd6;
+  --color-dayoff: #6b7280;
+  --color-border: #d9dce0;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 16px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--color-surface);
+  padding: 0 20px;
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+
+.wordmark { display: flex; align-items: center; text-decoration: none; }
+.logo-img {
+  /* 120px matches PricePulse's and TaskPulse's logo height exactly — a
+     consistent header across the PubPulse app family. The growth comes out
+     of the plate's own padding budget (6px -> 0 vertically), not out of the
+     topbar's depth, same technique the sibling apps use. */
+  height: 120px;
+  width: auto;
+  display: block;
+  background: #fff;
+  padding: 0 14px;
+  border-radius: var(--radius);
+}
+
+nav a, .admin-link { margin: 0 10px; color: var(--color-text); text-decoration: none; font-size: 0.95rem; }
+nav .link-button { background: none; border: none; color: var(--color-text); font-size: 0.95rem; cursor: pointer; }
+nav a.active, .nav-dropdown-trigger.active { text-decoration: underline; text-underline-offset: 4px; }
+
+.nav-dropdown { position: relative; display: inline-block; margin: 0 10px; }
+.nav-dropdown-trigger {
+  background: none;
+  border: none;
+  color: var(--color-text);
+  font-size: 0.95rem;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+.nav-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  min-width: 240px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 6px;
+  margin-top: 6px;
+}
+.nav-dropdown-menu.open { display: block; }
+.nav-dropdown-menu a,
+.nav-dropdown-item-button,
+.nav-dropdown-note {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: none;
+  background: none;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  text-decoration: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.nav-dropdown-menu a:hover,
+.nav-dropdown-item-button:hover { background: var(--color-bg); }
+.nav-dropdown-note { color: var(--color-muted); cursor: default; }
+.nav-dropdown-divider { border-top: 1px solid var(--color-border); margin: 6px 2px; }
+.nav-paste-form { padding: 8px 10px; }
+.nav-paste-form label { display: block; margin: 0 0 4px; font-weight: normal; font-size: 0.9rem; }
+.nav-paste-form select { width: 100%; margin-bottom: 6px; }
+.nav-paste-form .nav-dropdown-item-button { width: auto; padding: 6px 14px; background: var(--color-primary); color: white; }
+.nav-paste-form .nav-dropdown-item-button:hover { background: var(--color-primary-dark); }
+
+.content { padding: 20px; max-width: 1100px; margin: 0 auto; }
+
+.flash-container { max-width: 1100px; margin: 12px auto 0; padding: 0 20px; }
+.flash { padding: 10px 14px; border-radius: var(--radius); margin-bottom: 8px; }
+.flash-error { background: #fdecea; color: var(--color-error); }
+.flash-success { background: #e7f6ec; color: var(--color-accent); }
+
+h1 { font-size: 1.5rem; margin-bottom: 0.4rem; }
+h2 { font-size: 1.2rem; }
+.hint { color: var(--color-muted); margin-top: 0; }
+
+.panel, .card {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin: 16px 0;
+  border: 1px solid var(--color-border);
+}
+.card.narrow { max-width: 420px; }
+
+label { display: block; font-weight: 600; margin: 12px 0 4px; }
+input[type=text], input[type=password], input[type=number], input[type=date],
+input[type=time], input[type=email], input[type=month], textarea, select {
+  width: 100%;
+  padding: 9px;
+  font-size: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: white;
+  color: var(--color-text);
+}
+textarea { min-height: 70px; resize: vertical; }
+.checkbox-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+.checkbox-row label { margin: 0; font-weight: normal; }
+
+.btn-primary {
+  display: inline-block;
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  margin-top: 10px;
+}
+.btn-primary:hover { background: var(--color-primary-dark); }
+.btn-large { font-size: 1.2rem; padding: 16px 24px; width: 100%; text-align: center; }
+.btn-secondary {
+  display: inline-block;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  padding: 9px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  margin-top: 10px;
+}
+.btn-danger { background: var(--color-error); }
+.link-button { background: none; border: none; color: var(--color-primary); text-decoration: underline; cursor: pointer; padding: 0; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-border); }
+
+/* ---------- Rota grid ---------- */
+
+.rota-table { table-layout: fixed; }
+.rota-table th { background: var(--color-surface); position: sticky; top: 0; }
+.rota-cell {
+  min-height: 64px;
+  vertical-align: top;
+  cursor: pointer;
+}
+.rota-cell a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  text-decoration: none;
+  color: inherit;
+  padding: 4px;
+}
+.cell-empty { border: 2px dashed var(--color-border); color: var(--color-muted); }
+.cell-empty a::before { content: "+"; font-size: 1.4rem; }
+.cell-empty-plain { cursor: default; } /* the Open row's empty cells — nothing to tap, unlike a staff row's */
+.open-row td:first-child { font-style: italic; color: var(--color-muted); }
+.cell-openshift { background: #fffbf0; }
+.cell-openshift a { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px; }
+.open-shift-chip {
+  display: flex;
+  align-items: center;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: #fff3cd;
+  border: 1px solid #f0ad4e;
+  color: #856404;
+}
+.cell-shift { background: #e7f0f6; }
+.cell-shift a { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px; }
+.cell-shift .avatar { width: 22px; height: 22px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
+.cell-dayoff { background: #ececec; color: var(--color-dayoff); }
+.cell-dayoff a::before {
+  content: "🛏";
+  font-size: 1.3rem;
+  display: inline-block;
+  transform: scale(1.7); /* visual-only enlargement — doesn't affect layout/cell height, unlike a bigger font-size would */
+}
+.cell-leave { background: #f1eafb; color: var(--color-leave); }
+.cell-leave a::before { content: "🌴"; font-size: 1.3rem; }
+
+/* Draggable shift chips (app/static/rota_dragdrop.js) — touch-action: none
+   stops the browser's own touch-scroll from fighting a drag gesture on a
+   tablet, which is essential for pointer-based drag to work on touch. Each
+   chip gets its own background/border so a split shift (two shifts for the
+   same person on the same day, e.g. a morning and an evening slot) reads
+   as clearly separate entries instead of blending into one line. */
+.shift-chip {
+  display: flex;
+  align-items: center;
+  cursor: grab;
+  touch-action: none;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  font-size: 0.85rem;
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.shift-chip .avatar { -webkit-user-drag: none; }
+.shift-chip.dragging-source { opacity: 0.35; }
+.shift-chip-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  opacity: 0.9;
+}
+.rota-cell.drop-target { outline: 3px solid var(--color-primary); outline-offset: -3px; }
+
+.event-badge { display: inline-flex; align-items: center; gap: 3px; background: #fff3cd; color: #856404; border-radius: 6px; padding: 1px 4px 1px 6px; font-size: 0.7rem; margin-left: 4px; }
+.event-badge-remove-form { display: inline; }
+.event-badge-remove {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0 1px;
+}
+.event-badge-remove:hover { color: var(--color-error); }
+.day-cost { font-size: 0.8rem; font-weight: 600; color: var(--color-primary); }
+.weather-strip { font-size: 0.8rem; color: var(--color-muted); }
+
+.badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; vertical-align: middle; margin-left: 8px; }
+.badge-on-track { background: #e7f6ec; color: var(--color-accent); }
+.badge-over-target { background: #fdecea; color: var(--color-error); }
+.badge-unnotified { background: #ececec; color: var(--color-muted); }
+
+.staff-list-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--color-border); }
+.staff-list-item .avatar { width: 36px; height: 36px; border-radius: 50%; }
+
+.day-list-item { padding: 12px; border: 1px solid var(--color-border); border-radius: var(--radius); margin-bottom: 10px; }

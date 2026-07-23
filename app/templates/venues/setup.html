@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Set up RotaPulse{% endblock %}
+{% block content %}
+<div class="panel narrow">
+  <h1>Set up your venue</h1>
+  <p class="hint">You'll get {{ trial_days }} free days before a subscription is needed.</p>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="venue_name">Venue name</label>
+    <input type="text" id="venue_name" name="venue_name" required>
+    <label for="owner_name">Your name</label>
+    <input type="text" id="owner_name" name="owner_name" required>
+    <label for="postcode">Postcode</label>
+    <input type="text" id="postcode" name="postcode" placeholder="e.g. NR20 3EN">
+    <p class="hint">Used to confirm staff are on-site when they clock in/out.</p>
+    <button type="submit" class="btn-primary">Create venue</button>
+  </form>
+</div>
+{% endblock %}

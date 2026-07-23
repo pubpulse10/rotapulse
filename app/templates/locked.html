@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}RotaPulse — subscription needed{% endblock %}
+{% block content %}
+<div class="panel narrow">
+  <h1>{{ venue['name'] }} is locked</h1>
+  <p class="hint">The free trial has ended (or the subscription has lapsed) for this venue. Subscribe to keep using RotaPulse.</p>
+  <a class="btn-primary" href="{{ url_for('billing.subscription') }}">Go to subscription</a>
+</div>
+{% endblock %}

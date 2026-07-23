@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Checkout cancelled — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel narrow">
+  <h1>Checkout cancelled</h1>
+  <p>No changes were made — you can subscribe any time from the subscription page.</p>
+  <a class="btn-primary" href="{{ url_for('billing.subscription') }}">Back to subscription</a>
+</div>
+{% endblock %}

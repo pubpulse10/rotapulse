@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Claim shift — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel narrow">
+  <h1>Claim this shift?</h1>
+  <p>{{ shift['shift_date']|uk_date }} {{ shift['start_time'] }}-{{ shift['end_time'] }}</p>
+  <p class="hint">First to claim gets it — no admin approval needed.</p>
+  <form method="post" action="{{ url_for('staff_portal.claim_open_shift', shift_id=shift['id']) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn-primary btn-large">Claim shift</button>
+  </form>
+</div>
+{% endblock %}

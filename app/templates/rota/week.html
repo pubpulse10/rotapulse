@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Rota — {{ venue['name'] }}{% endblock %}
+{% block content %}
+<h1>
+  {{ venue['name'] }} — week of {{ week_start.day }} {{ week_start.strftime('%B %Y') }}
+  {% if week_notification %}
+    <span class="badge badge-on-track" title="Sent {{ week_notification['notified_at'] }}">Notified</span>
+  {% else %}
+    <span class="badge badge-unnotified">Unnotified</span>
+  {% endif %}
+</h1>
+<p>
+  <a class="btn-secondary" href="{{ url_for('rota_grid.week', week=prev_week) }}">&laquo; Prev week</a>
+  <a class="btn-secondary" href="{{ url_for('rota_grid.week', week=next_week) }}">Next week &raquo;</a>
+  <a class="btn-secondary" href="{{ url_for('rota_grid.swaps') }}">Swap requests</a>
+</p>
+
+<div class="panel">
+  <table class="rota-table">
+    <thead>
+      <tr>
+        <th>
+          <div class="day-cost">£{{ '%.2f'|format(week_cost) }}</div>
+          Staff
+        </th>
+        {% for d in dates %}
+          <th>
+            <div class="day-cost">£{{ '%.2f'|format(daily_cost.get(d.isoformat(), 0)) }}</div>
+            {{ d.strftime('%a') }} {{ d.day }}
+            {% for tag in tags_by_date.get(d.isoformat(), []) %}
+              <span class="event-badge">
+                {{ tag['label'] }}
+                <form method="post" action="{{ url_for('rota_grid.delete_event_tag', tag_id=tag['id']) }}" class="event-badge-remove-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="event-badge-remove" title="Remove {{ tag['label'] }}" aria-label="Remove {{ tag['label'] }}">&times;</button>
+                </form>
+              </span>
+            {% endfor %}
+            {% if forecast.get(d.isoformat()) %}
+              <div class="weather-strip">{{ forecast[d.isoformat()]['temperature_c'] }}°C</div>
+            {% endif %}
+          </th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="open-row">
+        <td>Open</td>
+        {% for d in dates %}
+          {% set d_str = date_strs[loop.index0] %}
+          {% set day_open_shifts = open_shifts_by_date.get(d_str, []) %}
+          <td class="rota-cell {{ 'cell-openshift' if day_open_shifts else 'cell-empty-plain' }}">
+            {% for s in day_open_shifts %}
+              <a href="{{ url_for('rota_grid.open_shift_panel', shift_id=s['id']) }}" draggable="false">
+                <span class="open-shift-chip">
+                  {{ s['start_time'] }}-{{ s['end_time'] }}{% if s['role_name'] %} ({{ s['role_name'] }}){% endif %}
+                </span>
+              </a>
+            {% endfor %}
+          </td>
+        {% endfor %}
+      </tr>
+      {% for row in grid %}
+        <tr>
+          <td>{{ row['member']['name'] }}</td>
+          {% for cell in row['cells'] %}
+            {% set d_str = date_strs[loop.index0] %}
+            <td class="rota-cell cell-{{ 'shift' if cell['state']=='shift' else ('dayoff' if cell['state']=='day_off' else ('leave' if cell['state']=='leave' else 'empty')) }}"
+                data-person-id="{{ row['member']['person_id'] }}" data-date="{{ d_str }}">
+              <a href="{{ url_for('rota_grid.cell', person_id=row['member']['person_id'], on_date=d_str) }}" draggable="false">
+                {% if cell['state'] == 'shift' %}
+                  {% for s in cell['shifts'] %}
+                    <span class="shift-chip" data-shift-id="{{ s['id'] }}">
+                      {% if row['member']['avatar_url'] %}
+                        <img class="avatar" src="{{ url_for('media.avatar', stored_filename=row['member']['avatar_url']) }}" alt="" draggable="false">
+                      {% endif %}
+                      {{ s['start_time'] }}-{{ s['end_time'] }}
+                    </span>
+                  {% endfor %}
+                {% endif %}
+              </a>
+            </td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <h2>Add an open shift</h2>
+  <p class="hint">Existing open shifts show on the "Open" row at the top of the grid above — tap one to notify staff or delete it.</p>
+  <form method="post" action="{{ url_for('rota_grid.create_shift') }}" style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div><label for="open_shift_date">Date</label><input type="date" id="open_shift_date" name="shift_date" required></div>
+    <div><label for="open_start_time">Start</label><input type="time" id="open_start_time" name="start_time" required></div>
+    <div><label for="open_end_time">End</label><input type="time" id="open_end_time" name="end_time" required></div>
+    <div>
+      <label for="open_venue_role_id">Role</label>
+      <select id="open_venue_role_id" name="venue_role_id">
+        <option value="">—</option>
+        {% for role in roles %}<option value="{{ role['id'] }}">{{ role['name'] }}</option>{% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn-secondary">Add open shift</button>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Add an event tag</h2>
+  <form method="post" action="{{ url_for('rota_grid.create_event_tag') }}" style="display:flex; gap:8px; align-items:flex-end;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div><label for="tag_date">Date</label><input type="date" id="tag_date" name="tag_date" required></div>
+    <div><label for="label">Label</label><input type="text" id="label" name="label" placeholder="Match day" required></div>
+    <button type="submit" class="btn-secondary">Add tag</button>
+  </form>
+</div>
+
+<script src="{{ url_for('static', filename='rota_dragdrop.js') }}?v={{ static_version('rota_dragdrop.js') }}" defer></script>
+{% endblock %}

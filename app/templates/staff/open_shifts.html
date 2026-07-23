@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Open shifts — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Open shifts</h1>
+  {% if not shifts %}<p class="hint">No open shifts right now.</p>{% endif %}
+  {% for s in shifts %}
+    <div class="day-list-item">
+      {{ s['shift_date']|uk_date }} {{ s['start_time'] }}-{{ s['end_time'] }} — {{ s['role_name'] or 'any role' }}
+      <form method="post" action="{{ url_for('staff_portal.claim_open_shift', shift_id=s['id']) }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn-primary">Claim</button>
+      </form>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

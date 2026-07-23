@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ person['name'] }} — {{ on_date|uk_date }}{% endblock %}
+{% block content %}
+<h1>{{ person['name'] }} — {{ on_date|uk_date }}</h1>
+
+{% if shifts %}
+  <div class="panel">
+    <h2>Shift(s)</h2>
+    {% for s in shifts %}
+      <div class="day-list-item">
+        {% if s['status'] == 'open' %}
+          <em>Open — no one assigned</em>
+        {% endif %}
+        <form method="post" action="{{ url_for('rota_grid.update_shift', shift_id=s['id']) }}" style="display:flex; gap:8px; align-items:flex-end;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="shift_date" value="{{ on_date }}">
+          <div><label>Start</label><input type="time" name="start_time" value="{{ s['start_time'] }}"></div>
+          <div><label>End</label><input type="time" name="end_time" value="{{ s['end_time'] }}"></div>
+          <div><label>Role</label>
+            <select name="venue_role_id">
+              <option value="">—</option>
+              {% for role in roles %}<option value="{{ role['id'] }}" {{ 'selected' if s['venue_role_id']==role['id'] }}>{{ role['name'] }}</option>{% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn-secondary">Save</button>
+        </form>
+        <form method="post" action="{{ url_for('rota_grid.open_shift', shift_id=s['id']) }}" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="link-button">Mark as open (needs cover)</button>
+        </form>
+        <form method="post" action="{{ url_for('rota_grid.delete_shift', shift_id=s['id']) }}" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="link-button">Delete</button>
+        </form>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<div class="panel">
+  <h2>Add a shift</h2>
+  <form method="post" action="{{ url_for('rota_grid.create_shift') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="person_id" value="{{ person['id'] }}">
+    <input type="hidden" name="shift_date" value="{{ on_date }}">
+    <label>Start</label><input type="time" name="start_time" required>
+    <label>End</label><input type="time" name="end_time" required>
+    <label>Role</label>
+    <select name="venue_role_id">
+      <option value="">—</option>
+      {% for role in roles %}<option value="{{ role['id'] }}">{{ role['name'] }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="btn-primary">Add shift</button>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Day off</h2>
+  {% if override %}
+    <form method="post" action="{{ url_for('rota_grid.delete_override', override_id=override['id']) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn-secondary">Remove day-off override</button>
+    </form>
+  {% else %}
+    <form method="post" action="{{ url_for('rota_grid.create_override') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="person_id" value="{{ person['id'] }}">
+      <input type="hidden" name="override_date" value="{{ on_date }}">
+      <label for="note">Note (optional)</label>
+      <input type="text" id="note" name="note">
+      <button type="submit" class="btn-secondary">Mark as day off</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

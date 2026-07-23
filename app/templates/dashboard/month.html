@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}{{ month_label }} — RotaPulse{% endblock %}
+{% block content %}
+<h1>{{ venue['name'] }} — {{ month_label }}</h1>
+<p>
+  <a class="btn-secondary" href="{{ url_for('dashboard.month', month=prev_month) }}">&laquo; Prev month</a>
+  <a class="btn-secondary" href="{{ url_for('dashboard.month', month=next_month) }}">Next month &raquo;</a>
+  <a class="btn-secondary" href="{{ url_for('dashboard.week') }}">Week view</a>
+  <a class="btn-secondary" href="{{ url_for('dashboard.birthdays') }}">Birthdays</a>
+</p>
+
+<div class="panel">
+  <h2>Month total</h2>
+  <table>
+    <tr><th></th><th>Staff cost</th><th>Turnover</th><th>% of turnover</th></tr>
+    <tr>
+      <td>Predicted</td>
+      <td>£{{ '%.2f'|format(total_predicted_cost) }}</td>
+      <td>£{{ '%.2f'|format(total_predicted_turnover) }}</td>
+      <td>{{ total_predicted_pct ~ '%' if total_predicted_pct is not none else '—' }}</td>
+    </tr>
+    <tr>
+      <td>Actual</td>
+      <td>£{{ '%.2f'|format(total_actual_cost) }}</td>
+      <td>£{{ '%.2f'|format(total_actual_turnover) }}</td>
+      <td>{{ total_actual_pct ~ '%' if total_actual_pct is not none else '—' }}</td>
+    </tr>
+  </table>
+  {% if target_pct %}<p class="hint">Target: {{ target_pct }}% of turnover.</p>{% endif %}
+</div>
+
+<div class="panel">
+  <h2>Each week — enter predicted (and actual, once known) turnover here</h2>
+  <p class="hint">A week counts toward whichever month its Monday falls in.</p>
+  <table>
+    <tr>
+      <th>Week starting</th>
+      <th>Predicted turnover</th>
+      <th>Actual turnover</th>
+      <th>Predicted staff cost</th>
+      <th>Actual staff cost</th>
+      <th>% predicted</th>
+      <th>% actual</th>
+    </tr>
+    {% for w in weeks %}
+      <tr>
+        <td><a href="{{ url_for('dashboard.week', week=w['week_start'].isoformat()) }}">{{ w['week_start'].day }} {{ w['week_start'].strftime('%b') }}</a></td>
+        <td>
+          <form method="post" action="{{ url_for('dashboard.update_weekly_turnover') }}" style="display:flex; gap:4px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="week_start_date" value="{{ w['week_start'].isoformat() }}">
+            <input type="hidden" name="month" value="{{ month_value }}">
+            <input type="number" step="0.01" name="predicted_amount" value="{{ w['predicted_turnover'] if w['predicted_turnover'] is not none else '' }}" style="width:90px">
+            <button type="submit" class="btn-secondary">Save</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="{{ url_for('dashboard.update_weekly_turnover') }}" style="display:flex; gap:4px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="week_start_date" value="{{ w['week_start'].isoformat() }}">
+            <input type="hidden" name="month" value="{{ month_value }}">
+            <input type="number" step="0.01" name="actual_amount" value="{{ w['actual_turnover'] if w['actual_turnover'] is not none else '' }}" style="width:90px">
+            <button type="submit" class="btn-secondary">Save</button>
+          </form>
+        </td>
+        <td>£{{ '%.2f'|format(w['predicted_cost']) }}</td>
+        <td>£{{ '%.2f'|format(w['actual_cost']) }}</td>
+        <td>{{ w['predicted_pct'] ~ '%' if w['predicted_pct'] is not none else '—' }}</td>
+        <td>
+          {{ w['actual_pct'] ~ '%' if w['actual_pct'] is not none else '—' }}
+          {% if w['on_track'] is not none %}
+            {% if w['on_track'] %}<span class="badge badge-on-track">On track</span>{% else %}<span class="badge badge-over-target">Over target</span>{% endif %}
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

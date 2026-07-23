@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Leave requests — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Leave requests awaiting approval</h1>
+  {% if not requests %}<p class="hint">Nothing pending.</p>{% endif %}
+  {% for r in requests %}
+    <div class="day-list-item">
+      {{ r['name'] }}: {{ r['start_date']|uk_date }} to {{ r['end_date']|uk_date }}
+      <form method="post" action="{{ url_for('rota_grid.approve_leave', leave_id=r['id']) }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn-primary">Approve</button>
+      </form>
+      <form method="post" action="{{ url_for('rota_grid.decline_leave', leave_id=r['id']) }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="link-button">Decline</button>
+      </form>
+    </div>
+  {% endfor %}
+</div>
+
+<div class="panel">
+  <h2>Add leave for a staff member</h2>
+  <p class="hint">Goes straight to approved — use this when you're recording leave on someone's behalf rather than waiting for them to request it themselves.</p>
+  <form method="post" action="{{ url_for('rota_grid.create_leave') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="person_id">Staff member</label>
+    <select id="person_id" name="person_id" required>
+      <option value="" disabled selected>Choose a staff member</option>
+      {% for member in staff %}
+        <option value="{{ member['person_id'] }}">{{ member['name'] }}</option>
+      {% endfor %}
+    </select>
+    <label for="start_date">From</label>
+    <input type="date" id="start_date" name="start_date" required>
+    <label for="end_date">To</label>
+    <input type="date" id="end_date" name="end_date" required>
+    <button type="submit" class="btn-primary">Add leave</button>
+  </form>
+</div>
+{% endblock %}

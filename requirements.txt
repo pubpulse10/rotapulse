@@ -1,0 +1,9 @@
+flask>=3.0
+flask-wtf>=1.2
+python-dotenv>=1.0
+waitress>=3.0
+pytest>=8.0
+stripe>=11.0
+requests>=2.31
+twilio>=9.0
+reportlab>=4.0

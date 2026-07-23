@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Payroll — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Payroll report</h1>
+  <form method="get">
+    <label for="start">From</label>
+    <input type="date" id="start" name="start" value="{{ start_date }}">
+    <label for="end">To</label>
+    <input type="date" id="end" name="end" value="{{ end_date }}">
+    <button type="submit" class="btn-secondary">Update</button>
+  </form>
+  <p>
+    <a class="btn-secondary" href="{{ url_for('payroll.export_csv', start=start_date, end=end_date) }}">Export CSV</a>
+    <a class="btn-secondary" href="{{ url_for('payroll.export_pdf', start=start_date, end=end_date) }}">Export PDF</a>
+  </p>
+
+  {% for person_id, entry in by_person.items() %}
+    <h2>{{ entry['name'] }}</h2>
+    <table>
+      <tr><th>Date</th><th>Hours</th><th>Pay</th></tr>
+      {% for day in entry['days'] %}
+        <tr><td>{{ day['date']|uk_date }}</td><td>{{ day['hours'] }}</td><td>£{{ '%.2f'|format(day['pay']) }}</td></tr>
+      {% endfor %}
+      <tr><td><strong>Total</strong></td><td><strong>{{ entry['total_hours'] }}</strong></td><td><strong>£{{ '%.2f'|format(entry['total_pay']) }}</strong></td></tr>
+    </table>
+  {% endfor %}
+  {% if not by_person %}<p class="hint">No completed shifts in this period yet.</p>{% endif %}
+</div>
+{% endblock %}

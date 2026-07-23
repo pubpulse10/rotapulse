@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Cost dashboard — RotaPulse{% endblock %}
+{% block content %}
+<h1>{{ venue['name'] }} — week of {{ summary['week_start'].day }} {{ summary['week_start'].strftime('%B %Y') }}</h1>
+<p>
+  <a class="btn-secondary" href="{{ url_for('dashboard.week', week=prev_week) }}">&laquo; Prev week</a>
+  <a class="btn-secondary" href="{{ url_for('dashboard.week', week=next_week) }}">Next week &raquo;</a>
+  <a class="btn-secondary" href="{{ url_for('dashboard.month') }}">Month view</a>
+  <a class="btn-secondary" href="{{ url_for('dashboard.birthdays') }}">Birthdays</a>
+</p>
+
+<div class="panel">
+  <h2>Turnover this week</h2>
+  <p class="hint">One figure covers the whole week — for day-by-day editing across a month, use the Month view.</p>
+  <form method="post" action="{{ url_for('dashboard.update_weekly_turnover') }}" style="display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="week_start_date" value="{{ summary['week_start'].isoformat() }}">
+    <div>
+      <label for="predicted_amount">Predicted turnover</label>
+      <input type="number" step="0.01" id="predicted_amount" name="predicted_amount" value="{{ summary['predicted_turnover'] if summary['predicted_turnover'] is not none else '' }}">
+    </div>
+    <div>
+      <label for="actual_amount">Actual turnover</label>
+      <input type="number" step="0.01" id="actual_amount" name="actual_amount" value="{{ summary['actual_turnover'] if summary['actual_turnover'] is not none else '' }}">
+    </div>
+    <button type="submit" class="btn-primary">Save</button>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Staff cost vs turnover</h2>
+  <table>
+    <tr><th></th><th>Staff cost</th><th>Turnover</th><th>% of turnover</th></tr>
+    <tr>
+      <td>Predicted</td>
+      <td>£{{ '%.2f'|format(summary['predicted_cost']) }}</td>
+      <td>£{{ '%.2f'|format(summary['predicted_turnover'] or 0) }}</td>
+      <td>{{ summary['predicted_pct'] ~ '%' if summary['predicted_pct'] is not none else '—' }}</td>
+    </tr>
+    <tr>
+      <td>Actual</td>
+      <td>£{{ '%.2f'|format(summary['actual_cost']) }}</td>
+      <td>£{{ '%.2f'|format(summary['actual_turnover'] or 0) }}</td>
+      <td>
+        {{ summary['actual_pct'] ~ '%' if summary['actual_pct'] is not none else '—' }}
+        {% if summary['on_track'] is not none %}
+          {% if summary['on_track'] %}<span class="badge badge-on-track">On track</span>{% else %}<span class="badge badge-over-target">Over target</span>{% endif %}
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+  {% if target_pct %}
+    <p class="hint">Target: {{ target_pct }}% of turnover.</p>
+  {% else %}
+    <p class="hint">No target staff cost % set yet — add one in Settings to see an on-track/over-target indicator.</p>
+  {% endif %}
+</div>
+{% endblock %}

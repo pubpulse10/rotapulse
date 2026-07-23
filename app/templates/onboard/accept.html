@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Complete your profile — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel narrow">
+  <h1>Welcome, {{ person['name'] }}</h1>
+  <p class="hint">Complete your profile to join {{ venue['name'] }}'s rota.</p>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="avatar">Photo (optional)</label>
+    <input type="file" id="avatar" name="avatar" accept="image/*">
+
+    <label for="home_address">Home address</label>
+    <textarea id="home_address" name="home_address"></textarea>
+
+    <h2>Which days can you normally work?</h2>
+    {% for day in days %}
+      <div class="checkbox-row">
+        <input type="checkbox" id="available_{{ day }}" name="available_{{ day }}" checked>
+        <label for="available_{{ day }}">{{ day|capitalize }}</label>
+      </div>
+    {% endfor %}
+
+    <label for="password">Choose a password</label>
+    <input type="password" id="password" name="password" autocomplete="new-password" required minlength="8">
+    <label for="confirm_password">Confirm password</label>
+    <input type="password" id="confirm_password" name="confirm_password" autocomplete="new-password" required minlength="8">
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="consent" name="consent">
+      <label for="consent">I consent to RotaPulse storing my home address, photo and phone number for rostering and attendance purposes.</label>
+    </div>
+    <p class="hint">You can still join without ticking this — your address and photo just won't be stored.</p>
+
+    <button type="submit" class="btn-primary">Complete profile</button>
+  </form>
+</div>
+{% endblock %}

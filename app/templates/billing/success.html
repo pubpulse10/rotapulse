@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Subscribed — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel narrow">
+  <h1>You're subscribed</h1>
+  <p>Thanks — {{ venue['name'] }} is now on a paid RotaPulse subscription.</p>
+  <a class="btn-primary" href="{{ url_for('rota_grid.week') }}">Back to the rota</a>
+</div>
+{% endblock %}

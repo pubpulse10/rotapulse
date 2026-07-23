@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Leave — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Leave</h1>
+  <p>Holiday days taken this year: <strong>{{ days_taken }}</strong></p>
+
+  <h2>Request leave</h2>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="start_date">From</label>
+    <input type="date" id="start_date" name="start_date" required>
+    <label for="end_date">To</label>
+    <input type="date" id="end_date" name="end_date" required>
+    <button type="submit" class="btn-primary">Submit request</button>
+  </form>
+
+  <h2>Your requests</h2>
+  {% for r in requests %}
+    <div class="day-list-item">{{ r['start_date']|uk_date }} to {{ r['end_date']|uk_date }} — {{ r['status'] }}</div>
+  {% endfor %}
+</div>
+{% endblock %}

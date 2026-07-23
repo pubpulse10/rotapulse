@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Pending approval — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Pending approval</h1>
+  {% if not pending %}
+    <p class="hint">No one is waiting for approval.</p>
+  {% endif %}
+  {% for row in pending %}
+    <div class="staff-list-item">
+      <div style="flex:1">
+        <strong>{{ row['name'] }}</strong><br>
+        <span class="hint">{{ row['email'] or row['mobile'] }}</span>
+      </div>
+      <form method="post" action="{{ url_for('admin_config.approve_staff', access_id=row['access_id']) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn-primary">Approve</button>
+      </form>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

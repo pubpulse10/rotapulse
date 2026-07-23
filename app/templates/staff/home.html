@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}My shifts — RotaPulse{% endblock %}
+{% block content %}
+<h1>My upcoming shifts</h1>
+<p>
+  <a class="btn-secondary" href="{{ url_for('staff_portal.open_shifts') }}">Open shifts</a>
+  <a class="btn-secondary" href="{{ url_for('staff_portal.leave') }}">Leave</a>
+  <a class="btn-secondary" href="{{ url_for('staff_portal.my_swaps') }}">Swap requests</a>
+</p>
+{% if not shifts %}
+  <p class="hint">No shifts scheduled in the next few weeks.</p>
+{% endif %}
+{% for s in shifts %}
+  <a href="{{ url_for('staff_portal.shift_detail', shift_id=s['id']) }}" style="text-decoration:none; color:inherit;">
+    <div class="day-list-item">
+      <strong>{{ s['shift_date']|uk_date }}</strong> — {{ s['start_time'] }} to {{ s['end_time'] }}
+      {% if s['clock_in_at'] and not s['clock_out_at'] %}<span class="badge badge-on-track">Clocked in</span>{% endif %}
+      {% if s['clock_out_at'] %}<span class="badge">Completed</span>{% endif %}
+    </div>
+  </a>
+{% endfor %}
+{% endblock %}

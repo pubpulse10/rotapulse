@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Swap requests — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Swap requests for you</h1>
+  {% if not incoming %}<p class="hint">No incoming swap requests.</p>{% endif %}
+  {% for s in incoming %}
+    <div class="day-list-item">
+      {{ s['from_name'] }} wants you to take {{ s['shift_date']|uk_date }} {{ s['start_time'] }}-{{ s['end_time'] }}
+      <form method="post" action="{{ url_for('staff_portal.accept_swap', swap_id=s['id']) }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn-primary">Accept</button>
+      </form>
+      <form method="post" action="{{ url_for('staff_portal.decline_swap_peer', swap_id=s['id']) }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="link-button">Decline</button>
+      </form>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

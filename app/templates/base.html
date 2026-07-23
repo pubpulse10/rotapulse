@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>{% block title %}RotaPulse{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ static_version('style.css') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link rel="icon" href="{{ url_for('static', filename='icons/favicon.ico') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="RotaPulse">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1f2327" media="(prefers-color-scheme: dark)">
+</head>
+<body>
+  <header class="topbar">
+    {% set is_admin_tier = g.get('permission_levels') and ('app_admin' in g.permission_levels or 'rota_admin' in g.permission_levels) %}
+    <a class="wordmark" href="{{ url_for('rota_grid.week') if (g.get('slug') and is_admin_tier) else (url_for('staff_portal.home') if g.get('slug') else url_for('venues.entry')) }}">
+      <img src="{{ url_for('static', filename='logo.svg') }}?v={{ static_version('logo.svg') }}" alt="RotaPulse" class="logo-img">
+    </a>
+    {% if g.get('venue') and g.get('permission_levels') %}
+      <nav>
+        {% set active_section = nav_section() %}
+        {% if 'app_admin' in g.permission_levels or 'rota_admin' in g.permission_levels %}
+          <div class="nav-dropdown">
+            <button type="button" class="nav-dropdown-trigger{{ ' active' if active_section == 'rota' else '' }}">Rota &#9662;</button>
+            <div class="nav-dropdown-menu">
+              <a href="{{ url_for('rota_grid.week') }}">Week grid</a>
+              {% if week_start is defined %}
+                {% if week_notification %}
+                  <span class="nav-dropdown-note">This week already notified</span>
+                {% else %}
+                  <form method="post" action="{{ url_for('rota_grid.notify_week') }}"
+                        onsubmit="return confirm('Send everyone their shift times for the week of {{ week_start.day }} {{ week_start.strftime('%B %Y') }}? This can only be done once for this week.');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="week" value="{{ week_start.isoformat() }}">
+                    <button type="submit" class="nav-dropdown-item-button">Notify staff of this week's shifts</button>
+                  </form>
+                {% endif %}
+
+                <div class="nav-dropdown-divider"></div>
+
+                <form method="post" action="{{ url_for('rota_grid.copy_week') }}" class="nav-paste-form" onsubmit="return rotaConfirmPasteWeek(this);">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="source_week" value="{{ week_start.isoformat() }}">
+                  <label for="nav_target_week">Paste this week into</label>
+                  <select id="nav_target_week" name="target_week" required>
+                    <option value="" disabled selected>Choose a week</option>
+                    {% for option in monday_options %}
+                      <option value="{{ option['value'] }}" data-has-shifts="{{ 'true' if option['has_shifts'] else 'false' }}">{{ option['label'] }}{% if option['has_shifts'] %} (has shifts){% endif %}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit" class="nav-dropdown-item-button">Paste</button>
+                </form>
+
+                <div class="nav-dropdown-divider"></div>
+
+                <form method="post" action="{{ url_for('rota_grid.clear_week') }}"
+                      onsubmit="return confirm('Clear all shifts from the week of {{ week_start.day }} {{ week_start.strftime('%B %Y') }}? This cannot be undone.');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="week" value="{{ week_start.isoformat() }}">
+                  <button type="submit" class="nav-dropdown-item-button">Clear this week</button>
+                </form>
+              {% endif %}
+            </div>
+          </div>
+          <a class="{{ 'active' if active_section == 'leave' else '' }}" href="{{ url_for('rota_grid.leave_queue') }}">Leave</a>
+          <a class="{{ 'active' if active_section == 'staff' else '' }}" href="{{ url_for('admin_config.staff_list') }}">Staff</a>
+          <a class="{{ 'active' if active_section == 'payroll' else '' }}" href="{{ url_for('payroll.report') }}">Payroll</a>
+          <a class="{{ 'active' if active_section == 'dashboard' else '' }}" href="{{ url_for('dashboard.week') }}">Dashboard</a>
+        {% endif %}
+        {% if 'app_admin' in g.permission_levels %}
+          <a class="{{ 'active' if active_section == 'settings' else '' }}" href="{{ url_for('admin_config.settings') }}">Settings</a>
+          <a class="{{ 'active' if active_section == 'subscription' else '' }}" href="{{ url_for('billing.subscription') }}">Subscription</a>
+        {% endif %}
+        <a class="{{ 'active' if active_section == 'my_shifts' else '' }}" href="{{ url_for('staff_portal.home') }}">My shifts</a>
+        {% if g.person and g.person['pub_id'] is none %}
+          <form method="post" action="{{ url_for('rota_login.logout') }}" class="inline-form" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="link-button">Log out</button>
+          </form>
+        {% endif %}
+      </nav>
+    {% elif g.get('venue') %}
+      <a class="admin-link" href="{{ url_for('rota_login.login') }}">Log in</a>
+    {% endif %}
+  </header>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-container">
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script src="{{ url_for('static', filename='sw-register.js') }}" defer></script>
+  <script>
+    // Click-to-toggle nav dropdowns (e.g. "Rota") — click, not hover, since
+    // this app is used on a tablet where hover doesn't really exist.
+    document.querySelectorAll(".nav-dropdown-trigger").forEach(function (trigger) {
+      trigger.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var menu = trigger.nextElementSibling;
+        var isOpen = menu.classList.contains("open");
+        document.querySelectorAll(".nav-dropdown-menu.open").forEach(function (m) { m.classList.remove("open"); });
+        if (!isOpen) menu.classList.add("open");
+      });
+    });
+    document.addEventListener("click", function (e) {
+      // Only close a menu on a click genuinely outside it — the Rota menu
+      // now contains a <select> and buttons of its own (paste-week,
+      // notify, clear), and closing on every click inside it would break
+      // interacting with those.
+      document.querySelectorAll(".nav-dropdown-menu.open").forEach(function (m) {
+        if (!m.contains(e.target)) m.classList.remove("open");
+      });
+    });
+
+    // Warns before pasting onto a week that already has shifts — nothing
+    // gets deleted (see app/rota_grid.py::copy_week), but some of the
+    // copied shifts may be silently skipped as conflicts.
+    function rotaConfirmPasteWeek(form) {
+      var select = form.querySelector('select[name="target_week"]');
+      var selected = select.options[select.selectedIndex];
+      if (selected && selected.dataset.hasShifts === "true") {
+        return confirm(
+          "The week of " + selected.textContent.replace(" (has shifts)", "").trim() + " already has shifts.\n\n" +
+          "Pasting won't delete them — but any copied shift that would clash with an existing shift or approved leave will be skipped rather than double-booked. Continue?"
+        );
+      }
+      return true;
+    }
+  </script>
+</body>
+</html>

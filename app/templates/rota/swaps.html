@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Swap requests — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Swap requests awaiting approval</h1>
+  {% if not swaps %}<p class="hint">Nothing to approve.</p>{% endif %}
+  {% for s in swaps %}
+    <div class="day-list-item">
+      {{ s['shift_date']|uk_date }} {{ s['start_time'] }}-{{ s['end_time'] }}: {{ s['from_name'] }} → {{ s['to_name'] }}
+      <form method="post" action="{{ url_for('rota_grid.approve_swap', swap_id=s['id']) }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn-primary">Approve</button>
+      </form>
+      <form method="post" action="{{ url_for('rota_grid.decline_swap', swap_id=s['id']) }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="link-button">Decline</button>
+      </form>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

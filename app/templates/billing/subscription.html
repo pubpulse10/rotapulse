@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Subscription — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel narrow">
+  <h1>Subscription</h1>
+  <p>Plan status: <strong>{{ plan }}</strong></p>
+  {% if sub and sub['trial_ends_at'] and plan == 'active' and not sub['stripe_subscription_id'] %}
+    <p class="hint">Free trial ends {{ sub['trial_ends_at']|uk_date }}.</p>
+  {% endif %}
+  <p>Billable staff: {{ staff_count }} — Tier {{ tier }}: £{{ '%.2f'|format(tiers[tier-1][1] / 100) }}/month</p>
+
+  {% if not stripe_configured %}
+    <p class="hint">Billing isn't configured yet in this environment.</p>
+  {% elif sub and sub['stripe_customer_id'] %}
+    <form method="post" action="{{ url_for('billing.manage') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn-primary">Manage subscription</button>
+    </form>
+  {% else %}
+    <form method="post" action="{{ url_for('billing.upgrade') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn-primary">Subscribe now</button>
+    </form>
+  {% endif %}
+
+  <h2>Pricing tiers</h2>
+  <table>
+    <tr><th>Staff</th><th>Price</th></tr>
+    <tr><td>1–5</td><td>£10/month</td></tr>
+    <tr><td>6–10</td><td>£20/month</td></tr>
+    <tr><td>11–17</td><td>£34/month</td></tr>
+    <tr><td>18–25 (and above)</td><td>£48/month</td></tr>
+  </table>
+</div>
+{% endblock %}
