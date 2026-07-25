@@ -17,10 +17,16 @@ from datetime import date, datetime
 
 
 def format_uk_date(value) -> str:
+    """Falls back to the original value unchanged if it can't be parsed as
+    a date, rather than raising — some date-ish fields across the family
+    (e.g. PricePulse's invoice_date) aren't guaranteed to be clean ISO."""
     if not value:
         return value
     if isinstance(value, str):
-        value = date.fromisoformat(value[:10])
+        try:
+            value = date.fromisoformat(value[:10])
+        except ValueError:
+            return value
     return f"{value.day} {value.strftime('%B %Y')}"
 
 
@@ -28,5 +34,8 @@ def format_uk_datetime(value) -> str:
     if not value:
         return value
     if isinstance(value, str):
-        value = datetime.fromisoformat(value)
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
     return f"{value.day} {value.strftime('%B %Y, %H:%M')}"
