@@ -6,7 +6,7 @@ import flask
 from flask_wtf import CSRFProtect
 
 from app import config, db
-from app.date_format import format_uk_date
+from app.date_format import format_uk_date, format_uk_datetime
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -18,6 +18,7 @@ def create_app():
     csrf = CSRFProtect(app)
     app.jinja_env.filters["from_json"] = lambda s: json.loads(s) if s else {}
     app.jinja_env.filters["uk_date"] = format_uk_date
+    app.jinja_env.filters["uk_datetime"] = format_uk_datetime
 
     @app.template_global()
     def static_version(filename):

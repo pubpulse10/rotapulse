@@ -14,7 +14,7 @@
       <button type="submit" class="btn-primary btn-large" onclick="return captureLocation('clock-in-form')">Clock in</button>
     </form>
   {% elif not attendance['clock_out_at'] %}
-    <p class="hint">Clocked in at {{ attendance['clock_in_at'] }}.</p>
+    <p class="hint">Clocked in at {{ attendance['clock_in_at'] | uk_datetime }}.</p>
     <form id="clock-out-form" method="post" action="{{ url_for('staff_portal.clock_out', shift_id=shift['id']) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="lat" id="clock-out-lat">
@@ -22,7 +22,7 @@
       <button type="submit" class="btn-primary btn-large" onclick="return captureLocation('clock-out-form')">Clock out</button>
     </form>
   {% else %}
-    <p class="hint">Clocked in {{ attendance['clock_in_at'] }}, clocked out {{ attendance['clock_out_at'] }}.</p>
+    <p class="hint">Clocked in {{ attendance['clock_in_at'] | uk_datetime }}, clocked out {{ attendance['clock_out_at'] | uk_datetime }}.</p>
   {% endif %}
 </div>
 

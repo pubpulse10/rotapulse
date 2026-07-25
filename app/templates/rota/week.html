@@ -4,7 +4,7 @@
 <h1>
   {{ venue['name'] }} — week of {{ week_start.day }} {{ week_start.strftime('%B %Y') }}
   {% if week_notification %}
-    <span class="badge badge-on-track" title="Sent {{ week_notification['notified_at'] }}">Notified</span>
+    <span class="badge badge-on-track" title="Sent {{ week_notification['notified_at'] | uk_datetime }}">Notified</span>
   {% else %}
     <span class="badge badge-unnotified">Unnotified</span>
   {% endif %}

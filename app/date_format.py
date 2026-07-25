@@ -6,14 +6,27 @@ digest and other notification text). One place decides the format, so
 every date shown to a user is unambiguous and consistent, rather than
 leaking the raw ISO (YYYY-MM-DD) storage format — which reads as
 month-first to anyone glancing at it out of context.
+
+format_uk_datetime is the same convention plus a 24-hour time, added for
+the timestamp fields (clock_in_at/clock_out_at, notified_at) that used to
+bypass this module entirely because format_uk_date isn't datetime-aware —
+now mirrored into the sibling apps' own date_format.py, same reasoning.
 """
 
-from datetime import date
+from datetime import date, datetime
 
 
 def format_uk_date(value) -> str:
     if not value:
         return value
     if isinstance(value, str):
-        value = date.fromisoformat(value)
+        value = date.fromisoformat(value[:10])
     return f"{value.day} {value.strftime('%B %Y')}"
+
+
+def format_uk_datetime(value) -> str:
+    if not value:
+        return value
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    return f"{value.day} {value.strftime('%B %Y, %H:%M')}"
