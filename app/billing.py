@@ -23,7 +23,7 @@ below uses getattr(obj, "field", None), never .get(). Tests must mock with
 SimpleNamespace, never a plain dict, or this can pass silently again.
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 import requests
 import stripe
@@ -69,6 +69,17 @@ def tier_for_count(count: int) -> int:
     return len(config.STAFF_TIERS)
 
 
+def _period_end_iso(stripe_subscription_obj) -> str | None:
+    """Converts a Stripe subscription object's current_period_end (a Unix
+    timestamp) into the same ISO-date-string convention every other date
+    column in this family already uses. Mirrors the sibling apps' own
+    helper exactly."""
+    ts = getattr(stripe_subscription_obj, "current_period_end", None)
+    if ts is None:
+        return None
+    return datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+
+
 def _push_entitlement(db, venue_id):
     """Notifies the PubPulse Hub of this venue's plan state, keyed by the
     venue's pub_id — mirrors the sibling apps' own push exactly. Best-effort
@@ -86,6 +97,9 @@ def _push_entitlement(db, venue_id):
                 "pub_id": int(venue["pub_id"]), "app_key": "rotapulse",
                 "plan": sub["plan"], "trial_ends_at": sub["trial_ends_at"],
                 "subscription_status": sub["subscription_status"],
+                "renewal_at": sub["current_period_end"],
+                "stripe_customer_id": sub["stripe_customer_id"],
+                "stripe_subscription_id": sub["stripe_subscription_id"],
             },
             headers={"Authorization": f"Bearer {config.INTERNAL_API_SECRET}"},
             timeout=5,
@@ -221,19 +235,26 @@ def register_webhook(app):
             if venue_id:
                 stripe_subscription_id = getattr(checkout, "subscription", None)
                 subscription_item_id = None
+                period_end = None
                 if stripe_subscription_id:
                     stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
                     items = getattr(stripe_sub, "items", None)
                     data = getattr(items, "data", None) if items else None
                     if data:
                         subscription_item_id = getattr(data[0], "id", None)
+                    # Same retrieve call already made above for
+                    # subscription_item_id — no extra API call needed to
+                    # also grab the renewal date off the same object.
+                    period_end = _period_end_iso(stripe_sub)
 
                 db.execute(
                     """UPDATE rota_subscription
                        SET plan = 'active', stripe_customer_id = ?, stripe_subscription_id = ?,
-                           stripe_subscription_item_id = ?, subscription_status = 'active'
+                           stripe_subscription_item_id = ?, subscription_status = 'active',
+                           current_period_end = ?
                        WHERE venue_id = ?""",
-                    (getattr(checkout, "customer", None), stripe_subscription_id, subscription_item_id, venue_id),
+                    (getattr(checkout, "customer", None), stripe_subscription_id, subscription_item_id,
+                     period_end, venue_id),
                 )
                 db.commit()
                 _push_entitlement(db, venue_id)
@@ -261,12 +282,16 @@ def register_webhook(app):
             sub = event["data"]["object"]
             status = getattr(sub, "status", None)
             active = status in ("active", "trialing")
+            # current_period_end is already directly on this event object —
+            # no extra Stripe API call needed here, unlike checkout.session.completed.
+            period_end = _period_end_iso(sub)
             existing = db.execute(
                 "SELECT venue_id FROM rota_subscription WHERE stripe_subscription_id = ?", (sub.id,)
             ).fetchone()
             db.execute(
-                "UPDATE rota_subscription SET plan = ?, subscription_status = ? WHERE stripe_subscription_id = ?",
-                ("active" if active else "inactive", status, sub.id),
+                """UPDATE rota_subscription SET plan = ?, subscription_status = ?, current_period_end = ?
+                   WHERE stripe_subscription_id = ?""",
+                ("active" if active else "inactive", status, period_end, sub.id),
             )
             db.commit()
             if existing is not None:

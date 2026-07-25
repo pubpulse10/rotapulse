@@ -332,6 +332,10 @@ def init_schema(conn=None):
             row_count = conn.execute("SELECT COUNT(*) AS n FROM turnover_figure").fetchone()["n"]
             if row_count == 0:
                 conn.execute("DROP TABLE turnover_figure")
+
+        # Real Stripe renewal date, for the PubPulse Hub's Owner Console —
+        # added after rota_subscription already existed in production.
+        _add_column_if_missing(conn, "rota_subscription", "current_period_end", "TEXT")
         conn.commit()
     finally:
         if owns_conn:
