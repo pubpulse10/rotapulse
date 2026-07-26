@@ -362,6 +362,13 @@ def get_venue_by_slug(conn, slug):
     return conn.execute("SELECT * FROM venue WHERE slug = ?", (slug,)).fetchone()
 
 
+def get_all_venues(conn):
+    """Every venue, for the family-admin support picker (app/family_admin.py)
+    — the only place that needs a cross-venue listing rather than one
+    resolved from a URL slug."""
+    return conn.execute("SELECT * FROM venue ORDER BY name").fetchall()
+
+
 def get_rota_subscription(conn, venue_id):
     return conn.execute("SELECT * FROM rota_subscription WHERE venue_id = ?", (venue_id,)).fetchone()
 

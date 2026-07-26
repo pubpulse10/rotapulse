@@ -29,6 +29,16 @@ def register_identity(blueprint):
         flask.g.membership = None
         flask.g.permission_levels = set()
 
+        if flask.session.get("pricepulse_admin") is True:
+            # Family-admin support session (see app/family_admin.py) — set by
+            # PricePulse's own /admin/login and readable here because all
+            # four PubPulse apps share one session cookie. Doesn't
+            # correspond to a real person/venue_membership row, so
+            # g.person/g.membership stay None; require_permission grants
+            # this a read-only bypass on admin-tier routes only.
+            flask.g.permission_levels = {"support_readonly"}
+            return
+
         venue = flask.g.get("venue")
         if venue is None:
             return
@@ -82,6 +92,18 @@ def require_permission(*levels):
         @wraps(view)
         def wrapped(*args, **kwargs):
             if not flask.g.permission_levels & set(levels):
+                if (
+                    "support_readonly" in flask.g.permission_levels
+                    and {"app_admin", "rota_admin"} & set(levels)
+                    and "staff" not in levels
+                ):
+                    # Family-admin read-only bypass — GET only, hard-blocked
+                    # otherwise. Excludes any route that also accepts
+                    # "staff", since those (e.g. staff_portal.py) dereference
+                    # g.person unguarded and support sessions have none.
+                    if flask.request.method != "GET":
+                        flask.abort(403)
+                    return view(*args, **kwargs)
                 if "app_admin" in levels and len(levels) == 1:
                     from app import config
 

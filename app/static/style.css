@@ -95,6 +95,15 @@ nav a.active, .nav-dropdown-trigger.active { text-decoration: underline; text-un
 .nav-dropdown-menu a:hover,
 .nav-dropdown-item-button:hover { background: var(--color-bg); }
 .nav-dropdown-note { color: var(--color-muted); cursor: default; }
+.admin-banner {
+  background: var(--color-warning-bg, #fff3cd);
+  color: var(--color-warning-text, #664d03);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-right: 12px;
+}
 .nav-dropdown-divider { border-top: 1px solid var(--color-border); margin: 6px 2px; }
 .nav-paste-form { padding: 8px 10px; }
 .nav-paste-form label { display: block; margin: 0 0 4px; font-weight: normal; font-size: 0.9rem; }

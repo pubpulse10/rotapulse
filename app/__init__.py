@@ -65,6 +65,7 @@ def create_app():
     from app.admin_config import admin_bp
     from app.billing import billing_bp, register_webhook
     from app.dashboard import dashboard_bp
+    from app.family_admin import family_admin_bp
     from app.internal import internal_bp
     from app.media import media_bp
     from app.onboarding import onboard_bp
@@ -84,6 +85,7 @@ def create_app():
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(billing_bp)
     app.register_blueprint(media_bp)
+    app.register_blueprint(family_admin_bp)
 
     # Server-to-server only (bearer-secret authed, no session/CSRF token) —
     # exempted the same way the Stripe webhook is below.
