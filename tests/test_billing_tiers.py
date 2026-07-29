@@ -2,7 +2,48 @@ from types import SimpleNamespace
 
 from app import db as db_module
 from app.billing import count_billable_staff, tier_for_count
-from tests.conftest import create_active_staff
+from tests.conftest import create_active_staff, login_as_pub
+
+
+def _give_venue_a_live_stripe_subscription(app, venue_id, sub_id="sub_live1", item_id="si_live1"):
+    """Mimics what checkout.session.completed's webhook handler would have
+    already set — sync_stripe_quantity() no-ops without these, so tests
+    that exercise the approve/leave -> Stripe push path need this first."""
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "UPDATE rota_subscription SET stripe_subscription_id = ?, stripe_subscription_item_id = ? WHERE venue_id = ?",
+            (sub_id, item_id, venue_id),
+        )
+        conn.commit()
+
+
+def _add_pending_approval_staff(app, venue_id, name="New Hire"):
+    """Mirrors onboarding.accept()'s end state: person + active membership +
+    a rota_staff_detail row already in place + app_access still
+    'pending_approval' — i.e. everything except the admin's approval tap."""
+    with app.app_context():
+        conn = db_module.get_db()
+        person_cur = conn.execute("INSERT INTO person (name, email) VALUES (?, ?)", (name, f"{name}@example.com"))
+        person_id = person_cur.lastrowid
+        membership_cur = conn.execute(
+            "INSERT INTO venue_membership (person_id, venue_id, status) VALUES (?, ?, 'active')",
+            (person_id, venue_id),
+        )
+        membership_id = membership_cur.lastrowid
+        app_id = db_module.get_app_id(conn, "rotapulse")
+        access_cur = conn.execute(
+            """INSERT INTO app_access (venue_membership_id, app_id, permission_level, status, accepted_at)
+               VALUES (?, ?, 'staff', 'pending_approval', datetime('now'))""",
+            (membership_id, app_id),
+        )
+        access_id = access_cur.lastrowid
+        conn.execute(
+            "INSERT INTO rota_staff_detail (venue_membership_id, hourly_pay_rate, availability) VALUES (?, 10, '{}')",
+            (membership_id,),
+        )
+        conn.commit()
+    return access_id, membership_id
 
 # A fixed Stripe current_period_end timestamp, used wherever a test needs a
 # real renewal date — 2026-08-12 in UTC. Matches the sibling apps' own tests.
@@ -181,3 +222,71 @@ def test_webhook_pushes_entitlement_with_renewal_and_stripe_ids(app, client, ven
     assert captured["json"]["stripe_customer_id"] == "cus_test123"
     assert captured["json"]["stripe_subscription_id"] == "sub_test123"
     assert captured["headers"]["Authorization"] == "Bearer some-secret"
+
+
+def test_approving_staff_pushes_the_new_quantity_and_tier_to_stripe(app, client, venue, monkeypatch):
+    """The actual admin-facing route, not just the helper function directly
+    — proves approve_staff() really does call sync_stripe_quantity(), which
+    really does call stripe.Subscription.modify() with the post-approval
+    headcount, immediately re-priced via 'always_invoice' proration."""
+    import stripe
+
+    _give_venue_a_live_stripe_subscription(app, venue["id"])
+    for i in range(5):
+        create_active_staff(app, venue["id"], name=f"Existing {i}")
+    access_id, _membership_id = _add_pending_approval_staff(app, venue["id"])
+
+    captured = {}
+
+    def fake_modify(sub_id, items=None, proration_behavior=None):
+        captured["sub_id"] = sub_id
+        captured["items"] = items
+        captured["proration_behavior"] = proration_behavior
+        return SimpleNamespace()
+
+    monkeypatch.setattr(stripe.Subscription, "modify", fake_modify)
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(f"/v/{venue['slug']}/admin/staff/{access_id}/approve")
+    assert resp.status_code == 302
+
+    # 5 pre-existing + this one just approved = 6 -> crosses into tier 2.
+    assert captured["sub_id"] == "sub_live1"
+    assert captured["items"] == [{"id": "si_live1", "quantity": 6}]
+    assert captured["proration_behavior"] == "always_invoice"
+
+    with app.app_context():
+        conn = db_module.get_db()
+        sub = conn.execute(
+            "SELECT current_tier FROM rota_subscription WHERE venue_id = ?", (venue["id"],)
+        ).fetchone()
+    assert sub["current_tier"] == 2
+
+
+def test_marking_staff_left_pushes_the_decremented_quantity_to_stripe(app, client, venue, monkeypatch):
+    import stripe
+
+    _give_venue_a_live_stripe_subscription(app, venue["id"])
+    _person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Leaver")
+    for i in range(5):
+        create_active_staff(app, venue["id"], name=f"Remaining {i}")
+
+    captured = {}
+    monkeypatch.setattr(
+        stripe.Subscription, "modify",
+        lambda sub_id, items=None, proration_behavior=None: captured.update(items=items) or SimpleNamespace(),
+    )
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(f"/v/{venue['slug']}/admin/staff/{membership_id}/leave")
+    assert resp.status_code == 302
+
+    # 6 active -> 5 remaining after this one leaves -> back down to tier 1.
+    assert captured["items"] == [{"id": "si_live1", "quantity": 5}]
+
+    with app.app_context():
+        conn = db_module.get_db()
+        sub = conn.execute(
+            "SELECT current_tier FROM rota_subscription WHERE venue_id = ?", (venue["id"],)
+        ).fetchone()
+    assert sub["current_tier"] == 1
