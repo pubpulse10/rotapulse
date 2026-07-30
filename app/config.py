@@ -72,7 +72,16 @@ ROTAPULSE_TRIAL_DAYS = int(os.environ.get("ROTAPULSE_TRIAL_DAYS", "30"))
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
 STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
-STRIPE_PRICE_STAFF_TIERED = os.environ.get("STRIPE_PRICE_STAFF_TIERED")
+STRIPE_PRICE_STAFF_TIERED = os.environ.get("STRIPE_PRICE_STAFF_TIERED")  # legacy, retired
+# Fixed staff bands (the pick-a-band model): one flat monthly Stripe price per
+# band. Index 0..3 line up with STAFF_TIERS' four bands (1-5, 6-10, 11-17,
+# 18-25+). Replaces the old STRIPE_PRICE_STAFF_TIERED volume price.
+STRIPE_PRICE_ROTA_BANDS = [
+    os.environ.get("STRIPE_PRICE_ROTA_BAND1"),
+    os.environ.get("STRIPE_PRICE_ROTA_BAND2"),
+    os.environ.get("STRIPE_PRICE_ROTA_BAND3"),
+    os.environ.get("STRIPE_PRICE_ROTA_BAND4"),
+]
 
 # Same Brevo SMTP relay account as the sibling apps — see
 # app/notifications.py. Unset MAIL_SERVER means the message is logged

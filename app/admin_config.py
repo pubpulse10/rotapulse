@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 import flask
 
 from app import config
-from app.billing import sync_stripe_quantity
+from app.billing import enforce_band
 from app.consent import erase_person_sensitive_data
 from app.db import get_app_id, get_db
 from app.geocoding import geocode_postcode
@@ -262,7 +262,7 @@ def edit_staff(membership_id):
             (membership_id, pay_rate, form.get("home_address", "").strip() or None, json.dumps(availability)),
         )
         db.commit()
-        sync_stripe_quantity(venue_id)
+        enforce_band(venue_id)
         flask.flash(f"{name}'s record updated.")
         return flask.redirect(flask.url_for("admin_config.staff_list"))
 
@@ -354,7 +354,7 @@ def approve_staff(access_id):
         (access_id,),
     )
     db.commit()
-    sync_stripe_quantity(flask.g.venue["id"])
+    enforce_band(flask.g.venue["id"])
     flask.flash("Staff member approved — they can now log in and clock in.")
     return flask.redirect(flask.url_for("admin_config.pending_approval"))
 
@@ -373,7 +373,7 @@ def mark_left(membership_id):
         (membership_id,),
     )
     db.commit()
-    sync_stripe_quantity(flask.g.venue["id"])
+    enforce_band(flask.g.venue["id"])
     flask.flash("Staff member marked as left — their access is revoked and they no longer count toward billing.")
     return flask.redirect(flask.url_for("admin_config.staff_list"))
 

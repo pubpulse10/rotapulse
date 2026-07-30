@@ -120,42 +120,91 @@ def current_venue_plan(venue_id: int) -> str:
     return "inactive"
 
 
-def sync_stripe_quantity(venue_id: int) -> None:
-    """Called whenever a staff-count-relevant state change happens (a
-    membership approved-active, or set to 'left') — pushes the new billable
-    headcount to Stripe as the subscription item's quantity, with immediate
-    proration. No-ops if there's no live Stripe subscription yet (still on
-    trial, or Stripe isn't configured)."""
+def _band_price(band: int) -> str | None:
+    """The flat monthly Stripe price id for a band (1-4), or None if unset."""
+    if 1 <= band <= len(config.STRIPE_PRICE_ROTA_BANDS):
+        return config.STRIPE_PRICE_ROTA_BANDS[band - 1]
+    return None
+
+
+def enforce_band(venue_id: int) -> None:
+    """Called whenever the billable staff count changes. If the venue has grown
+    past its current band, move the Stripe subscription UP to the band that fits
+    and email the owner. The new price takes effect at the NEXT monthly bill
+    (proration_behavior='none') — no surprise mid-month charge. Never
+    auto-downgrades (a shrinking venue keeps its band until it lowers it
+    itself). No-ops if there's no live Stripe subscription yet (still on trial,
+    or Stripe isn't configured)."""
     db = get_db()
     sub = get_rota_subscription(db, venue_id)
     if not sub or not sub["stripe_subscription_id"] or not sub["stripe_subscription_item_id"]:
         return
-    new_count = count_billable_staff(venue_id)
+    required = tier_for_count(count_billable_staff(venue_id))
+    current = sub["current_tier"] or 1
+    if required <= current:
+        return  # still within band, or a shrink we don't act on automatically
+    new_price = _band_price(required)
+    if not new_price:
+        return
     stripe.Subscription.modify(
         sub["stripe_subscription_id"],
-        items=[{"id": sub["stripe_subscription_item_id"], "quantity": max(new_count, 1)}],
-        proration_behavior="always_invoice",
+        items=[{"id": sub["stripe_subscription_item_id"], "price": new_price, "quantity": 1}],
+        proration_behavior="none",  # applies at the next monthly bill, no mid-month charge
     )
-    db.execute(
-        "UPDATE rota_subscription SET current_tier = ? WHERE venue_id = ?",
-        (tier_for_count(new_count), venue_id),
-    )
+    db.execute("UPDATE rota_subscription SET current_tier = ? WHERE venue_id = ?", (required, venue_id))
     db.commit()
+    _notify_band_change(db, venue_id, required)
+
+
+def _notify_band_change(db, venue_id: int, new_band: int) -> None:
+    """Best-effort email to the venue owner (and the subscriber-notify inbox)
+    that their band moved up — a failed email must never break staff management."""
+    venue = db.execute("SELECT name, pub_id FROM venue WHERE id = ?", (venue_id,)).fetchone()
+    if venue is None:
+        return
+    venue_name = venue["name"] or "your venue"
+    max_staff, pence = config.STAFF_TIERS[new_band - 1]
+    body = (
+        f"Your staff count on {venue_name} has grown, so RotaPulse has moved you to the band "
+        f"for up to {max_staff} staff (£{pence / 100:.2f}/month). The new price takes effect "
+        f"from your next monthly bill — nothing is charged mid-month. You can review it any "
+        f"time on your RotaPulse subscription page."
+    )
+    owner = db.execute(
+        "SELECT email FROM person WHERE pub_id = ? AND email IS NOT NULL ORDER BY id LIMIT 1",
+        (venue["pub_id"],),
+    ).fetchone()
+    for to in filter(None, [owner["email"] if owner else None, config.SUBSCRIBER_NOTIFY_EMAIL]):
+        try:
+            send_email(to, "Your RotaPulse plan has moved up a band", body)
+        except Exception:
+            pass
 
 
 @billing_bp.route("/upgrade", methods=["POST"])
 def upgrade():
+    """Starts Checkout for the band the landlord picked. You can't pick a band
+    smaller than your current staff needs — that's what the band-exceeded guard
+    would immediately correct anyway."""
     venue = g.venue
-    if not config.STRIPE_PRICE_STAFF_TIERED:
+    band = request.form.get("band", type=int)
+    required = tier_for_count(count_billable_staff(venue["id"]))
+    if not band or band < required or band > len(config.STAFF_TIERS):
+        abort(400)
+    price_id = _band_price(band)
+    if not price_id:
         abort(400)
 
     db = get_db()
     existing = get_rota_subscription(db, venue["id"])
-    quantity = max(count_billable_staff(venue["id"]), 1)
+    # Remember the chosen band now; the webhook confirms activation and doesn't
+    # touch current_tier.
+    db.execute("UPDATE rota_subscription SET current_tier = ? WHERE venue_id = ?", (band, venue["id"]))
+    db.commit()
 
     session_kwargs = {
         "mode": "subscription",
-        "line_items": [{"price": config.STRIPE_PRICE_STAFF_TIERED, "quantity": quantity}],
+        "line_items": [{"price": price_id, "quantity": 1}],
         "success_url": url_for("billing.success", _external=True) + "?session_id={CHECKOUT_SESSION_ID}",
         "cancel_url": url_for("billing.cancelled", _external=True),
         "client_reference_id": str(venue["id"]),
@@ -185,6 +234,37 @@ def upgrade():
     return redirect(checkout_session.url, code=303)
 
 
+@billing_bp.route("/change-band", methods=["POST"])
+@require_permission("app_admin")
+def change_band():
+    """Manually move an ACTIVE subscription to a different band. The new price
+    takes effect at the next monthly bill (proration_behavior='none'). You
+    can't drop below the band your current staff count needs."""
+    venue = g.venue
+    band = request.form.get("band", type=int)
+    db = get_db()
+    sub = get_rota_subscription(db, venue["id"])
+    if not sub or not sub["stripe_subscription_id"] or not sub["stripe_subscription_item_id"]:
+        flash("There's no active subscription to change yet.", "error")
+        return redirect(url_for("billing.subscription"))
+    required = tier_for_count(count_billable_staff(venue["id"]))
+    if not band or band < required or band > len(config.STAFF_TIERS):
+        flash(f"You have too many staff for that band — the minimum is band {required}.", "error")
+        return redirect(url_for("billing.subscription"))
+    new_price = _band_price(band)
+    if not new_price:
+        abort(400)
+    stripe.Subscription.modify(
+        sub["stripe_subscription_id"],
+        items=[{"id": sub["stripe_subscription_item_id"], "price": new_price, "quantity": 1}],
+        proration_behavior="none",
+    )
+    db.execute("UPDATE rota_subscription SET current_tier = ? WHERE venue_id = ?", (band, venue["id"]))
+    db.commit()
+    flash("Band updated — the new price applies from your next monthly bill.")
+    return redirect(url_for("billing.subscription"))
+
+
 @billing_bp.route("/success")
 def success():
     return render_template("billing/success.html", venue=g.venue)
@@ -201,15 +281,21 @@ def subscription():
     venue = g.venue
     sub = get_rota_subscription(get_db(), venue["id"])
     staff_count = count_billable_staff(venue["id"])
+    bands = [
+        {"n": i + 1, "max": config.STAFF_TIERS[i][0], "price": config.STAFF_TIERS[i][1] / 100}
+        for i in range(len(config.STAFF_TIERS))
+    ]
     return render_template(
         "billing/subscription.html",
         venue=venue,
         sub=sub,
         plan=current_venue_plan(venue["id"]),
         staff_count=staff_count,
-        tier=tier_for_count(staff_count),
-        tiers=config.STAFF_TIERS,
-        stripe_configured=bool(config.STRIPE_PRICE_STAFF_TIERED),
+        required_band=tier_for_count(staff_count),
+        current_band=(sub["current_tier"] if sub else None),
+        bands=bands,
+        active=bool(sub and sub["stripe_subscription_id"]),
+        stripe_configured=all(config.STRIPE_PRICE_ROTA_BANDS),
     )
 
 

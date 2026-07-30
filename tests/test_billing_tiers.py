@@ -5,17 +5,29 @@ from app.billing import count_billable_staff, tier_for_count
 from tests.conftest import create_active_staff, login_as_pub
 
 
-def _give_venue_a_live_stripe_subscription(app, venue_id, sub_id="sub_live1", item_id="si_live1"):
-    """Mimics what checkout.session.completed's webhook handler would have
-    already set — sync_stripe_quantity() no-ops without these, so tests
-    that exercise the approve/leave -> Stripe push path need this first."""
+def _give_venue_a_live_stripe_subscription(app, venue_id, sub_id="sub_live1", item_id="si_live1", band=1):
+    """Mimics what checkout.session.completed's webhook handler + band choice
+    would have already set — enforce_band() no-ops without these, so tests that
+    exercise the approve/leave -> Stripe path need this first. `band` seeds the
+    venue's current band."""
     with app.app_context():
         conn = db_module.get_db()
         conn.execute(
-            "UPDATE rota_subscription SET stripe_subscription_id = ?, stripe_subscription_item_id = ? WHERE venue_id = ?",
-            (sub_id, item_id, venue_id),
+            "UPDATE rota_subscription SET stripe_subscription_id = ?, stripe_subscription_item_id = ?, "
+            "current_tier = ? WHERE venue_id = ?",
+            (sub_id, item_id, band, venue_id),
         )
         conn.commit()
+
+
+def _set_band_prices(monkeypatch):
+    """Point the four band price slots at fake ids so billing acts (they're
+    env-sourced and unset in tests)."""
+    from app import billing as billing_module
+    monkeypatch.setattr(
+        billing_module.config, "STRIPE_PRICE_ROTA_BANDS",
+        ["price_band1", "price_band2", "price_band3", "price_band4"],
+    )
 
 
 def _add_pending_approval_staff(app, venue_id, name="New Hire"):
@@ -227,36 +239,27 @@ def test_webhook_pushes_entitlement_with_renewal_and_stripe_ids(app, client, ven
     assert captured["headers"]["Authorization"] == "Bearer some-secret"
 
 
-def test_approving_staff_pushes_the_new_quantity_and_tier_to_stripe(app, client, venue, monkeypatch):
-    """The actual admin-facing route, not just the helper function directly
-    — proves approve_staff() really does call sync_stripe_quantity(), which
-    really does call stripe.Subscription.modify() with the post-approval
-    headcount, immediately re-priced via 'always_invoice' proration."""
+def test_upgrade_uses_the_chosen_band_price(app, client, venue, monkeypatch):
+    """The landlord picks a band; Checkout uses that band's flat price (qty 1)
+    and the chosen band is recorded."""
     import stripe
 
-    _give_venue_a_live_stripe_subscription(app, venue["id"])
-    for i in range(5):
-        create_active_staff(app, venue["id"], name=f"Existing {i}")
-    access_id, _membership_id = _add_pending_approval_staff(app, venue["id"])
+    from app import billing as billing_module
+
+    _set_band_prices(monkeypatch)
 
     captured = {}
-
-    def fake_modify(sub_id, items=None, proration_behavior=None):
-        captured["sub_id"] = sub_id
-        captured["items"] = items
-        captured["proration_behavior"] = proration_behavior
-        return SimpleNamespace()
-
-    monkeypatch.setattr(stripe.Subscription, "modify", fake_modify)
+    monkeypatch.setattr(
+        stripe.checkout.Session, "create",
+        lambda **kw: captured.update(kw) or SimpleNamespace(url="https://checkout.example/x"),
+    )
 
     login_as_pub(client, venue["pub_id"])
-    resp = client.post(f"/v/{venue['slug']}/admin/staff/{access_id}/approve")
-    assert resp.status_code == 302
-
-    # 5 pre-existing + this one just approved = 6 -> crosses into tier 2.
-    assert captured["sub_id"] == "sub_live1"
-    assert captured["items"] == [{"id": "si_live1", "quantity": 6}]
-    assert captured["proration_behavior"] == "always_invoice"
+    resp = client.post(f"/v/{venue['slug']}/billing/upgrade", data={"band": "2"})
+    assert resp.status_code == 303
+    assert captured["line_items"] == [{"price": "price_band2", "quantity": 1}]
+    assert captured["subscription_data"]["trial_period_days"] == billing_module.config.ROTAPULSE_TRIAL_DAYS
+    assert captured["metadata"] == {"pubpulse_app": "rotapulse"}
 
     with app.app_context():
         conn = db_module.get_db()
@@ -266,30 +269,77 @@ def test_approving_staff_pushes_the_new_quantity_and_tier_to_stripe(app, client,
     assert sub["current_tier"] == 2
 
 
-def test_marking_staff_left_pushes_the_decremented_quantity_to_stripe(app, client, venue, monkeypatch):
+def test_upgrade_rejects_band_below_staff_requirement(app, client, venue, monkeypatch):
+    _set_band_prices(monkeypatch)
+    for i in range(6):  # 6 billable staff -> needs at least band 2
+        create_active_staff(app, venue["id"], name=f"Staff {i}")
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(f"/v/{venue['slug']}/billing/upgrade", data={"band": "1"})
+    assert resp.status_code == 400
+
+
+def test_approving_staff_bumps_band_when_it_grows_past_current(app, client, venue, monkeypatch):
+    """Approving a staff member that pushes the count past the current band
+    moves the subscription UP a band — repriced to the higher band's flat price
+    at the next bill (proration 'none'), not immediately."""
     import stripe
 
-    _give_venue_a_live_stripe_subscription(app, venue["id"])
-    _person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Leaver")
+    _set_band_prices(monkeypatch)
+    _give_venue_a_live_stripe_subscription(app, venue["id"], band=1)
     for i in range(5):
-        create_active_staff(app, venue["id"], name=f"Remaining {i}")
+        create_active_staff(app, venue["id"], name=f"Existing {i}")
+    access_id, _membership_id = _add_pending_approval_staff(app, venue["id"])
 
     captured = {}
     monkeypatch.setattr(
         stripe.Subscription, "modify",
-        lambda sub_id, items=None, proration_behavior=None: captured.update(items=items) or SimpleNamespace(),
+        lambda sub_id, items=None, proration_behavior=None: captured.update(
+            sub_id=sub_id, items=items, proration_behavior=proration_behavior) or SimpleNamespace(),
     )
 
     login_as_pub(client, venue["pub_id"])
-    resp = client.post(f"/v/{venue['slug']}/admin/staff/{membership_id}/leave")
+    resp = client.post(f"/v/{venue['slug']}/admin/staff/{access_id}/approve")
     assert resp.status_code == 302
 
-    # 6 active -> 5 remaining after this one leaves -> back down to tier 1.
-    assert captured["items"] == [{"id": "si_live1", "quantity": 5}]
+    # 5 existing + 1 approved = 6 -> band 2, repriced at next bill.
+    assert captured["sub_id"] == "sub_live1"
+    assert captured["items"] == [{"id": "si_live1", "price": "price_band2", "quantity": 1}]
+    assert captured["proration_behavior"] == "none"
 
     with app.app_context():
         conn = db_module.get_db()
         sub = conn.execute(
             "SELECT current_tier FROM rota_subscription WHERE venue_id = ?", (venue["id"],)
         ).fetchone()
-    assert sub["current_tier"] == 1
+    assert sub["current_tier"] == 2
+
+
+def test_marking_staff_left_does_not_downgrade_band(app, client, venue, monkeypatch):
+    """No auto-downgrade: a shrinking venue keeps its band (and no Stripe call
+    is made) until the landlord lowers it themselves."""
+    import stripe
+
+    _set_band_prices(monkeypatch)
+    _give_venue_a_live_stripe_subscription(app, venue["id"], band=2)
+    _person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Leaver")
+    for i in range(5):
+        create_active_staff(app, venue["id"], name=f"Remaining {i}")
+
+    called = {"modify": False}
+    monkeypatch.setattr(
+        stripe.Subscription, "modify",
+        lambda *a, **k: called.update(modify=True) or SimpleNamespace(),
+    )
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(f"/v/{venue['slug']}/admin/staff/{membership_id}/leave")
+    assert resp.status_code == 302
+
+    # 6 -> 5 is still within band 2: no downgrade, no Stripe call.
+    assert called["modify"] is False
+    with app.app_context():
+        conn = db_module.get_db()
+        sub = conn.execute(
+            "SELECT current_tier FROM rota_subscription WHERE venue_id = ?", (venue["id"],)
+        ).fetchone()
+    assert sub["current_tier"] == 2

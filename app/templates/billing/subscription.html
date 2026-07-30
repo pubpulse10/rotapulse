@@ -3,39 +3,52 @@
 {% block content %}
 <div class="panel narrow">
   <h1>Subscription</h1>
-  <p>Plan status: <strong>{{ plan }}</strong></p>
+  <p>Plan status: <strong>{{ plan }}</strong>{% if current_band and bands %}
+     · Band {{ current_band }} (£{{ '%.2f'|format(bands[current_band-1].price) }}/month){% endif %}</p>
   {% if sub and sub['trial_ends_at'] and plan == 'active' and not sub['stripe_subscription_id'] %}
     <p class="hint">Free trial ends {{ sub['trial_ends_at']|uk_date }}.</p>
   {% endif %}
-  <p>RotaPulse pricing is set <strong>automatically by your staff count</strong> — there's no
-     plan to choose. You're currently on <strong>Tier {{ tier }}</strong>: {{ staff_count }}
-     billable staff = <strong>£{{ '%.2f'|format(tiers[tier-1][1] / 100) }}/month</strong>. It
-     adjusts automatically (with proration) as you add or remove staff.</p>
+  <p>Billable staff right now: <strong>{{ staff_count }}</strong> — that needs at least
+     <strong>Band {{ required_band }}</strong>.</p>
 
   {% if not stripe_configured %}
     <p class="hint">Billing isn't configured yet in this environment.</p>
-  {% elif sub and sub['stripe_customer_id'] %}
-    <form method="post" action="{{ url_for('billing.manage') }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn-primary">Manage subscription</button>
-    </form>
   {% else %}
-    <p class="hint">Subscribing starts your free trial — you'll add a card, but nothing is
-       charged until the trial ends.</p>
-    <form method="post" action="{{ url_for('billing.upgrade') }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn-primary">Subscribe now</button>
-    </form>
-  {% endif %}
+    {% if active %}
+      <h2>Change band</h2>
+      <p class="hint">Your price is a flat monthly fee for your band. If your staff grow past
+        your band we move you up automatically and email you — the new price starts at your
+        next monthly bill. A change you make here also takes effect at your next bill.</p>
+    {% else %}
+      <h2>Choose your band</h2>
+      <p class="hint">Your price is a flat monthly fee based on how many staff you have. Pick the
+        band that fits — if you grow past it later we move you up automatically and email you
+        (new price from your next bill). Subscribing starts your free trial: you'll add a card,
+        but nothing is charged until the trial ends.</p>
+    {% endif %}
 
-  <h2>Price bands (for reference)</h2>
-  <p class="hint">You're billed at whichever band your staff count falls into — you don't pick one.</p>
-  <table>
-    <tr><th>Staff</th><th>Price</th></tr>
-    <tr><td>1–5</td><td>£10/month</td></tr>
-    <tr><td>6–10</td><td>£20/month</td></tr>
-    <tr><td>11–17</td><td>£34/month</td></tr>
-    <tr><td>18–25 (and above)</td><td>£48/month</td></tr>
-  </table>
+    <form method="post" action="{{ url_for('billing.change_band') if active else url_for('billing.upgrade') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% for b in bands %}
+      <p>
+        <label>
+          <input type="radio" name="band" value="{{ b.n }}"
+                 {% if b.n == (current_band if active else required_band) %}checked{% endif %}
+                 {% if b.n < required_band %}disabled{% endif %}>
+          <strong>Band {{ b.n }}</strong>: up to {{ b.max }} staff — £{{ '%.2f'|format(b.price) }}/month
+          {% if b.n < required_band %}<span class="hint">(too small for your staff count)</span>{% endif %}
+        </label>
+      </p>
+      {% endfor %}
+      <button type="submit" class="btn-primary">{{ 'Change band' if active else 'Subscribe now' }}</button>
+    </form>
+
+    {% if active %}
+    <form method="post" action="{{ url_for('billing.manage') }}" style="margin-top:1rem;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn-primary">Manage / cancel (card &amp; invoices)</button>
+    </form>
+    {% endif %}
+  {% endif %}
 </div>
 {% endblock %}
