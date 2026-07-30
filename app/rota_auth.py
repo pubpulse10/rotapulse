@@ -50,7 +50,22 @@ def register_identity(blueprint):
         if person_id:
             person = db.execute("SELECT * FROM person WHERE id = ?", (person_id,)).fetchone()
 
-        if person is None and flask.session.get("pub_id") is not None:
+        # Hub-invited staff (shared login): session['person_id'] is the Hub's
+        # person id, materialised locally on person.hub_person_id by the
+        # /internal/access push. Resolve within THIS venue via its membership.
+        hub_person_id = flask.session.get("person_id")
+        if person is None and hub_person_id is not None:
+            person = db.execute(
+                """SELECT person.* FROM person
+                   JOIN venue_membership ON venue_membership.person_id = person.id
+                   WHERE person.hub_person_id = ? AND venue_membership.venue_id = ?""",
+                (hub_person_id, venue["id"]),
+            ).fetchone()
+
+        # Owner via the shared pub cookie — only when this ISN'T a Hub-staff
+        # session (a staff session carries the owner's pub_id too, so a bare
+        # pub_id match would otherwise resolve them as the owner).
+        if person is None and flask.session.get("pub_id") is not None and hub_person_id is None:
             person = db.execute(
                 """SELECT person.* FROM person
                    JOIN venue_membership ON venue_membership.person_id = person.id

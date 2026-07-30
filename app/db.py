@@ -90,6 +90,9 @@ CREATE TABLE IF NOT EXISTS person (
                                        -- identity from the shared session (see
                                        -- app/rota_auth.py). Convention, not an
                                        -- enforced FK, same as venue.pub_id above.
+    hub_person_id INTEGER,            -- Phase 2: the Hub's person.id for a staff
+                                       -- member invited via the Hub (NULL for the
+                                       -- owner and for bespoke-invited people).
     consent_given_at TEXT,            -- sensitive-data consent (spec §3, see app/consent.py)
     erased_at TEXT,                    -- right-to-erasure marker (see app/consent.py)
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -336,6 +339,7 @@ def init_schema(conn=None):
         # Real Stripe renewal date, for the PubPulse Hub's Owner Console —
         # added after rota_subscription already existed in production.
         _add_column_if_missing(conn, "rota_subscription", "current_period_end", "TEXT")
+        _add_column_if_missing(conn, "person", "hub_person_id", "INTEGER")
         conn.commit()
     finally:
         if owns_conn:
