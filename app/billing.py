@@ -159,6 +159,20 @@ def upgrade():
         "success_url": url_for("billing.success", _external=True) + "?session_id={CHECKOUT_SESSION_ID}",
         "cancel_url": url_for("billing.cancelled", _external=True),
         "client_reference_id": str(venue["id"]),
+        # Tag the session + subscription with which app it's for. The whole
+        # family shares ONE Stripe account, so every webhook endpoint receives
+        # every checkout.session.completed event — each app's webhook uses this
+        # tag to ignore events that aren't its own (see stripe_webhook).
+        "metadata": {"pubpulse_app": "rotapulse"},
+        # Card-to-start-a-trial: capture a card now and start a Stripe-managed
+        # free trial (no charge until it ends). payment_method_collection=
+        # "always" forces card entry despite the trial; the subscription lands
+        # in status 'trialing', which the webhook already treats as active.
+        "subscription_data": {
+            "trial_period_days": config.ROTAPULSE_TRIAL_DAYS,
+            "metadata": {"pubpulse_app": "rotapulse"},
+        },
+        "payment_method_collection": "always",
     }
     if existing and existing["stripe_customer_id"]:
         session_kwargs["customer"] = existing["stripe_customer_id"]
@@ -231,11 +245,21 @@ def register_webhook(app):
         db = get_db()
         if event["type"] == "checkout.session.completed":
             checkout = event["data"]["object"]
+            # Shared Stripe account: this event is broadcast to every sibling
+            # app's webhook. Only act on it if it's tagged as ours — otherwise a
+            # sibling's checkout would also (wrongly) fire RotaPulse.
+            md = getattr(checkout, "metadata", None)
+            if getattr(md, "pubpulse_app", None) != "rotapulse":
+                return "", 200
             venue_id = getattr(checkout, "client_reference_id", None)
             if venue_id:
                 stripe_subscription_id = getattr(checkout, "subscription", None)
                 subscription_item_id = None
                 period_end = None
+                # Real status ('trialing' for a fresh card-trial, 'active' when
+                # paying) — plan='active' is what the gate reads, but keep the
+                # stored status honest for display and the Hub badge.
+                sub_status = "active"
                 if stripe_subscription_id:
                     stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
                     items = getattr(stripe_sub, "items", None)
@@ -244,17 +268,18 @@ def register_webhook(app):
                         subscription_item_id = getattr(data[0], "id", None)
                     # Same retrieve call already made above for
                     # subscription_item_id — no extra API call needed to
-                    # also grab the renewal date off the same object.
+                    # also grab the renewal date + status off the same object.
                     period_end = _period_end_iso(stripe_sub)
+                    sub_status = getattr(stripe_sub, "status", None) or "active"
 
                 db.execute(
                     """UPDATE rota_subscription
                        SET plan = 'active', stripe_customer_id = ?, stripe_subscription_id = ?,
-                           stripe_subscription_item_id = ?, subscription_status = 'active',
+                           stripe_subscription_item_id = ?, subscription_status = ?,
                            current_period_end = ?
                        WHERE venue_id = ?""",
                     (getattr(checkout, "customer", None), stripe_subscription_id, subscription_item_id,
-                     period_end, venue_id),
+                     sub_status, period_end, venue_id),
                 )
                 db.commit()
                 _push_entitlement(db, venue_id)

@@ -86,6 +86,7 @@ def test_webhook_checkout_completed_uses_getattr_not_get(app, client, venue, mon
 
     fake_checkout = SimpleNamespace(
         client_reference_id=str(venue["id"]),
+        metadata=SimpleNamespace(pubpulse_app="rotapulse"),
         customer="cus_test123",
         subscription="sub_test123",
         customer_details=SimpleNamespace(email="owner@example.com"),
@@ -120,7 +121,8 @@ def test_webhook_checkout_completed_captures_renewal_date(app, client, venue, mo
     from app import billing as billing_module
 
     fake_checkout = SimpleNamespace(
-        client_reference_id=str(venue["id"]), customer="cus_test123", subscription="sub_test123",
+        client_reference_id=str(venue["id"]),
+        metadata=SimpleNamespace(pubpulse_app="rotapulse"), customer="cus_test123", subscription="sub_test123",
     )
     fake_event = {"type": "checkout.session.completed", "data": {"object": fake_checkout}}
 
@@ -201,7 +203,8 @@ def test_webhook_pushes_entitlement_with_renewal_and_stripe_ids(app, client, ven
     monkeypatch.setattr(billing_module.requests, "post", fake_post)
 
     fake_checkout = SimpleNamespace(
-        client_reference_id=str(venue["id"]), customer="cus_test123", subscription="sub_test123",
+        client_reference_id=str(venue["id"]),
+        metadata=SimpleNamespace(pubpulse_app="rotapulse"), customer="cus_test123", subscription="sub_test123",
     )
     fake_event = {"type": "checkout.session.completed", "data": {"object": fake_checkout}}
     monkeypatch.setattr(stripe.Webhook, "construct_event", lambda *a, **k: fake_event)

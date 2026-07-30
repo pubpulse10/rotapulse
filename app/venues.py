@@ -101,10 +101,12 @@ def setup():
         venue_id = cur.lastrowid
         db.execute("INSERT INTO venue_settings (venue_id) VALUES (?)", (venue_id,))
 
-        trial_ends_at = (date.today() + timedelta(days=config.ROTAPULSE_TRIAL_DAYS)).isoformat()
+        # New venues start LOCKED (no cardless trial) — the free trial is now
+        # Stripe-managed and only starts once the owner completes Checkout with
+        # a card. current_venue_plan() reads this as 'inactive' until then.
         db.execute(
-            "INSERT INTO rota_subscription (venue_id, plan, trial_ends_at) VALUES (?, 'inactive', ?)",
-            (venue_id, trial_ends_at),
+            "INSERT INTO rota_subscription (venue_id, plan, trial_ends_at) VALUES (?, 'inactive', NULL)",
+            (venue_id,),
         )
 
         landlord_email = flask.session.get("landlord_email")
@@ -128,28 +130,28 @@ def setup():
             )
         db.commit()
 
+        subscribe_url = flask.url_for("billing.subscription", slug=slug, _external=True)
         if landlord_email:
             send_email(
                 landlord_email,
-                "Welcome to RotaPulse — your free trial has started",
+                "Welcome to RotaPulse — subscribe to start your free trial",
                 f"You've set up {venue_name} on RotaPulse.\n\n"
-                f"You're on a {config.ROTAPULSE_TRIAL_DAYS}-day free trial, no card needed yet. "
-                f"Your trial ends on {format_uk_date(trial_ends_at)}.\n\n"
-                "Before then, subscribe to keep using RotaPulse without a gap — you can do that "
-                f"any time from your subscription page.",
+                f"To start using it, subscribe to begin your {config.ROTAPULSE_TRIAL_DAYS}-day "
+                "free trial. You'll add a card but won't be charged until the trial ends, and you "
+                f"can cancel any time before then:\n{subscribe_url}\n",
             )
         if config.SUBSCRIBER_NOTIFY_EMAIL:
             send_email(
                 config.SUBSCRIBER_NOTIFY_EMAIL,
-                f"New RotaPulse trial: {venue_name}",
+                f"New RotaPulse venue (awaiting subscription): {venue_name}",
                 f"Venue: {venue_name}\nLandlord email: {landlord_email or '(not available)'}\n"
-                f"Trial ends: {format_uk_date(trial_ends_at)}",
+                "Status: created, not yet subscribed",
             )
 
         flask.flash(
-            f"Welcome to RotaPulse — you have {config.ROTAPULSE_TRIAL_DAYS} free days "
-            "before a subscription is needed."
+            f"Almost there — subscribe to start your {config.ROTAPULSE_TRIAL_DAYS}-day free trial "
+            "and unlock RotaPulse."
         )
-        return flask.redirect(flask.url_for("rota_grid.week", slug=slug))
+        return flask.redirect(flask.url_for("billing.subscription", slug=slug))
 
     return flask.render_template("venues/setup.html", trial_days=config.ROTAPULSE_TRIAL_DAYS)
