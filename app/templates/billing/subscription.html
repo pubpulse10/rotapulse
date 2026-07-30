@@ -7,7 +7,10 @@
   {% if sub and sub['trial_ends_at'] and plan == 'active' and not sub['stripe_subscription_id'] %}
     <p class="hint">Free trial ends {{ sub['trial_ends_at']|uk_date }}.</p>
   {% endif %}
-  <p>Billable staff: {{ staff_count }} — Tier {{ tier }}: £{{ '%.2f'|format(tiers[tier-1][1] / 100) }}/month</p>
+  <p>RotaPulse pricing is set <strong>automatically by your staff count</strong> — there's no
+     plan to choose. You're currently on <strong>Tier {{ tier }}</strong>: {{ staff_count }}
+     billable staff = <strong>£{{ '%.2f'|format(tiers[tier-1][1] / 100) }}/month</strong>. It
+     adjusts automatically (with proration) as you add or remove staff.</p>
 
   {% if not stripe_configured %}
     <p class="hint">Billing isn't configured yet in this environment.</p>
@@ -17,13 +20,16 @@
       <button type="submit" class="btn-primary">Manage subscription</button>
     </form>
   {% else %}
+    <p class="hint">Subscribing starts your free trial — you'll add a card, but nothing is
+       charged until the trial ends.</p>
     <form method="post" action="{{ url_for('billing.upgrade') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn-primary">Subscribe now</button>
     </form>
   {% endif %}
 
-  <h2>Pricing tiers</h2>
+  <h2>Price bands (for reference)</h2>
+  <p class="hint">You're billed at whichever band your staff count falls into — you don't pick one.</p>
   <table>
     <tr><th>Staff</th><th>Price</th></tr>
     <tr><td>1–5</td><td>£10/month</td></tr>
