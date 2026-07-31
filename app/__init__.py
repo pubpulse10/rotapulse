@@ -20,6 +20,13 @@ def create_app():
     app.jinja_env.filters["uk_date"] = format_uk_date
     app.jinja_env.filters["uk_datetime"] = format_uk_datetime
 
+    @app.context_processor
+    def inject_hub_url():
+        # An owner session here isn't a RotaPulse-specific login at all —
+        # it's the same shared PubPulse session cookie the sibling apps and
+        # the Hub all read. "My Apps" just links back to it.
+        return {"pubpulse_hub_url": config.PUBPULSE_HUB_URL}
+
     @app.template_global()
     def static_version(filename):
         """Cache-busting query string for a static asset, based on its own
