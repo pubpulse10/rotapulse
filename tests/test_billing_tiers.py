@@ -1,7 +1,8 @@
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 from app import db as db_module
-from app.billing import count_billable_staff, tier_for_count
+from app.billing import count_billable_staff, current_venue_plan, tier_for_count
 from tests.conftest import create_active_staff, login_as_pub
 
 
@@ -343,3 +344,62 @@ def test_marking_staff_left_does_not_downgrade_band(app, client, venue, monkeypa
             "SELECT current_tier FROM rota_subscription WHERE venue_id = ?", (venue["id"],)
         ).fetchone()
     assert sub["current_tier"] == 2
+
+
+# --- subscription gate: only a card-backed plan grants access (no legacy trial) ---
+
+def _make_venue(app, plan, trial_ends_at=None, stripe_sub=None, slug="legacy"):
+    with app.app_context():
+        conn = db_module.get_db()
+        vid = conn.execute(
+            "INSERT INTO venue (pub_id, name, slug) VALUES (?, ?, ?)", (99, "Legacy Venue", slug)
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO rota_subscription (venue_id, plan, trial_ends_at, stripe_subscription_id) "
+            "VALUES (?, ?, ?, ?)",
+            (vid, plan, trial_ends_at, stripe_sub),
+        )
+        conn.commit()
+        return vid
+
+
+def test_bare_legacy_trial_no_longer_grants_access(app):
+    # A stale cardless trial: plan 'inactive', a future trial_ends_at, and NO
+    # Stripe subscription. All trials now need a card, so this must be inactive.
+    future = (date.today() + timedelta(days=20)).isoformat()
+    vid = _make_venue(app, "inactive", trial_ends_at=future, slug="legacytrial")
+    with app.app_context():
+        assert current_venue_plan(vid) == "inactive"
+
+
+def test_active_plan_grants_access(app):
+    # A completed Stripe checkout (including a card-trial) sets plan='active'.
+    vid = _make_venue(app, "active", stripe_sub="sub_x", slug="paidvenue")
+    with app.app_context():
+        assert current_venue_plan(vid) == "active"
+
+
+def test_no_subscription_row_is_inactive(app):
+    with app.app_context():
+        conn = db_module.get_db()
+        vid = conn.execute("INSERT INTO venue (pub_id, name, slug) VALUES (99, 'No Sub', 'nosub')").lastrowid
+        conn.commit()
+        assert current_venue_plan(vid) == "inactive"
+
+
+def test_gated_route_locks_a_legacy_trial_venue(app, client, venue):
+    # End to end: an owner whose only "access" is a stale trial_ends_at hits a
+    # gated route and gets the locked page, not the real dashboard.
+    future = (date.today() + timedelta(days=20)).isoformat()
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "UPDATE rota_subscription SET plan='inactive', trial_ends_at=?, stripe_subscription_id=NULL "
+            "WHERE venue_id=?",
+            (future, venue["id"]),
+        )
+        conn.commit()
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/dashboard/")
+    assert resp.status_code == 200
+    assert b"is locked" in resp.data

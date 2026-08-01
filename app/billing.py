@@ -23,7 +23,7 @@ below uses getattr(obj, "field", None), never .get(). Tests must mock with
 SimpleNamespace, never a plain dict, or this can pass silently again.
 """
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 import requests
 import stripe
@@ -113,11 +113,12 @@ def current_venue_plan(venue_id: int) -> str:
     row = get_rota_subscription(db, venue_id)
     if row is None:
         return "inactive"
-    if row["plan"] == "active":
-        return "active"
-    if row["trial_ends_at"] and row["trial_ends_at"] >= date.today().isoformat():
-        return "active"
-    return "inactive"
+    # 'active' is set only by a completed Stripe Checkout — card-backed, and
+    # covering Stripe-managed card-trials (status 'trialing'). A bare
+    # trial_ends_at is a LEGACY cardless-trial leftover from before
+    # card-to-start-a-trial (commit 63b6ac2); it no longer grants access, since
+    # venue creation sets no cardless trial and all trials now need a card.
+    return "active" if row["plan"] == "active" else "inactive"
 
 
 def _band_price(band: int) -> str | None:
