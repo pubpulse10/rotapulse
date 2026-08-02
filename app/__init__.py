@@ -94,6 +94,14 @@ def create_app():
     app.register_blueprint(media_bp)
     app.register_blueprint(family_admin_bp)
 
+    @app.route("/favicon.ico")
+    def favicon():
+        """Serve the icon at the domain root too, not just via the <link> in
+        <head>. Windows .url desktop shortcuts, bookmarks and crawlers request
+        /favicon.ico directly and ignore the page markup — without this they
+        404 and fall back to a generic icon."""
+        return app.send_static_file("icons/favicon.ico")
+
     # Server-to-server only (bearer-secret authed, no session/CSRF token) —
     # exempted the same way the Stripe webhook is below.
     csrf.exempt(internal_bp)
