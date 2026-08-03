@@ -1,0 +1,28 @@
+# Litestream config — RotaPulse (repo: rotapulse)
+#
+# Streams the SQLite database to Cloudflare R2 (S3-compatible) continuously.
+# Env vars are expanded by Litestream at runtime — set these in the Render
+# service's Environment tab, NOT in this file:
+#   LITESTREAM_ACCESS_KEY_ID       R2 API token access key id
+#   LITESTREAM_SECRET_ACCESS_KEY   R2 API token secret
+#   R2_ACCOUNT_ID                  Cloudflare account id (in the R2 endpoint)
+#   R2_BUCKET                      e.g. pubpulse-backups
+#
+# The DB path below MUST match app/db.py's DB_PATH inside the container
+# (/app because the Dockerfile WORKDIR is /app), which is also the Render
+# persistent-disk mount path so the file survives redeploys.
+
+dbs:
+  - path: /app/data/rotapulse.db
+    replicas:
+      - type: s3
+        endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+        bucket: ${R2_BUCKET}
+        path: rotapulse             # <-- per-app prefix inside the shared bucket
+        region: auto
+        force-path-style: true      # required for Cloudflare R2
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+        # Keep 7 days of point-in-time recovery; snapshot once a day.
+        retention: 168h
+        snapshot-interval: 24h
