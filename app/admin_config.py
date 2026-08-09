@@ -325,17 +325,60 @@ def create_staff():
     )
     db.commit()
 
-    invite_url = flask.url_for("onboarding.accept", slug=flask.g.slug, token=raw_token, _external=True)
+    _send_invite_message(flask.g.venue, flask.g.slug, invite_method, email, mobile, raw_token)
+
+    flask.flash(f"Invited {name}.")
+    return flask.redirect(flask.url_for("admin_config.staff_list"))
+
+
+def _send_invite_message(venue, slug, invite_method, email, mobile, raw_token):
+    invite_url = flask.url_for("onboarding.accept", slug=slug, token=raw_token, _external=True)
     message = (
-        f"You've been invited to {flask.g.venue['name']}'s RotaPulse rota. "
+        f"You've been invited to {venue['name']}'s RotaPulse rota. "
         f"Complete your profile here (link expires in {config.INVITE_TOKEN_EXPIRY_DAYS} days): {invite_url}"
     )
     if invite_method == "sms" and mobile:
         send_sms(mobile, message)
     elif email:
-        send_email(email, f"You've been invited to {flask.g.venue['name']} on RotaPulse", message)
+        send_email(email, f"You've been invited to {venue['name']} on RotaPulse", message)
 
-    flask.flash(f"Invited {name}.")
+
+@admin_bp.route("/staff/<int:access_id>/resend-invite", methods=["POST"])
+@require_permission("app_admin", "rota_admin")
+def resend_invite(access_id):
+    """For someone stuck at 'invited' — most often because the original
+    email/SMS never actually arrived (e.g. the SMS-delivery-failure class of
+    bug this was added alongside) rather than them just not having gotten
+    round to it yet. Issues a fresh token + expiry rather than resending the
+    old one, which also naturally invalidates whatever link they may already
+    have half-used."""
+    db = get_db()
+    venue_id = flask.g.venue["id"]
+    row = db.execute(
+        """SELECT app_access.id, app_access.status, app_access.invite_method,
+                  person.name, person.email, person.mobile
+           FROM app_access
+           JOIN venue_membership ON venue_membership.id = app_access.venue_membership_id
+           JOIN person ON person.id = venue_membership.person_id
+           WHERE app_access.id = ? AND venue_membership.venue_id = ?
+           AND app_access.app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+        (access_id, venue_id),
+    ).fetchone()
+    if row is None or row["status"] != "invited":
+        flask.abort(404)
+
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=config.INVITE_TOKEN_EXPIRY_DAYS)).isoformat()
+    db.execute(
+        """UPDATE app_access SET invite_token_hash = ?, invite_expires_at = ?, invited_at = datetime('now')
+           WHERE id = ?""",
+        (_hash_token(raw_token), expires_at, access_id),
+    )
+    db.commit()
+
+    _send_invite_message(flask.g.venue, flask.g.slug, row["invite_method"], row["email"], row["mobile"], raw_token)
+
+    flask.flash(f"Invite resent to {row['name']}.")
     return flask.redirect(flask.url_for("admin_config.staff_list"))
 
 

@@ -15,6 +15,12 @@
         <td>£{{ '%.2f'|format(member['hourly_pay_rate'] or 0) }}</td>
         <td><a href="{{ url_for('admin_config.edit_staff', membership_id=member['membership_id']) }}">Edit</a></td>
         <td>
+          {% if member['access_status'] == 'invited' %}
+            <form method="post" action="{{ url_for('admin_config.resend_invite', access_id=member['access_id']) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="link-button">Resend invite</button>
+            </form>
+          {% endif %}
           {% if member['membership_status'] == 'active' %}
             <form method="post" action="{{ url_for('admin_config.mark_left', membership_id=member['membership_id']) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
