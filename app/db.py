@@ -351,6 +351,13 @@ def init_schema(conn=None):
         # E.164-format bug) is visible on the Staff page instead of only in
         # server logs the admin has no access to.
         _add_column_if_missing(conn, "app_access", "invite_delivery_status", "TEXT")
+        # Employment start date — was missing entirely, despite the
+        # "birthday/anniversary differentiator" (spec §10) already having a
+        # dedicated dashboard page whose title promised anniversaries it had
+        # no data to ever compute. ISO date, ADD-side of the same person's
+        # rota_staff_detail row (not person, since a start date is specific
+        # to working at THIS venue, unlike date_of_birth).
+        _add_column_if_missing(conn, "rota_staff_detail", "start_date", "TEXT")
         conn.commit()
     finally:
         if owns_conn:

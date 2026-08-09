@@ -291,13 +291,17 @@ def edit_staff(membership_id):
         else:
             pay_rate = detail["hourly_pay_rate"] if detail else 0
         db.execute(
-            """INSERT INTO rota_staff_detail (venue_membership_id, hourly_pay_rate, home_address, availability)
-               VALUES (?, ?, ?, ?)
+            """INSERT INTO rota_staff_detail (venue_membership_id, hourly_pay_rate, home_address, availability, start_date)
+               VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(venue_membership_id) DO UPDATE SET
                hourly_pay_rate = excluded.hourly_pay_rate,
                home_address = excluded.home_address,
-               availability = excluded.availability""",
-            (membership_id, pay_rate, form.get("home_address", "").strip() or None, json.dumps(availability)),
+               availability = excluded.availability,
+               start_date = excluded.start_date""",
+            (
+                membership_id, pay_rate, form.get("home_address", "").strip() or None,
+                json.dumps(availability), form.get("start_date") or None,
+            ),
         )
         db.commit()
         enforce_band(venue_id)

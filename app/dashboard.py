@@ -174,21 +174,16 @@ def month():
 def birthdays():
     db = get_db()
     rows = db.execute(
-        """SELECT person.name, person.date_of_birth FROM person
+        """SELECT person.name, person.date_of_birth, rota_staff_detail.start_date
+           FROM person
            JOIN venue_membership ON venue_membership.person_id = person.id
+           LEFT JOIN rota_staff_detail ON rota_staff_detail.venue_membership_id = venue_membership.id
            WHERE venue_membership.venue_id = ? AND venue_membership.status = 'active'
-           AND person.date_of_birth IS NOT NULL""",
+           AND (person.date_of_birth IS NOT NULL OR rota_staff_detail.start_date IS NOT NULL)""",
         (flask.g.venue["id"],),
     ).fetchall()
 
     today = date.today()
-
-    def days_until_next(dob_str):
-        month, day = int(dob_str[5:7]), int(dob_str[8:10])
-        this_year = date(today.year, month, day) if _valid_date(today.year, month, day) else date(today.year, 3, 1)
-        if this_year < today:
-            this_year = date(today.year + 1, month, day)
-        return (this_year - today).days
 
     def _valid_date(year, month, day):
         try:
@@ -197,8 +192,26 @@ def birthdays():
         except ValueError:
             return False
 
-    upcoming = sorted(
-        ({"name": r["name"], "date_of_birth": r["date_of_birth"], "days_until": days_until_next(r["date_of_birth"])} for r in rows),
-        key=lambda x: x["days_until"],
-    )
+    def next_occurrence(date_str):
+        """The next upcoming month/day recurrence of date_str (birthday or
+        work-start-date), and how many days away it is. Falls back to 1
+        March for the rare Feb 29 case in a non-leap year, same as before."""
+        month, day = int(date_str[5:7]), int(date_str[8:10])
+        this_year = date(today.year, month, day) if _valid_date(today.year, month, day) else date(today.year, 3, 1)
+        if this_year < today:
+            this_year = date(today.year + 1, month, day)
+        return this_year, (this_year - today).days
+
+    upcoming = []
+    for r in rows:
+        if r["date_of_birth"]:
+            _next_date, days_until = next_occurrence(r["date_of_birth"])
+            upcoming.append({"name": r["name"], "kind": "birthday", "days_until": days_until})
+        if r["start_date"]:
+            next_date, days_until = next_occurrence(r["start_date"])
+            years = next_date.year - int(r["start_date"][:4])
+            if years >= 1:  # skip a "0-year anniversary" before their first has actually come round
+                upcoming.append({"name": r["name"], "kind": "anniversary", "years": years, "days_until": days_until})
+
+    upcoming.sort(key=lambda x: x["days_until"])
     return flask.render_template("dashboard/birthdays.html", upcoming=upcoming)

@@ -122,3 +122,117 @@ def test_month_view_totals_sum_across_weeks(app, client, venue):
     resp = client.get(f"/v/{venue['slug']}/dashboard/month?month=2026-08")
     assert resp.status_code == 200
     assert b"2000.00" in resp.data  # 1000 + 1000 across the two weeks entered
+
+
+def test_admin_can_set_a_start_date(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    _person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Started Today")
+
+    client.post(
+        f"/v/{venue['slug']}/admin/staff/{membership_id}/edit",
+        data={"name": "Started Today", "start_date": "2024-03-15"},
+    )
+
+    with app.app_context():
+        conn = db_module.get_db()
+        detail = conn.execute(
+            "SELECT start_date FROM rota_staff_detail WHERE venue_membership_id = ?", (membership_id,)
+        ).fetchone()
+    assert detail["start_date"] == "2024-03-15"
+
+
+def test_birthdays_dashboard_shows_an_upcoming_birthday(app, client, venue):
+    person_id, _membership_id, _email = create_active_staff(app, venue["id"], name="Birthday Person")
+    upcoming_dob = date.today() + timedelta(days=5)
+    # Year doesn't matter for a birthday, just month/day - use a year safely in the past.
+    dob = date(1990, upcoming_dob.month, upcoming_dob.day)
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute("UPDATE person SET date_of_birth = ? WHERE id = ?", (dob.isoformat(), person_id))
+        conn.commit()
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/dashboard/birthdays")
+    assert resp.status_code == 200
+    assert b"Birthday Person" in resp.data
+    assert "🎂".encode() in resp.data
+    assert b"birthday in 5 day" in resp.data
+
+
+def test_birthdays_dashboard_shows_an_upcoming_anniversary_with_correct_year_count(app, client, venue):
+    person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Anniversary Person")
+    upcoming = date.today() + timedelta(days=7)
+    start_date = date(upcoming.year - 3, upcoming.month, upcoming.day)  # 3 years ago from the upcoming date
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "UPDATE rota_staff_detail SET start_date = ? WHERE venue_membership_id = ?",
+            (start_date.isoformat(), membership_id),
+        )
+        conn.commit()
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/dashboard/birthdays")
+    assert resp.status_code == 200
+    assert b"Anniversary Person" in resp.data
+    assert "🎉".encode() in resp.data
+    assert b"3 year anniversary in 7 day" in resp.data
+
+
+def test_birthdays_dashboard_skips_a_future_start_date(app, client, venue):
+    """A start date that's still in the future (not yet started) must not
+    show a nonsensical '0 year anniversary' — there's no such thing before
+    anyone's actually started."""
+    person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Not Started Yet")
+    start_date = date.today() + timedelta(days=20)  # month/day hasn't occurred yet this year
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "UPDATE rota_staff_detail SET start_date = ? WHERE venue_membership_id = ?",
+            (start_date.isoformat(), membership_id),
+        )
+        conn.commit()
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/dashboard/birthdays")
+    assert resp.status_code == 200
+    assert b"Not Started Yet" not in resp.data
+
+
+def test_birthdays_dashboard_shows_first_anniversary_for_a_recent_start(app, client, venue):
+    """Someone who started a few months ago should show their upcoming
+    FIRST anniversary (1 year from their start date), not be skipped."""
+    person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Recent Starter")
+    start_date = date.today() - timedelta(days=90)  # month/day already passed this year
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "UPDATE rota_staff_detail SET start_date = ? WHERE venue_membership_id = ?",
+            (start_date.isoformat(), membership_id),
+        )
+        conn.commit()
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/dashboard/birthdays")
+    assert resp.status_code == 200
+    assert b"Recent Starter" in resp.data
+    assert b"1 year anniversary" in resp.data
+
+
+def test_birthdays_dashboard_shows_both_kinds_for_the_same_person(app, client, venue):
+    person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Double Date")
+    soon = date.today() + timedelta(days=3)
+    dob = date(1985, soon.month, soon.day)
+    start_date = date(soon.year - 2, soon.month, soon.day)
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute("UPDATE person SET date_of_birth = ? WHERE id = ?", (dob.isoformat(), person_id))
+        conn.execute(
+            "UPDATE rota_staff_detail SET start_date = ? WHERE venue_membership_id = ?",
+            (start_date.isoformat(), membership_id),
+        )
+        conn.commit()
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/dashboard/birthdays")
+    assert resp.data.count(b"Double Date") == 2  # one birthday entry, one anniversary entry

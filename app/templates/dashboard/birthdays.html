@@ -3,9 +3,15 @@
 {% block content %}
 <div class="panel">
   <h1>Birthdays &amp; anniversaries</h1>
-  {% if not upcoming %}<p class="hint">No dates of birth on file yet.</p>{% endif %}
+  {% if not upcoming %}<p class="hint">No dates of birth or start dates on file yet.</p>{% endif %}
   {% for u in upcoming %}
-    <div class="day-list-item">{{ u['name'] }} — in {{ u['days_until'] }} day(s)</div>
+    <div class="day-list-item">
+      {% if u['kind'] == 'birthday' %}
+        🎂 {{ u['name'] }} — birthday in {{ u['days_until'] }} day(s)
+      {% else %}
+        🎉 {{ u['name'] }} — {{ u['years'] }} year anniversary in {{ u['days_until'] }} day(s)
+      {% endif %}
+    </div>
   {% endfor %}
 </div>
 {% endblock %}

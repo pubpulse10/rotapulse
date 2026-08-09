@@ -19,6 +19,10 @@
     <input type="date" id="date_of_birth" name="date_of_birth" value="{{ person['date_of_birth'] or '' }}">
     <p class="hint">Used for the birthday reminder on the cost dashboard — optional.</p>
 
+    <label for="start_date">Start date</label>
+    <input type="date" id="start_date" name="start_date" value="{{ detail['start_date'] if detail else '' }}">
+    <p class="hint">When they started working here — also powers the anniversary reminder on the cost dashboard.</p>
+
     <label for="role_id">Role</label>
     <select id="role_id" name="role_id">
       <option value="">—</option>
