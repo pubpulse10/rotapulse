@@ -195,3 +195,78 @@ def test_resend_clears_previous_failed_status_before_retrying(app, client, venue
         assert conn.execute(
             "SELECT invite_delivery_status FROM app_access WHERE id = ?", (access_id,)
         ).fetchone()["invite_delivery_status"] == "sent"
+
+
+def _put_into_pending_approval(app, access_id):
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute("UPDATE app_access SET status = 'pending_approval' WHERE id = ?", (access_id,))
+        conn.commit()
+
+
+def test_approving_sends_a_welcome_message_with_what_they_can_do(app, client, venue, monkeypatch):
+    sent = []
+    monkeypatch.setattr("app.admin_config.send_email", lambda *a, **k: True)
+    monkeypatch.setattr(
+        "app.admin_config.send_sms", lambda to, body: sent.append((to, body)) or True
+    )
+
+    login_as_pub(client, venue["pub_id"])
+    _create_invite(client, venue, mobile="07796123456", invite_method="sms", email="")
+    access_id = _get_access_id(app, venue)
+    _put_into_pending_approval(app, access_id)
+    sent.clear()  # drop the original invite send, only care about the approval one
+
+    resp = client.post(f"/v/{venue['slug']}/admin/staff/{access_id}/approve", follow_redirects=True)
+    assert resp.status_code == 200
+
+    assert len(sent) == 1
+    to, body = sent[0]
+    assert to == "07796123456"
+    assert "welcome" in body.lower() or "approved" in body.lower()
+    # actually tells them what they can now do, not just "you're approved"
+    assert "clock in" in body.lower()
+    assert "shift" in body.lower()
+
+
+def test_approving_uses_email_when_that_was_the_invite_method(app, client, venue, monkeypatch):
+    sent = []
+
+    def fake_send_email(to, subject, body):
+        sent.append((to, subject, body))
+        return True
+
+    monkeypatch.setattr("app.admin_config.send_email", fake_send_email)
+
+    login_as_pub(client, venue["pub_id"])
+    _create_invite(client, venue)  # default invite_method is email
+    access_id = _get_access_id(app, venue)
+    _put_into_pending_approval(app, access_id)
+    sent.clear()
+
+    client.post(f"/v/{venue['slug']}/admin/staff/{access_id}/approve")
+
+    assert len(sent) == 1
+    to, subject, body = sent[0]
+    assert to == "starter@example.com"
+    assert "approved" in subject.lower()
+
+
+def test_approving_twice_does_not_resend_the_welcome_message(app, client, venue, monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        "app.admin_config.send_email", lambda *a, **k: sent.append(1) or True
+    )
+
+    login_as_pub(client, venue["pub_id"])
+    _create_invite(client, venue)
+    access_id = _get_access_id(app, venue)
+    _put_into_pending_approval(app, access_id)
+    sent.clear()
+
+    first = client.post(f"/v/{venue['slug']}/admin/staff/{access_id}/approve")
+    assert first.status_code == 302
+    second = client.post(f"/v/{venue['slug']}/admin/staff/{access_id}/approve")
+    assert second.status_code == 404
+
+    assert len(sent) == 1

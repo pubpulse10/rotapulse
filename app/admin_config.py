@@ -435,22 +435,54 @@ def pending_approval():
 @require_permission("app_admin", "rota_admin")
 def approve_staff(access_id):
     db = get_db()
+    venue_id = flask.g.venue["id"]
     # Scope to the caller's venue via venue_membership — the app_access row
     # itself has no venue_id, so without this an admin at one venue could
     # approve an access row belonging to another venue by id (IDOR). Mirrors
-    # the venue-scoping mark_left/edit_staff/erase_staff already apply.
+    # the venue-scoping mark_left/edit_staff/erase_staff already apply. Also
+    # needed here (not just for the UPDATE's WHERE) so there's contact detail
+    # to actually send the welcome message to.
+    row = db.execute(
+        """SELECT app_access.invite_method, person.name, person.email, person.mobile
+           FROM app_access
+           JOIN venue_membership ON venue_membership.id = app_access.venue_membership_id
+           JOIN person ON person.id = venue_membership.person_id
+           WHERE app_access.id = ? AND venue_membership.venue_id = ?
+           AND app_access.app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+        (access_id, venue_id),
+    ).fetchone()
+    if row is None:
+        flask.abort(404)
+
+    # status = 'pending_approval' in the WHERE stops a re-approve (e.g. a
+    # doubled-up click) from re-sending the welcome message.
     cur = db.execute(
-        """UPDATE app_access SET status = 'active', approved_at = datetime('now')
-           WHERE id = ?
-           AND venue_membership_id IN (SELECT id FROM venue_membership WHERE venue_id = ?)""",
-        (access_id, flask.g.venue["id"]),
+        "UPDATE app_access SET status = 'active', approved_at = datetime('now') WHERE id = ? AND status = 'pending_approval'",
+        (access_id,),
     )
     if cur.rowcount == 0:
         flask.abort(404)
     db.commit()
-    enforce_band(flask.g.venue["id"])
+    enforce_band(venue_id)
+
+    _send_approval_message(flask.g.venue, flask.g.slug, row["invite_method"], row["email"], row["mobile"])
+
     flask.flash("Staff member approved — they can now log in and clock in.")
     return flask.redirect(flask.url_for("admin_config.pending_approval"))
+
+
+def _send_approval_message(venue, slug, invite_method, email, mobile):
+    login_url = flask.url_for("rota_login.login", slug=slug, _external=True)
+    message = (
+        f"Welcome to the team! Your RotaPulse account for {venue['name']} has been approved — you're all set.\n\n"
+        "You can now log in to view your upcoming shifts, clock in and out, see and claim open shifts, "
+        "request leave, and swap shifts with colleagues.\n\n"
+        f"Log in here: {login_url}"
+    )
+    if invite_method == "sms" and mobile:
+        send_sms(mobile, message)
+    elif email:
+        send_email(email, f"You're approved for {venue['name']} on RotaPulse", message)
 
 
 @admin_bp.route("/staff/<int:membership_id>/leave", methods=["POST"])
