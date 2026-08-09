@@ -87,6 +87,109 @@ def test_rota_admin_cannot_change_pay_rate_through_edit_form(app, client, venue)
         assert detail["hourly_pay_rate"] == 10  # unchanged, not 999
 
 
+def test_admin_can_change_permission_level(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    person_id, membership_id, _email = create_active_staff(
+        app, venue["id"], name="Promote Me", permission_level="staff"
+    )
+
+    client.post(
+        f"/v/{venue['slug']}/admin/staff/{membership_id}/edit",
+        data={"name": "Promote Me", "permission_level": "rota_admin"},
+    )
+
+    with app.app_context():
+        conn = db_module.get_db()
+        access = conn.execute(
+            """SELECT permission_level FROM app_access
+               WHERE venue_membership_id = ? AND app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+            (membership_id,),
+        ).fetchone()
+    assert access["permission_level"] == "rota_admin"
+
+
+def test_rota_admin_cannot_change_permission_level_through_edit_form(app, client, venue):
+    """Same protection as pay rate — permission level is app_admin-only, a
+    rota_admin editing someone must not be able to grant rota_admin (or
+    revoke it) by posting the field directly."""
+    login_as_pub(client, venue["pub_id"])
+    person_id, membership_id, _email = create_active_staff(
+        app, venue["id"], name="StayPut", permission_level="staff"
+    )
+
+    rota_admin_id, _rota_admin_membership_id, _rota_admin_email = create_active_staff(
+        app, venue["id"], name="RotaAdminUser2", permission_level="rota_admin"
+    )
+    from tests.conftest import login_as_person
+
+    login_as_person(client, rota_admin_id)
+    client.post(
+        f"/v/{venue['slug']}/admin/staff/{membership_id}/edit",
+        data={"name": "StayPut", "permission_level": "rota_admin"},
+    )
+
+    with app.app_context():
+        conn = db_module.get_db()
+        access = conn.execute(
+            """SELECT permission_level FROM app_access
+               WHERE venue_membership_id = ? AND app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+            (membership_id,),
+        ).fetchone()
+    assert access["permission_level"] == "staff"  # unchanged
+
+
+def test_permission_level_cannot_be_smuggled_to_app_admin(app, client, venue):
+    """app_admin is the owner-only SSO tier — must never be grantable
+    through this form even by an app_admin posting the field directly."""
+    login_as_pub(client, venue["pub_id"])
+    person_id, membership_id, _email = create_active_staff(
+        app, venue["id"], name="NoEscalation", permission_level="staff"
+    )
+
+    client.post(
+        f"/v/{venue['slug']}/admin/staff/{membership_id}/edit",
+        data={"name": "NoEscalation", "permission_level": "app_admin"},
+    )
+
+    with app.app_context():
+        conn = db_module.get_db()
+        access = conn.execute(
+            """SELECT permission_level FROM app_access
+               WHERE venue_membership_id = ? AND app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+            (membership_id,),
+        ).fetchone()
+    assert access["permission_level"] == "staff"  # unchanged, not app_admin
+
+
+def test_editing_owner_with_dual_access_rows_does_not_crash(app, client, venue):
+    """The venue owner has TWO app_access rows on one membership (app_admin
+    + rota_admin) — a fundamentally different shape from regular invited
+    staff's single row. The permission field must not appear (there's no
+    single unambiguous level to show/edit), and the page must not crash."""
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/admin/staff/{venue['owner_membership_id']}/edit")
+    assert resp.status_code == 200
+    assert b'name="permission_level"' not in resp.data
+
+    post_resp = client.post(
+        f"/v/{venue['slug']}/admin/staff/{venue['owner_membership_id']}/edit",
+        data={"name": "Owner Person", "permission_level": "staff"},
+    )
+    assert post_resp.status_code == 302  # saved fine, no crash
+
+    with app.app_context():
+        conn = db_module.get_db()
+        levels = {
+            row["permission_level"]
+            for row in conn.execute(
+                """SELECT permission_level FROM app_access
+                   WHERE venue_membership_id = ? AND app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+                (venue["owner_membership_id"],),
+            ).fetchall()
+        }
+    assert levels == {"app_admin", "rota_admin"}  # both untouched
+
+
 def test_edit_staff_requires_name(app, client, venue):
     login_as_pub(client, venue["pub_id"])
     person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Keep This Name")

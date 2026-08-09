@@ -233,6 +233,18 @@ def edit_staff(membership_id):
         "SELECT * FROM rota_staff_detail WHERE venue_membership_id = ?", (membership_id,)
     ).fetchone()
     roles = db.execute("SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name", (venue_id,)).fetchall()
+    # Someone with a single invited role (the normal case — every regular
+    # staff/rota_admin invite creates exactly one app_access row) can have
+    # that permission level changed here. The venue owner is a different
+    # shape entirely (auto-provisioned with BOTH app_admin and rota_admin as
+    # two separate rows on the same membership) — deliberately not editable
+    # through this form, since "the" permission level is ambiguous for them.
+    access_rows = db.execute(
+        """SELECT * FROM app_access WHERE venue_membership_id = ?
+           AND app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+        (membership_id,),
+    ).fetchall()
+    editable_access = access_rows[0] if len(access_rows) == 1 else None
 
     if flask.request.method == "POST":
         form = flask.request.form
@@ -255,6 +267,19 @@ def edit_staff(membership_id):
             "UPDATE venue_membership SET job_role_id = ? WHERE id = ? AND venue_id = ?",
             (form.get("role_id", type=int) or None, membership_id, venue_id),
         )
+
+        # Permission level, like pay rate below, stays app_admin-only — never
+        # trust a client-submitted privilege-sensitive field from a caller
+        # who might only be rota_admin. Restricted to 'staff'/'rota_admin':
+        # 'app_admin' is the owner-only SSO tier and must never be grantable
+        # through this form.
+        if "app_admin" in flask.g.permission_levels and editable_access is not None:
+            new_level = form.get("permission_level")
+            if new_level in ("staff", "rota_admin"):
+                db.execute(
+                    "UPDATE app_access SET permission_level = ? WHERE id = ?",
+                    (new_level, editable_access["id"]),
+                )
 
         availability = {day: bool(form.get(f"available_{day}")) for day in DAYS}
         # Pay rate stays app_admin-only (spec §2.1/§4 — "admin-only, never
@@ -282,7 +307,7 @@ def edit_staff(membership_id):
     availability = json.loads(detail["availability"]) if detail and detail["availability"] else {}
     return flask.render_template(
         "admin/staff_edit.html", person=person, membership=membership, detail=detail,
-        roles=roles, availability=availability, days=DAYS,
+        roles=roles, availability=availability, days=DAYS, editable_access=editable_access,
     )
 
 

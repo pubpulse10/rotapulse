@@ -30,6 +30,14 @@
     {% if 'app_admin' in g.permission_levels %}
       <label for="hourly_pay_rate">Hourly pay rate</label>
       <input type="number" step="0.01" id="hourly_pay_rate" name="hourly_pay_rate" value="{{ detail['hourly_pay_rate'] if detail else 0 }}">
+
+      {% if editable_access %}
+        <label for="permission_level">Permission</label>
+        <select id="permission_level" name="permission_level">
+          <option value="staff" {{ 'selected' if editable_access['permission_level'] == 'staff' }}>Staff</option>
+          <option value="rota_admin" {{ 'selected' if editable_access['permission_level'] == 'rota_admin' }}>Rota admin</option>
+        </select>
+      {% endif %}
     {% endif %}
 
     <label for="home_address">Home address</label>
