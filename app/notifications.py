@@ -13,6 +13,7 @@ so every SMS-triggering flow (invites, open-shift notify, digest) stays
 fully testable without a real Twilio account.
 """
 
+import re
 import smtplib
 import sys
 from email.message import EmailMessage
@@ -31,11 +32,36 @@ def send_email(to: str, subject: str, body: str) -> None:
     msg["Subject"] = subject
     msg.set_content(body)
 
-    with smtplib.SMTP(config.MAIL_SERVER, config.MAIL_PORT) as smtp:
-        smtp.starttls()
-        if config.MAIL_USERNAME:
-            smtp.login(config.MAIL_USERNAME, config.MAIL_PASSWORD)
-        smtp.send_message(msg)
+    try:
+        with smtplib.SMTP(config.MAIL_SERVER, config.MAIL_PORT) as smtp:
+            smtp.starttls()
+            if config.MAIL_USERNAME:
+                smtp.login(config.MAIL_USERNAME, config.MAIL_PASSWORD)
+            smtp.send_message(msg)
+    except Exception:
+        # A delivery failure (bad address, SMTP outage, etc.) must never crash
+        # the caller's request — the same "log instead of send" fallback
+        # philosophy as the unconfigured-credentials case above, just for the
+        # send-attempt-failed case instead of the never-attempted case.
+        print(f"[email:failed] To: {to} | Subject: {subject}\n{body}", flush=True, file=sys.stderr)
+
+
+def _to_e164_uk(raw: str) -> str:
+    """Best-effort normalisation of a UK mobile number to E.164 (+447...),
+    which Twilio requires — confirmed live in production: a plain domestic
+    '07...' number is flatly rejected ("Invalid 'To' Phone Number"). Almost
+    nobody types the +44 prefix themselves, so without this every UK number
+    entered the ordinary way fails every time, not just malformed ones."""
+    digits = re.sub(r"[^\d+]", "", raw)
+    if digits.startswith("+"):
+        return digits
+    if digits.startswith("00"):
+        return "+" + digits[2:]
+    if digits.startswith("0"):
+        return "+44" + digits[1:]
+    if digits.startswith("44"):
+        return "+" + digits
+    return raw  # unrecognised shape — let Twilio's own validation reject it
 
 
 def send_sms(to: str, body: str) -> None:
@@ -46,4 +72,13 @@ def send_sms(to: str, body: str) -> None:
     from twilio.rest import Client
 
     client = Client(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN)
-    client.messages.create(to=to, from_=config.TWILIO_FROM_NUMBER, body=body)
+    try:
+        client.messages.create(to=_to_e164_uk(to), from_=config.TWILIO_FROM_NUMBER, body=body)
+    except Exception:
+        # A delivery failure (bad number even after normalising, Twilio
+        # outage, etc.) must never crash the caller's request — confirmed
+        # live: an unhandled TwilioRestException here 500'd
+        # admin_config.create_staff AFTER the invite row was already
+        # committed, leaving an admin looking at an error page for a record
+        # that actually existed underneath it.
+        print(f"[sms:failed] To: {to}\n{body}", flush=True, file=sys.stderr)
