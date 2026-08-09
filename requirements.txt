@@ -8,3 +8,4 @@ stripe>=11.0
 requests>=2.31
 twilio>=9.0
 reportlab>=4.0
+boto3>=1.34
