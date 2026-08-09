@@ -26,6 +26,15 @@ def app(monkeypatch):
     application.config["TESTING"] = True
     application.config["WTF_CSRF_ENABLED"] = False
 
+    # The rate limiter's in-memory counters are process-global, not
+    # per-app-instance — every test's requests come from the same test
+    # client "IP", so without this, later tests in a run get spuriously
+    # throttled by earlier ones' request volume (bit PricePulse's suite this
+    # same way: 80 failures from limiter bleed, not real bugs).
+    from app.extensions import limiter
+
+    limiter.enabled = False
+
     with application.app_context():
         db_module.init_schema()
 

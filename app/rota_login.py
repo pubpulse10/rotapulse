@@ -26,6 +26,7 @@ import flask
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.db import get_db
+from app.extensions import limiter
 from app.notifications import send_email
 from app.venue_scope import register_venue_gate, register_venue_scope
 
@@ -36,6 +37,18 @@ register_venue_gate(login_bp)
 
 def _hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
+def _safe_next(target: str | None) -> bool:
+    """Only accept a root-relative local path — one that starts with a single
+    '/', isn't protocol-relative ('//...') or a '/\\...' variant browsers
+    normalise to that, and carries no scheme. Blocks open-redirect abuse of
+    the ?next= parameter to an attacker-controlled absolute URL."""
+    if not target or not target.startswith("/"):
+        return False
+    if target.startswith("//") or target.startswith("/\\"):
+        return False
+    return True
 
 
 def _find_person_by_identifier(db, venue_id, identifier):
@@ -50,6 +63,7 @@ def _find_person_by_identifier(db, venue_id, identifier):
 
 
 @login_bp.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute; 100 per hour", methods=["POST"])
 def login():
     venue = flask.g.venue
     if flask.request.method == "POST":
@@ -60,7 +74,8 @@ def login():
         if person and check_password_hash(person["password_hash"], password):
             flask.session.permanent = True
             flask.session["rotapulse_person_id"] = person["id"]
-            dest = flask.request.args.get("next") or flask.url_for("staff_portal.home", slug=venue["slug"])
+            next_param = flask.request.args.get("next")
+            dest = next_param if _safe_next(next_param) else flask.url_for("staff_portal.home", slug=venue["slug"])
             return flask.redirect(dest)
         flask.flash("Invalid email/mobile or password.", "error")
     return flask.render_template("login/login.html", venue=venue)
@@ -73,6 +88,7 @@ def logout():
 
 
 @login_bp.route("/forgot-password", methods=["GET", "POST"])
+@limiter.limit("5 per minute; 30 per hour", methods=["POST"])
 def forgot_password():
     venue = flask.g.venue
     if flask.request.method == "POST":
@@ -100,6 +116,7 @@ def forgot_password():
 
 
 @login_bp.route("/reset-password/<token>", methods=["GET", "POST"])
+@limiter.limit("5 per minute; 30 per hour", methods=["POST"])
 def reset_password(token):
     venue = flask.g.venue
     db = get_db()

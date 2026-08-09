@@ -32,11 +32,15 @@ if not SECRET_KEY:
     )
 
 SESSION_COOKIE_SAMESITE = "Lax"
-# Long — this session doubles as the "refresh token" for staff logins (spec
-# §4's "most staff rarely see the login screen day-to-day"). Revocation for
-# a departed staff member is handled by flipping app_access.status, checked
-# on every request via rota_auth, not by any separate token-invalidation.
-PERMANENT_SESSION_LIFETIME = timedelta(days=180)
+# This session doubles as the "refresh token" for staff logins (spec §4's
+# "most staff rarely see the login screen day-to-day"). Revocation for a
+# departed staff member is handled by flipping app_access.status, checked on
+# every request via rota_auth, not by any separate token-invalidation.
+# Rolling: SESSION_REFRESH_EACH_REQUEST re-issues the cookie on every request,
+# so active staff stay logged in indefinitely, but a stolen/idle cookie
+# expires 30 days after its last use rather than lasting six months.
+PERMANENT_SESSION_LIFETIME = timedelta(days=30)
+SESSION_REFRESH_EACH_REQUEST = True
 # Only force HTTPS-only cookies once actually deployed — forcing it during
 # local http:// development would silently break every session.
 SESSION_COOKIE_SECURE = os.environ.get("FLASK_ENV") == "production"
@@ -129,5 +133,6 @@ def apply(app):
     app.secret_key = SECRET_KEY
     app.config["SESSION_COOKIE_SAMESITE"] = SESSION_COOKIE_SAMESITE
     app.config["PERMANENT_SESSION_LIFETIME"] = PERMANENT_SESSION_LIFETIME
+    app.config["SESSION_REFRESH_EACH_REQUEST"] = SESSION_REFRESH_EACH_REQUEST
     app.config["SESSION_COOKIE_SECURE"] = SESSION_COOKIE_SECURE
     app.config["SESSION_COOKIE_DOMAIN"] = SESSION_COOKIE_DOMAIN

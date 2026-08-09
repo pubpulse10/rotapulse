@@ -384,6 +384,15 @@ def create_shift():
     db = get_db()
     form = flask.request.form
     person_id = form.get("person_id", type=int)
+    # A posted person_id must be an active member of THIS venue — otherwise a
+    # scheduled shift could be created against someone at another venue.
+    if person_id is not None:
+        is_staff_here = db.execute(
+            "SELECT 1 FROM venue_membership WHERE person_id = ? AND venue_id = ? AND status = 'active'",
+            (person_id, flask.g.venue["id"]),
+        ).fetchone()
+        if is_staff_here is None:
+            flask.abort(404)
     status = "scheduled" if person_id else "open"
     db.execute(
         """INSERT INTO shift (venue_id, person_id, venue_role_id, shift_date, start_time, end_time, status)
@@ -595,10 +604,24 @@ def notify_open_shift(shift_id):
 @require_permission("app_admin", "rota_admin")
 def approve_swap(swap_id):
     db = get_db()
-    swap_row = db.execute("SELECT * FROM shift_swap_request WHERE id = ?", (swap_id,)).fetchone()
+    venue_id = flask.g.venue["id"]
+    # Scope the swap to the caller's venue by joining it to its shift — the
+    # swap request row itself carries no venue_id, so without this join an
+    # admin at one venue could approve another venue's swap by id (IDOR).
+    swap_row = db.execute(
+        """SELECT shift_swap_request.* FROM shift_swap_request
+           JOIN shift ON shift.id = shift_swap_request.shift_id
+           WHERE shift_swap_request.id = ? AND shift.venue_id = ?""",
+        (swap_id, venue_id),
+    ).fetchone()
     if swap_row is None or swap_row["status"] != "pending_admin":
         flask.abort(404)
-    db.execute("UPDATE shift SET person_id = ? WHERE id = ?", (swap_row["to_person_id"], swap_row["shift_id"]))
+    # The UPDATE also re-asserts venue_id so it can never touch another
+    # venue's shift even if a swap row were somehow mis-pointed.
+    db.execute(
+        "UPDATE shift SET person_id = ? WHERE id = ? AND venue_id = ?",
+        (swap_row["to_person_id"], swap_row["shift_id"], venue_id),
+    )
     db.execute(
         "UPDATE shift_swap_request SET status = 'approved', admin_decided_at = datetime('now'), admin_decided_by_person_id = ? WHERE id = ?",
         (flask.g.person["id"] if flask.g.person else None, swap_id),
@@ -612,10 +635,17 @@ def approve_swap(swap_id):
 @require_permission("app_admin", "rota_admin")
 def decline_swap(swap_id):
     db = get_db()
-    db.execute(
-        "UPDATE shift_swap_request SET status = 'declined', admin_decided_at = datetime('now'), admin_decided_by_person_id = ? WHERE id = ?",
-        (flask.g.person["id"] if flask.g.person else None, swap_id),
+    venue_id = flask.g.venue["id"]
+    # Scope to the caller's venue via the swap's shift (the swap row has no
+    # venue_id) — 404 on a miss so another venue's swap can't be declined.
+    cur = db.execute(
+        """UPDATE shift_swap_request SET status = 'declined', admin_decided_at = datetime('now'),
+           admin_decided_by_person_id = ?
+           WHERE id = ? AND shift_id IN (SELECT id FROM shift WHERE venue_id = ?)""",
+        (flask.g.person["id"] if flask.g.person else None, swap_id, venue_id),
     )
+    if cur.rowcount == 0:
+        flask.abort(404)
     db.commit()
     flask.flash("Swap declined.")
     return flask.redirect(flask.url_for("rota_grid.week"))

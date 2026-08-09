@@ -257,6 +257,14 @@ def request_swap(shift_id):
     ).fetchone()
     if shift_row is None or not to_person_id:
         flask.abort(400)
+    # The swap target must be an active member of THIS venue — otherwise a
+    # swap could be pointed at a person_id belonging to another venue.
+    to_is_staff_here = db.execute(
+        "SELECT 1 FROM venue_membership WHERE person_id = ? AND venue_id = ? AND status = 'active'",
+        (to_person_id, flask.g.venue["id"]),
+    ).fetchone()
+    if to_is_staff_here is None:
+        flask.abort(404)
     db.execute(
         "INSERT INTO shift_swap_request (shift_id, from_person_id, to_person_id) VALUES (?, ?, ?)",
         (shift_id, flask.g.person["id"], to_person_id),

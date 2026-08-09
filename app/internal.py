@@ -11,20 +11,29 @@ in right now* — that's what this endpoint answers, authenticated the same
 bearer-secret way as the sibling apps' existing /internal/* calls.
 """
 
+import hmac
+
 from flask import Blueprint, jsonify, request
 
 from app import config
 from app.db import get_db, get_app_id
+from app.extensions import limiter
 
 internal_bp = Blueprint("internal", __name__, url_prefix="/internal")
 
 
 def _authorized():
-    expected = f"Bearer {config.INTERNAL_API_SECRET}"
-    return bool(config.INTERNAL_API_SECRET) and request.headers.get("Authorization") == expected
+    # Fail closed when the secret is unset, and compare in constant time so a
+    # caller can't recover the secret byte-by-byte via response timing.
+    secret = config.INTERNAL_API_SECRET
+    if not secret:
+        return False
+    provided = request.headers.get("Authorization", "")
+    return hmac.compare_digest(provided, f"Bearer {secret}")
 
 
 @internal_bp.route("/clock-status", methods=["POST"])
+@limiter.limit("60 per minute")
 def clock_status():
     if not _authorized():
         return jsonify({"error": "unauthorized"}), 401
@@ -54,6 +63,7 @@ def clock_status():
 
 
 @internal_bp.route("/access", methods=["POST"])
+@limiter.limit("60 per minute")
 def access():
     """Phase 2: the Hub pushes a staff person's RotaPulse grant here whenever
     it changes. Materialises a person (keyed by person.hub_person_id) + an

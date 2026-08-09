@@ -362,10 +362,18 @@ def pending_approval():
 @require_permission("app_admin", "rota_admin")
 def approve_staff(access_id):
     db = get_db()
-    db.execute(
-        "UPDATE app_access SET status = 'active', approved_at = datetime('now') WHERE id = ?",
-        (access_id,),
+    # Scope to the caller's venue via venue_membership — the app_access row
+    # itself has no venue_id, so without this an admin at one venue could
+    # approve an access row belonging to another venue by id (IDOR). Mirrors
+    # the venue-scoping mark_left/edit_staff/erase_staff already apply.
+    cur = db.execute(
+        """UPDATE app_access SET status = 'active', approved_at = datetime('now')
+           WHERE id = ?
+           AND venue_membership_id IN (SELECT id FROM venue_membership WHERE venue_id = ?)""",
+        (access_id, flask.g.venue["id"]),
     )
+    if cur.rowcount == 0:
+        flask.abort(404)
     db.commit()
     enforce_band(flask.g.venue["id"])
     flask.flash("Staff member approved — they can now log in and clock in.")

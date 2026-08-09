@@ -183,6 +183,7 @@ def _notify_band_change(db, venue_id: int, new_band: int) -> None:
 
 
 @billing_bp.route("/upgrade", methods=["POST"])
+@require_permission("app_admin")
 def upgrade():
     """Starts Checkout for the band the landlord picked. You can't pick a band
     smaller than your current staff needs — that's what the band-exceeded guard

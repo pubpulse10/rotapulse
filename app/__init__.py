@@ -14,6 +14,24 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 def create_app():
     app = flask.Flask(__name__)
     config.apply(app)
+
+    # Behind Waitress + a reverse proxy: trust exactly one proxy hop for the
+    # client IP and scheme, so the rate limiter keys on the real remote
+    # address (X-Forwarded-For) rather than the proxy's, and url_for(_external)
+    # honours X-Forwarded-Proto.
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+
+    # In-memory limiter storage is correct for a single Waitress process (the
+    # current deployment). A multi-instance/multi-process deployment would
+    # need a shared backend (e.g. redis) so limits are enforced globally.
+    from app.extensions import limiter
+    limiter.init_app(app)
+
+    # Cap request bodies so an oversized upload can't exhaust memory/disk
+    # (covers the avatar/attendance-photo uploads in app/media.py).
+    app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+
     db.init_app(app)
     csrf = CSRFProtect(app)
     app.jinja_env.filters["from_json"] = lambda s: json.loads(s) if s else {}
@@ -133,6 +151,32 @@ def create_app():
         )
         resp.headers["Service-Worker-Allowed"] = "/"
         resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+    @app.after_request
+    def set_security_headers(resp):
+        # Baseline hardening headers. setdefault() so a view that sets its own
+        # header (e.g. the service worker above) is never overridden.
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        # HSTS only when cookies are already HTTPS-only (production). A
+        # Content-Security-Policy is deliberately NOT enforced here yet — it
+        # needs testing against inline scripts and the PWA service worker.
+        if app.config.get("SESSION_COOKIE_SECURE"):
+            resp.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+        # Report-only CSP: browsers evaluate and report violations but never
+        # block, so this can't break inline scripts, the PWA service worker or
+        # the Stripe.js embed. Tune against real violation reports, then
+        # promote to an enforcing Content-Security-Policy header.
+        resp.headers.setdefault(
+            "Content-Security-Policy-Report-Only",
+            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline' https://js.stripe.com; "
+            "frame-src https://js.stripe.com; object-src 'none'; base-uri 'self'",
+        )
         return resp
 
     return app

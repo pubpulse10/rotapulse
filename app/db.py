@@ -304,6 +304,11 @@ def get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL lets readers and a writer proceed concurrently (fewer "database is
+    # locked" errors under Waitress' threads); busy_timeout waits up to 5s for
+    # a lock instead of failing immediately.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
