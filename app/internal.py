@@ -12,12 +12,14 @@ bearer-secret way as the sibling apps' existing /internal/* calls.
 """
 
 import hmac
+from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 
 from app import config
 from app.db import get_db, get_app_id
 from app.extensions import limiter
+from app.notification_settings import check_missed_clock_ins, check_missed_clock_outs
 
 internal_bp = Blueprint("internal", __name__, url_prefix="/internal")
 
@@ -60,6 +62,23 @@ def clock_status():
         return jsonify({"clocked_in": False})
 
     return jsonify({"clocked_in": True, "person_id": person_id, "name": row["name"], "avatar_url": row["avatar_url"]})
+
+
+@internal_bp.route("/run-shift-notifications", methods=["POST"])
+@limiter.limit("60 per minute")
+def run_shift_notifications():
+    """Called by the Render Cron Job (scripts/check_shift_notifications.py has
+    no persistent disk of its own to read the DB from, so it hits this
+    endpoint over HTTP instead — the web service's connection is the one
+    with the real, disk-backed database)."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+
+    db = get_db()
+    now = datetime.now()
+    missed_in = check_missed_clock_ins(db, now)
+    missed_out = check_missed_clock_outs(db, now)
+    return jsonify({"missed_clock_in": missed_in, "missed_clock_out": missed_out})
 
 
 @internal_bp.route("/access", methods=["POST"])
