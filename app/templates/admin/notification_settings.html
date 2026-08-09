@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Notifications — RotaPulse{% endblock %}
+{% block content %}
+<p><a class="btn-secondary" href="{{ url_for('admin_config.settings') }}">&laquo; Venue settings</a></p>
+<div class="panel">
+  <h1>Notifications</h1>
+  <p class="hint">Choose which events you want to hear about, how, and who should get them. Recipients can be anyone with admin or rota admin access.</p>
+
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    {% for key, label in notification_types %}
+      {% set setting = settings_by_type.get(key) %}
+      <div class="panel" style="margin: 12px 0;">
+        <div class="checkbox-row">
+          <input type="checkbox" id="enabled_{{ key }}" name="enabled_{{ key }}" {{ 'checked' if setting and setting['enabled'] }}>
+          <label for="enabled_{{ key }}">{{ label }}</label>
+        </div>
+
+        <label for="method_{{ key }}">Delivery method</label>
+        <select id="method_{{ key }}" name="method_{{ key }}">
+          <option value="email" {{ 'selected' if not setting or setting['method'] == 'email' }}>Email</option>
+          <option value="sms" {{ 'selected' if setting and setting['method'] == 'sms' }}>SMS</option>
+          <option value="both" {{ 'selected' if setting and setting['method'] == 'both' }}>Both</option>
+        </select>
+
+        <p class="hint" style="margin-bottom: 4px;">Send to:</p>
+        {% for person in eligible_recipients %}
+          <div class="checkbox-row">
+            <input type="checkbox" id="recipients_{{ key }}_{{ person['id'] }}" name="recipients_{{ key }}" value="{{ person['id'] }}"
+                   {{ 'checked' if person['id'] in recipients_by_type.get(key, []) }}>
+            <label for="recipients_{{ key }}_{{ person['id'] }}">{{ person['name'] }}</label>
+          </div>
+        {% else %}
+          <p class="hint">No admins or rota admins to choose from yet.</p>
+        {% endfor %}
+      </div>
+    {% endfor %}
+
+    <button type="submit" class="btn-primary">Save notification settings</button>
+  </form>
+</div>
+{% endblock %}

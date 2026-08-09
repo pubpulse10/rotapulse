@@ -14,6 +14,7 @@ from app.db import get_db
 from app.geo_distance import distance_metres
 from app.leave import days_taken_count
 from app.media import save_attendance_photo
+from app.notification_settings import notify_admins
 from app.rota_auth import register_identity, require_permission
 from app.venue_scope import register_venue_gate, register_venue_scope
 
@@ -171,6 +172,11 @@ def leave():
             (person["id"], venue["id"], form["start_date"], form["end_date"]),
         )
         db.commit()
+        notify_admins(
+            db, venue, "leave_request",
+            f"Leave request — {venue['name']}",
+            f"{person['name']} has requested leave from {form['start_date']} to {form['end_date']} at {venue['name']}.",
+        )
         flask.flash("Leave request submitted — awaiting approval.")
         return flask.redirect(flask.url_for("staff_portal.leave"))
 
@@ -237,6 +243,13 @@ def claim_open_shift(shift_id):
     )
     db.commit()
     if cur.rowcount == 1:
+        shift_row = db.execute("SELECT shift_date, start_time, end_time FROM shift WHERE id = ?", (shift_id,)).fetchone()
+        notify_admins(
+            db, flask.g.venue, "open_shift_claimed",
+            f"Open shift claimed — {flask.g.venue['name']}",
+            f"{flask.g.person['name']} claimed the open shift on {shift_row['shift_date']} "
+            f"{shift_row['start_time']}-{shift_row['end_time']} at {flask.g.venue['name']}.",
+        )
         flask.flash("Shift claimed — it's yours.")
     else:
         flask.flash("Someone else already claimed that shift.", "error")
@@ -305,6 +318,18 @@ def accept_swap(swap_id):
         (swap_id,),
     )
     db.commit()
+    # Notified here, not at the initial request — this is the point it
+    # actually needs an admin's attention (peer has accepted, awaiting
+    # approval); the earlier staff-to-peer request has no admin role yet.
+    shift_row = db.execute(
+        "SELECT shift_date, start_time, end_time FROM shift WHERE id = ?", (swap_row["shift_id"],)
+    ).fetchone()
+    notify_admins(
+        db, flask.g.venue, "swap_request",
+        f"Shift swap needs approval — {flask.g.venue['name']}",
+        f"{flask.g.person['name']} has accepted a shift swap for {shift_row['shift_date']} "
+        f"{shift_row['start_time']}-{shift_row['end_time']} at {flask.g.venue['name']} — it now needs your approval.",
+    )
     flask.flash("Accepted — waiting for admin approval to finalise.")
     return flask.redirect(flask.url_for("staff_portal.my_swaps"))
 

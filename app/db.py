@@ -297,6 +297,40 @@ CREATE TABLE IF NOT EXISTS weather_cache (
     fetched_at TEXT NOT NULL,
     PRIMARY KEY (venue_id, forecast_date)
 );
+
+-- ---------- Owner-configurable admin notifications ----------
+-- One row per (venue, notification_type) — see app/notification_settings.py
+-- for the fixed list of types. Recipients are chosen per type, not global,
+-- so e.g. missed-clock-in alerts can go to just the owner while swap
+-- requests go to a delegated rota_admin (Steve's explicit design ask).
+
+CREATE TABLE IF NOT EXISTS notification_setting (
+    id INTEGER PRIMARY KEY,
+    venue_id INTEGER NOT NULL REFERENCES venue(id),
+    notification_type TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    method TEXT NOT NULL DEFAULT 'email',   -- 'email' | 'sms' | 'both'
+    UNIQUE(venue_id, notification_type)
+);
+
+CREATE TABLE IF NOT EXISTS notification_recipient (
+    id INTEGER PRIMARY KEY,
+    notification_setting_id INTEGER NOT NULL REFERENCES notification_setting(id),
+    person_id INTEGER NOT NULL REFERENCES person(id),
+    UNIQUE(notification_setting_id, person_id)
+);
+
+-- Idempotency log for the scheduled missed-clock-in/out checker (run
+-- externally on a timer, see scripts/check_shift_notifications.py) — without
+-- this, every run of the checker would re-notify for the same still-missed
+-- clock-in/out every time it runs.
+CREATE TABLE IF NOT EXISTS shift_notification_log (
+    id INTEGER PRIMARY KEY,
+    shift_id INTEGER NOT NULL REFERENCES shift(id),
+    notification_type TEXT NOT NULL,
+    sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(shift_id, notification_type)
+);
 """
 
 

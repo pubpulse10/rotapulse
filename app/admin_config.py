@@ -17,6 +17,7 @@ from app.billing import enforce_band
 from app.consent import erase_person_sensitive_data
 from app.db import get_app_id, get_db
 from app.geocoding import geocode_postcode
+from app.notification_settings import METHODS, NOTIFICATION_TYPES
 from app.notifications import send_email, send_sms
 from app.rota_auth import register_identity, require_permission
 from app.venue_scope import register_venue_gate, register_venue_scope
@@ -153,6 +154,102 @@ def delete_role(role_id):
     db.commit()
     flask.flash("Role deleted.")
     return flask.redirect(flask.url_for("admin_config.roles"))
+
+
+# ---------- Admin notifications (app_admin only — the owner decides who
+# hears about what, not each recipient for themselves) ----------
+
+
+def _eligible_notification_recipients(db, venue_id):
+    """Anyone with active app_admin or rota_admin access at this venue —
+    the same pool the owner can pick from for any notification type."""
+    return db.execute(
+        """SELECT DISTINCT person.id, person.name, person.email, person.mobile
+           FROM person
+           JOIN venue_membership ON venue_membership.person_id = person.id
+           JOIN app_access ON app_access.venue_membership_id = venue_membership.id
+           WHERE venue_membership.venue_id = ? AND venue_membership.status = 'active'
+           AND app_access.status = 'active'
+           AND app_access.permission_level IN ('app_admin', 'rota_admin')
+           AND app_access.app_id = (SELECT id FROM app WHERE key = 'rotapulse')
+           ORDER BY person.name COLLATE NOCASE""",
+        (venue_id,),
+    ).fetchall()
+
+
+@admin_bp.route("/notifications")
+@require_permission("app_admin")
+def notification_settings():
+    db = get_db()
+    venue_id = flask.g.venue["id"]
+    settings_by_type = {
+        row["notification_type"]: row
+        for row in db.execute("SELECT * FROM notification_setting WHERE venue_id = ?", (venue_id,)).fetchall()
+    }
+    recipients_by_type = {}
+    for key, _label in NOTIFICATION_TYPES:
+        setting = settings_by_type.get(key)
+        if setting is None:
+            recipients_by_type[key] = set()
+        else:
+            rows = db.execute(
+                "SELECT person_id FROM notification_recipient WHERE notification_setting_id = ?",
+                (setting["id"],),
+            ).fetchall()
+            recipients_by_type[key] = {r["person_id"] for r in rows}
+
+    return flask.render_template(
+        "admin/notification_settings.html",
+        notification_types=NOTIFICATION_TYPES,
+        methods=METHODS,
+        settings_by_type=settings_by_type,
+        recipients_by_type=recipients_by_type,
+        eligible_recipients=_eligible_notification_recipients(db, venue_id),
+    )
+
+
+@admin_bp.route("/notifications", methods=["POST"])
+@require_permission("app_admin")
+def save_notification_settings():
+    db = get_db()
+    venue_id = flask.g.venue["id"]
+    form = flask.request.form
+    eligible_ids = {p["id"] for p in _eligible_notification_recipients(db, venue_id)}
+
+    for key, _label in NOTIFICATION_TYPES:
+        enabled = 1 if form.get(f"enabled_{key}") else 0
+        method = form.get(f"method_{key}", "email")
+        if method not in METHODS:
+            method = "email"
+        # Only IDs actually eligible right now are honoured — a person who's
+        # left or lost admin access since this list last loaded must not
+        # stay a silent recipient just because their checkbox was posted.
+        chosen_ids = {int(v) for v in form.getlist(f"recipients_{key}") if v.isdigit()} & eligible_ids
+
+        db.execute(
+            """INSERT INTO notification_setting (venue_id, notification_type, enabled, method)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(venue_id, notification_type) DO UPDATE SET
+               enabled = excluded.enabled, method = excluded.method""",
+            (venue_id, key, enabled, method),
+        )
+        # cur.lastrowid isn't reliable on the ON CONFLICT DO UPDATE path
+        # (only reflects a genuine INSERT) — query it explicitly instead.
+        setting_id = db.execute(
+            "SELECT id FROM notification_setting WHERE venue_id = ? AND notification_type = ?",
+            (venue_id, key),
+        ).fetchone()["id"]
+
+        db.execute("DELETE FROM notification_recipient WHERE notification_setting_id = ?", (setting_id,))
+        for person_id in chosen_ids:
+            db.execute(
+                "INSERT INTO notification_recipient (notification_setting_id, person_id) VALUES (?, ?)",
+                (setting_id, person_id),
+            )
+
+    db.commit()
+    flask.flash("Notification settings saved.")
+    return flask.redirect(flask.url_for("admin_config.notification_settings"))
 
 
 # ---------- Staff directory / onboarding invite / approval ----------
