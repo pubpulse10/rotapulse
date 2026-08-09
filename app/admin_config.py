@@ -529,6 +529,33 @@ def mark_left(membership_id):
     return flask.redirect(flask.url_for("admin_config.staff_list"))
 
 
+@admin_bp.route("/staff/<int:membership_id>/reinstate", methods=["POST"])
+@require_permission("app_admin", "rota_admin")
+def reinstate_staff(membership_id):
+    """Undoes mark_left — e.g. it was clicked by mistake. Restores both the
+    membership and their RotaPulse access straight back to active (not
+    whatever intermediate state, like 'invited', it might have been in
+    before) — reinstating means they're a working staff member again now,
+    able to log in and clock in immediately."""
+    db = get_db()
+    venue_id = flask.g.venue["id"]
+    cur = db.execute(
+        "UPDATE venue_membership SET status = 'active' WHERE id = ? AND venue_id = ? AND status = 'left'",
+        (membership_id, venue_id),
+    )
+    if cur.rowcount == 0:
+        flask.abort(404)
+    db.execute(
+        """UPDATE app_access SET status = 'active'
+           WHERE venue_membership_id = ? AND app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+        (membership_id,),
+    )
+    db.commit()
+    enforce_band(venue_id)
+    flask.flash("Staff member reinstated — they can log in and clock in again.")
+    return flask.redirect(flask.url_for("admin_config.staff_list"))
+
+
 @admin_bp.route("/staff/<int:membership_id>/erase", methods=["POST"])
 @require_permission("app_admin")
 def erase_staff(membership_id):

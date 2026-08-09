@@ -243,3 +243,84 @@ def test_staff_list_shows_left_once_membership_status_is_left(app, client, venue
     row = text[row_start : row_start + 400]
     assert "Left" in row
     assert "revoked" not in row.lower()  # the underlying access_status isn't shown raw in the table cell
+
+
+def test_reinstate_undoes_mark_left(app, client, venue):
+    """The exact real-world scenario: mark_left was clicked by mistake."""
+    login_as_pub(client, venue["pub_id"])
+    _person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Whoops")
+
+    client.post(f"/v/{venue['slug']}/admin/staff/{membership_id}/leave")
+    with app.app_context():
+        conn = db_module.get_db()
+        assert conn.execute(
+            "SELECT status FROM venue_membership WHERE id = ?", (membership_id,)
+        ).fetchone()["status"] == "left"
+
+    resp = client.post(f"/v/{venue['slug']}/admin/staff/{membership_id}/reinstate", follow_redirects=True)
+    assert resp.status_code == 200
+    assert b"Staff member reinstated" in resp.data
+
+    with app.app_context():
+        conn = db_module.get_db()
+        membership = conn.execute(
+            "SELECT status FROM venue_membership WHERE id = ?", (membership_id,)
+        ).fetchone()
+        access = conn.execute(
+            """SELECT status FROM app_access
+               WHERE venue_membership_id = ? AND app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+            (membership_id,),
+        ).fetchone()
+    assert membership["status"] == "active"
+    assert access["status"] == "active"
+
+
+def test_reinstate_shows_up_as_active_and_button_disappears(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    _person_id, membership_id, _email = create_active_staff(app, venue["id"], name="BackAgain")
+    client.post(f"/v/{venue['slug']}/admin/staff/{membership_id}/leave")
+    client.post(f"/v/{venue['slug']}/admin/staff/{membership_id}/reinstate")
+
+    resp = client.get(f"/v/{venue['slug']}/admin/staff")
+    text = resp.data.decode()
+    row_start = text.index("BackAgain")
+    row = text[row_start : row_start + 400]
+    assert "Active" in row
+    assert "Reinstate" not in row  # back to the Mark left button, not still offering Reinstate
+
+
+def test_reinstate_404s_for_someone_not_actually_left(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    _person_id, membership_id, _email = create_active_staff(app, venue["id"], name="NeverLeft")
+
+    resp = client.post(f"/v/{venue['slug']}/admin/staff/{membership_id}/reinstate")
+    assert resp.status_code == 404
+
+
+def test_reinstate_is_venue_scoped(app, client, venue):
+    """A second venue's membership_id must not be reinstateable through this
+    venue's session — same IDOR protection as the other staff routes."""
+    with app.app_context():
+        conn = db_module.get_db()
+        other_venue_cur = conn.execute(
+            "INSERT INTO venue (pub_id, name, slug) VALUES (999, 'Other Venue', 'othervenue')"
+        )
+        other_venue_id = other_venue_cur.lastrowid
+        conn.commit()
+    other_person_id, other_membership_id, _email = create_active_staff(
+        app, other_venue_id, name="OtherVenueStaff"
+    )
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute("UPDATE venue_membership SET status = 'left' WHERE id = ?", (other_membership_id,))
+        conn.commit()
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(f"/v/{venue['slug']}/admin/staff/{other_membership_id}/reinstate")
+    assert resp.status_code == 404
+
+    with app.app_context():
+        conn = db_module.get_db()
+        assert conn.execute(
+            "SELECT status FROM venue_membership WHERE id = ?", (other_membership_id,)
+        ).fetchone()["status"] == "left"  # unchanged

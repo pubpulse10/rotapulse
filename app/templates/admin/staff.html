@@ -32,6 +32,10 @@
               <button type="submit" class="link-button">Mark left</button>
             </form>
           {% else %}
+            <form method="post" action="{{ url_for('admin_config.reinstate_staff', membership_id=member['membership_id']) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="link-button">Reinstate</button>
+            </form>
             <form method="post" action="{{ url_for('admin_config.erase_staff', membership_id=member['membership_id']) }}"
                   onsubmit="return confirm('Erase this person\'s sensitive personal data? This cannot be undone.');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
