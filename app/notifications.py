@@ -21,10 +21,14 @@ from email.message import EmailMessage
 from app import config
 
 
-def send_email(to: str, subject: str, body: str) -> None:
+def send_email(to: str, subject: str, body: str) -> bool:
+    """Returns True if the message was sent (or dev-fallback-logged), False
+    if a real send was attempted and failed — callers that need to show the
+    admin whether a notification actually got there (e.g. invite delivery
+    status) can act on this instead of just trusting it silently worked."""
     if not config.MAIL_SERVER:
         print(f"[email:dev-fallback] To: {to} | Subject: {subject}\n{body}", flush=True, file=sys.stderr)
-        return
+        return True
 
     msg = EmailMessage()
     msg["From"] = config.MAIL_FROM or config.MAIL_USERNAME
@@ -38,12 +42,14 @@ def send_email(to: str, subject: str, body: str) -> None:
             if config.MAIL_USERNAME:
                 smtp.login(config.MAIL_USERNAME, config.MAIL_PASSWORD)
             smtp.send_message(msg)
+        return True
     except Exception:
         # A delivery failure (bad address, SMTP outage, etc.) must never crash
         # the caller's request — the same "log instead of send" fallback
         # philosophy as the unconfigured-credentials case above, just for the
         # send-attempt-failed case instead of the never-attempted case.
         print(f"[email:failed] To: {to} | Subject: {subject}\n{body}", flush=True, file=sys.stderr)
+        return False
 
 
 def _to_e164_uk(raw: str) -> str:
@@ -64,16 +70,19 @@ def _to_e164_uk(raw: str) -> str:
     return raw  # unrecognised shape — let Twilio's own validation reject it
 
 
-def send_sms(to: str, body: str) -> None:
+def send_sms(to: str, body: str) -> bool:
+    """Returns True if the message was sent (or dev-fallback-logged), False
+    if a real send was attempted and failed — see send_email's docstring."""
     if not (config.TWILIO_ACCOUNT_SID and config.TWILIO_AUTH_TOKEN and config.TWILIO_FROM_NUMBER):
         print(f"[sms:dev-fallback] To: {to}\n{body}", flush=True, file=sys.stderr)
-        return
+        return True
 
     from twilio.rest import Client
 
     client = Client(config.TWILIO_ACCOUNT_SID, config.TWILIO_AUTH_TOKEN)
     try:
         client.messages.create(to=_to_e164_uk(to), from_=config.TWILIO_FROM_NUMBER, body=body)
+        return True
     except Exception:
         # A delivery failure (bad number even after normalising, Twilio
         # outage, etc.) must never crash the caller's request — confirmed
@@ -82,3 +91,4 @@ def send_sms(to: str, body: str) -> None:
         # committed, leaving an admin looking at an error page for a record
         # that actually existed underneath it.
         print(f"[sms:failed] To: {to}\n{body}", flush=True, file=sys.stderr)
+        return False

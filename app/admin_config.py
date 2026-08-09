@@ -189,7 +189,7 @@ def staff_list():
                   venue_role.name AS role_name,
                   rota_staff_detail.hourly_pay_rate,
                   app_access.permission_level, app_access.status AS access_status,
-                  app_access.id AS access_id
+                  app_access.id AS access_id, app_access.invite_delivery_status
            FROM venue_membership
            JOIN person ON person.id = venue_membership.person_id
            LEFT JOIN venue_role ON venue_role.id = venue_membership.job_role_id
@@ -316,7 +316,7 @@ def create_staff():
     raw_token = secrets.token_urlsafe(32)
     expires_at = (datetime.now(timezone.utc) + timedelta(days=config.INVITE_TOKEN_EXPIRY_DAYS)).isoformat()
     app_id = get_app_id(db, "rotapulse")
-    db.execute(
+    access_cur = db.execute(
         """INSERT INTO app_access
            (venue_membership_id, app_id, permission_level, status, invite_method,
             invite_token_hash, invite_expires_at, invited_at)
@@ -325,22 +325,42 @@ def create_staff():
     )
     db.commit()
 
-    _send_invite_message(flask.g.venue, flask.g.slug, invite_method, email, mobile, raw_token)
+    delivery_status = _send_invite_message(flask.g.venue, flask.g.slug, invite_method, email, mobile, raw_token)
+    _record_delivery_status(db, access_cur.lastrowid, delivery_status)
 
-    flask.flash(f"Invited {name}.")
+    if delivery_status == "failed":
+        flask.flash(
+            f"Invited {name}, but the {invite_method} couldn't be delivered — "
+            "check their details and use Resend invite once fixed.", "error",
+        )
+    else:
+        flask.flash(f"Invited {name}.")
     return flask.redirect(flask.url_for("admin_config.staff_list"))
 
 
 def _send_invite_message(venue, slug, invite_method, email, mobile, raw_token):
+    """Returns 'sent', 'failed', or None (neither contact method was
+    actually usable — shouldn't happen given create_staff/resend_invite's
+    own validation, but handled rather than assumed)."""
     invite_url = flask.url_for("onboarding.accept", slug=slug, token=raw_token, _external=True)
     message = (
         f"You've been invited to {venue['name']}'s RotaPulse rota. "
         f"Complete your profile here (link expires in {config.INVITE_TOKEN_EXPIRY_DAYS} days): {invite_url}"
     )
     if invite_method == "sms" and mobile:
-        send_sms(mobile, message)
+        delivered = send_sms(mobile, message)
     elif email:
-        send_email(email, f"You've been invited to {venue['name']} on RotaPulse", message)
+        delivered = send_email(email, f"You've been invited to {venue['name']} on RotaPulse", message)
+    else:
+        return None
+    return "sent" if delivered else "failed"
+
+
+def _record_delivery_status(db, access_id, delivery_status):
+    if delivery_status is None:
+        return
+    db.execute("UPDATE app_access SET invite_delivery_status = ? WHERE id = ?", (delivery_status, access_id))
+    db.commit()
 
 
 @admin_bp.route("/staff/<int:access_id>/resend-invite", methods=["POST"])
@@ -370,15 +390,25 @@ def resend_invite(access_id):
     raw_token = secrets.token_urlsafe(32)
     expires_at = (datetime.now(timezone.utc) + timedelta(days=config.INVITE_TOKEN_EXPIRY_DAYS)).isoformat()
     db.execute(
-        """UPDATE app_access SET invite_token_hash = ?, invite_expires_at = ?, invited_at = datetime('now')
+        """UPDATE app_access SET invite_token_hash = ?, invite_expires_at = ?, invited_at = datetime('now'),
+           invite_delivery_status = NULL
            WHERE id = ?""",
         (_hash_token(raw_token), expires_at, access_id),
     )
     db.commit()
 
-    _send_invite_message(flask.g.venue, flask.g.slug, row["invite_method"], row["email"], row["mobile"], raw_token)
+    delivery_status = _send_invite_message(
+        flask.g.venue, flask.g.slug, row["invite_method"], row["email"], row["mobile"], raw_token
+    )
+    _record_delivery_status(db, access_id, delivery_status)
 
-    flask.flash(f"Invite resent to {row['name']}.")
+    if delivery_status == "failed":
+        flask.flash(
+            f"Resent to {row['name']}, but it still couldn't be delivered — "
+            "double-check their contact details.", "error",
+        )
+    else:
+        flask.flash(f"Invite resent to {row['name']}.")
     return flask.redirect(flask.url_for("admin_config.staff_list"))
 
 

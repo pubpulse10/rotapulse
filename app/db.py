@@ -345,6 +345,12 @@ def init_schema(conn=None):
         # added after rota_subscription already existed in production.
         _add_column_if_missing(conn, "rota_subscription", "current_period_end", "TEXT")
         _add_column_if_missing(conn, "person", "hub_person_id", "INTEGER")
+        # 'sent' | 'failed' | NULL (not yet attempted — pre-existing rows
+        # from before this column existed). Set whenever an invite/resend
+        # actually attempts delivery, so a silent failure (e.g. the SMS
+        # E.164-format bug) is visible on the Staff page instead of only in
+        # server logs the admin has no access to.
+        _add_column_if_missing(conn, "app_access", "invite_delivery_status", "TEXT")
         conn.commit()
     finally:
         if owns_conn:

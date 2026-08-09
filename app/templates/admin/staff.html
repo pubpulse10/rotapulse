@@ -11,7 +11,12 @@
         <td>{{ member['name'] }}</td>
         <td>{{ member['role_name'] or '—' }}</td>
         <td>{{ member['permission_level'] }}</td>
-        <td>{{ member['display_status'] }}</td>
+        <td>
+          {{ member['display_status'] }}
+          {% if member['access_status'] == 'invited' and member['invite_delivery_status'] == 'failed' %}
+            <span class="badge badge-over-target" title="The invite email/SMS couldn't be delivered — check their contact details, then Resend invite.">Delivery failed</span>
+          {% endif %}
+        </td>
         <td>£{{ '%.2f'|format(member['hourly_pay_rate'] or 0) }}</td>
         <td><a href="{{ url_for('admin_config.edit_staff', membership_id=member['membership_id']) }}">Edit</a></td>
         <td>
