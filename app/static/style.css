@@ -128,6 +128,10 @@ h2 { font-size: 1.2rem; }
   padding: 20px;
   margin: 16px 0;
   border: 1px solid var(--color-border);
+  /* Wide tables (rota grid, payroll, staff, turnover) get a horizontal
+     scrollbar of their own rather than squeezing every column unreadable
+     on a narrow phone screen — the page itself never scrolls sideways. */
+  overflow-x: auto;
 }
 .card.narrow { max-width: 420px; }
 
@@ -180,7 +184,14 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 
 /* ---------- Rota grid ---------- */
 
-.rota-table { table-layout: fixed; }
+.rota-table {
+  table-layout: fixed;
+  /* fixed layout needs an explicit width or narrow screens just crush all
+     8 columns (Staff + 7 days) into an unreadable jumble — 100px/column is
+     enough for the cost figure + day name + weather without wrapping, and
+     .panel's overflow-x:auto (above) makes the excess scrollable. */
+  min-width: 760px;
+}
 .rota-table th { background: var(--color-surface); position: sticky; top: 0; }
 .rota-cell {
   min-height: 64px;
@@ -287,3 +298,18 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 .staff-list-item .avatar { width: 36px; height: 36px; border-radius: 50%; }
 
 .day-list-item { padding: 12px; border: 1px solid var(--color-border); border-radius: var(--radius); margin-bottom: 10px; }
+
+/* ---------- Phone-width screens ---------- */
+@media (max-width: 640px) {
+  /* The 120px logo (sized to match the family header on desktop) is what
+     was overflowing straight off the edge of a phone screen — everything
+     else in the topbar was actually wrapping fine on its own. */
+  .logo-img { height: 44px; padding: 0 8px; }
+  .topbar { padding: 6px 12px; }
+  nav a, .admin-link, nav .link-button, .nav-dropdown-trigger {
+    font-size: 0.85rem;
+    margin: 0 6px;
+  }
+  .content, .flash-container { padding: 12px; }
+  .panel, .card { padding: 12px; }
+}
