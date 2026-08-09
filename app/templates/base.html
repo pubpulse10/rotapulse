@@ -21,12 +21,17 @@
     <a class="wordmark" href="{{ url_for('rota_grid.week') if (g.get('slug') and is_admin_tier) else (url_for('staff_portal.home') if g.get('slug') else url_for('venues.entry')) }}">
       <img src="{{ url_for('static', filename='logo.svg') }}?v={{ static_version('logo.svg') }}" alt="RotaPulse" class="logo-img">
     </a>
+    {% if g.get('venue') and g.get('permission_levels') %}
+      <button type="button" class="nav-toggle" aria-label="Menu" aria-expanded="false" aria-controls="site-nav">
+        <span class="nav-toggle-bars"></span>
+      </button>
+    {% endif %}
     {% if is_support_session %}
       <span class="admin-banner">Support view — read-only</span>
       <a href="{{ url_for('family_admin.venues') }}">Switch venue</a>
     {% endif %}
     {% if g.get('venue') and g.get('permission_levels') %}
-      <nav>
+      <nav id="site-nav">
         {% set active_section = nav_section() %}
         {% if 'app_admin' in g.permission_levels or 'rota_admin' in g.permission_levels or is_support_session %}
           <div class="nav-dropdown">
@@ -121,6 +126,7 @@
   </main>
 
   <script src="{{ url_for('static', filename='sw-register.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='nav.js') }}" defer></script>
   <script>
     // Click-to-toggle nav dropdowns (e.g. "Rota") — click, not hover, since
     // this app is used on a tablet where hover doesn't really exist.

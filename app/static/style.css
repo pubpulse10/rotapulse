@@ -299,6 +299,42 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 
 .day-list-item { padding: 12px; border: 1px solid var(--color-border); border-radius: var(--radius); margin-bottom: 10px; }
 
+/* ---------- Hamburger nav toggle (hidden until phone-width) ---------- */
+
+.nav-toggle {
+  display: none;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.nav-toggle-bars {
+  position: relative;
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: var(--color-text);
+  border-radius: 2px;
+}
+.nav-toggle-bars::before,
+.nav-toggle-bars::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 20px;
+  height: 2px;
+  background: var(--color-text);
+  border-radius: 2px;
+}
+.nav-toggle-bars::before { top: -6px; }
+.nav-toggle-bars::after { top: 6px; }
+
 /* ---------- Phone-width screens ---------- */
 @media (max-width: 640px) {
   /* The 120px logo (sized to match the family header on desktop) is what
@@ -306,10 +342,56 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
      else in the topbar was actually wrapping fine on its own. */
   .logo-img { height: 44px; padding: 0 8px; }
   .topbar { padding: 6px 12px; }
-  nav a, .admin-link, nav .link-button, .nav-dropdown-trigger {
-    font-size: 0.85rem;
-    margin: 0 6px;
-  }
   .content, .flash-container { padding: 12px; }
   .panel, .card { padding: 12px; }
+
+  .nav-toggle { display: inline-flex; }
+  nav {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
+    padding: 8px 0;
+    z-index: 20;
+  }
+  nav.nav-open { display: flex; }
+  nav a, nav .link-button {
+    padding: 14px 20px;
+    margin: 0;
+    border-left: 3px solid transparent;
+    font-size: 1rem;
+  }
+  nav a.active { border-left-color: var(--color-accent); background: var(--color-bg); text-decoration: none; font-weight: 600; }
+
+  /* The Rota dropdown becomes a plain full-width row too, its own submenu
+     opening inline below it rather than as a floating absolutely-positioned
+     panel (which would render off-canvas against the now-relatively-narrow
+     collapsed nav column). */
+  .nav-dropdown { display: block; margin: 0; width: 100%; }
+  .nav-dropdown-trigger {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 14px 20px;
+    border-left: 3px solid transparent;
+    font-size: 1rem;
+  }
+  .nav-dropdown-trigger.active { border-left-color: var(--color-accent); background: var(--color-bg); text-decoration: none; font-weight: 600; }
+  .nav-dropdown-menu {
+    position: static;
+    box-shadow: none;
+    border: none;
+    border-radius: 0;
+    background: var(--color-bg);
+    margin-top: 0;
+    min-width: 0;
+    padding: 4px 0 4px 20px;
+  }
 }
