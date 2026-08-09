@@ -47,4 +47,10 @@
     <button type="submit" class="btn-primary">Save settings</button>
   </form>
 </div>
+
+<div class="panel">
+  <h2>Roles</h2>
+  <p class="hint">Add, rename, or remove the job roles staff can be assigned to (e.g. Bar staff, Kitchen, Manager).</p>
+  <a class="btn-secondary" href="{{ url_for('admin_config.roles') }}">Manage roles</a>
+</div>
 {% endblock %}

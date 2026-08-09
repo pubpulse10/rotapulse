@@ -137,8 +137,21 @@ def rename_role(role_id):
 @require_permission("app_admin")
 def delete_role(role_id):
     db = get_db()
-    db.execute("DELETE FROM venue_role WHERE id = ? AND venue_id = ?", (role_id, flask.g.venue["id"]))
+    venue_id = flask.g.venue["id"]
+    in_use = db.execute(
+        "SELECT COUNT(*) AS n FROM venue_membership WHERE job_role_id = ? AND venue_id = ?",
+        (role_id, venue_id),
+    ).fetchone()["n"]
+    if in_use:
+        flask.flash(
+            f"Can't delete this role — {in_use} staff member(s) are still assigned to it. "
+            "Reassign them to a different role first.",
+            "error",
+        )
+        return flask.redirect(flask.url_for("admin_config.roles"))
+    db.execute("DELETE FROM venue_role WHERE id = ? AND venue_id = ?", (role_id, venue_id))
     db.commit()
+    flask.flash("Role deleted.")
     return flask.redirect(flask.url_for("admin_config.roles"))
 
 
