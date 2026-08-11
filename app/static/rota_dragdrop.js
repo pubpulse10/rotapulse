@@ -53,7 +53,36 @@
     drag.ghost = ghost;
   }
 
+  // Tears down whatever state a drag left behind, including releasing
+  // pointer capture. Needed both for normal cleanup and for the defensive
+  // call in onPointerDown below — if the OS ever swallows a gesture
+  // mid-drag (e.g. an edge-swipe-back gesture cancels it without ever
+  // delivering pointerup/pointercancel to the page), the captured chip
+  // would otherwise keep claiming pointer events forever, and on some
+  // browsers a later touch can be assigned that same now-stale pointerId,
+  // silently swallowing an unrelated tap elsewhere on the page (a plain
+  // click() or dispatched event doesn't go through real pointer capture,
+  // which is why this class of bug doesn't show up under synthetic testing
+  // — only a real, interrupted touch gesture triggers it).
+  function teardownDrag() {
+    if (!drag) return;
+    if (drag.longPressTimer) clearTimeout(drag.longPressTimer);
+    if (drag.moved) {
+      try { drag.chip.releasePointerCapture(drag.pointerId); } catch (err) {}
+    }
+    if (drag.ghost) drag.ghost.remove();
+    drag.chip.classList.remove("dragging-source");
+    document.querySelectorAll(".rota-cell.drop-target").forEach((el) => el.classList.remove("drop-target"));
+    drag = null;
+  }
+
   function onPointerDown(e) {
+    // A different pointerId arriving while `drag` is still set proves the
+    // previous gesture is over one way or another (browsers don't reuse an
+    // active pointerId for a second simultaneous touch) — clean it up now
+    // rather than risk it lingering indefinitely.
+    if (drag && drag.pointerId !== e.pointerId) teardownDrag();
+
     const chip = e.target.closest(".shift-chip");
     if (!chip || e.button === 2) return;
     drag = {
@@ -115,12 +144,7 @@
 
   function onPointerUp(e) {
     if (!drag || e.pointerId !== drag.pointerId) return;
-    if (drag.longPressTimer) clearTimeout(drag.longPressTimer);
     const { chip, moved, ghost } = drag;
-
-    if (ghost) ghost.remove();
-    chip.classList.remove("dragging-source");
-    document.querySelectorAll(".rota-cell.drop-target").forEach((el) => el.classList.remove("drop-target"));
 
     if (moved) {
       ghost && (ghost.style.display = "none");
@@ -130,7 +154,7 @@
         moveShift(chip.dataset.shiftId, targetCell.dataset.personId, targetCell.dataset.date);
       }
     }
-    drag = null;
+    teardownDrag();
   }
 
   function moveShift(shiftId, personId, shiftDate) {
@@ -158,6 +182,16 @@
   // never get a real drop, because the OS-level drag swallows the actual
   // release. This stops that at the source.
   document.addEventListener("dragstart", (e) => {
+    if (e.target.closest(".shift-chip")) e.preventDefault();
+  });
+
+  // Android's long-press context menu ("Open link in new tab" / "Copy link
+  // address") fires around the same hold duration as our own drag-arm
+  // timer, and pops up right over the cell you're trying to drop onto if
+  // left unsuppressed. iOS Safari's equivalent is blocked via
+  // -webkit-touch-callout: none on .shift-chip in style.css instead, since
+  // this event doesn't fire there.
+  document.addEventListener("contextmenu", (e) => {
     if (e.target.closest(".shift-chip")) e.preventDefault();
   });
 

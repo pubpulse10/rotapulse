@@ -260,6 +260,13 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
   -webkit-user-drag: none;
   user-select: none;
   -webkit-user-select: none;
+  /* Stops iOS Safari's own link-preview/callout popup from appearing during
+     the hold used to arm a drag (see rota_dragdrop.js) — without this it
+     pops up right over the cell you're trying to drop onto. Android's
+     equivalent long-press context menu is suppressed via the contextmenu
+     listener in rota_dragdrop.js instead, since -webkit-touch-callout is
+     Safari-only. */
+  -webkit-touch-callout: none;
 }
 .shift-chip .avatar { -webkit-user-drag: none; }
 .shift-chip.dragging-source { opacity: 0.35; }
