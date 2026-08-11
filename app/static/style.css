@@ -239,20 +239,22 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 .cell-leave { background: #f1eafb; color: var(--color-leave); }
 .cell-leave a::before { content: "🌴"; font-size: 1.3rem; }
 
-/* Draggable shift chips (app/static/rota_dragdrop.js). touch-action: pan-x
-   pan-y (not none) — a plain scroll swipe that happens to start on a chip
-   must still scroll the page/table natively; rota_dragdrop.js only takes
-   over once its own long-press gate has armed a drag, at which point
-   pointermove's preventDefault() is honoured because no native pan will
-   have started yet. Each chip gets its own background/border so a split
-   shift (two shifts for the same person on the same day, e.g. a morning
-   and an evening slot) reads as clearly separate entries instead of
-   blending into one line. */
+/* Draggable shift chips (app/static/rota_dragdrop.js). touch-action: none —
+   confirmed live that touch-action: pan-x pan-y does NOT reliably hand
+   control back once a hold arms a drag; WebKit can commit to a native pan
+   as soon as movement starts, and a preventDefault() arriving after the
+   long-press delay is too late to cancel it. With touch-action: none, the
+   browser never takes the gesture at all, and rota_dragdrop.js manually
+   forwards movement to the scroll containers itself until/unless a drag
+   arms — see the long comment at the top of that file. Each chip gets its
+   own background/border so a split shift (two shifts for the same person
+   on the same day, e.g. a morning and an evening slot) reads as clearly
+   separate entries instead of blending into one line. */
 .shift-chip {
   display: flex;
   align-items: center;
   cursor: grab;
-  touch-action: pan-x pan-y;
+  touch-action: none;
   padding: 3px 6px;
   border-radius: 6px;
   background: var(--color-surface);

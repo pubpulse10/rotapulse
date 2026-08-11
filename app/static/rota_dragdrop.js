@@ -15,14 +15,21 @@
 // short-movement tap navigates via data-href directly instead (see
 // onPointerUp) — only a genuine drag is treated as a move.
 //
-// Touch/pen requires a deliberate hold (LONG_PRESS_MS) before a drag
-// arms, and any movement past LONG_PRESS_CANCEL_PX before that hold
-// completes cancels the drag candidate outright, leaving the gesture to
-// fall through to the browser's own native scroll untouched (chips use
-// touch-action: pan-x pan-y in style.css for exactly this reason — an
-// ordinary scroll swipe that happens to start on a shift chip must not
-// hijack into moving it). Mouse has no such ambiguity with scrolling, so
-// it keeps the original small-distance-threshold, no-hold-needed feel.
+// Touch/pen requires a deliberate hold (LONG_PRESS_MS) before a drag arms.
+// Chips use touch-action: none (see style.css) so the browser never takes
+// over the gesture natively — a chip is the one thing on this page you
+// might deliberately hold still on, and once a real WebKit pan gesture has
+// started for a touch, a preventDefault() arriving after our hold delay is
+// too late to cancel it (this was tried with touch-action: pan-x pan-y
+// instead and confirmed live not to work: the page kept scrolling under a
+// held/dragged finger instead of the drag taking over). So instead, any
+// movement past LONG_PRESS_CANCEL_PX before the hold completes is treated
+// as "this was actually a scroll" and onPointerMove manually forwards that
+// movement to the relevant scroll containers itself (the .panel horizontal
+// scroller and the page's own vertical scroll) for the rest of the
+// gesture, since native scrolling is never available on this element at
+// all. Mouse has no such ambiguity with scrolling, so it keeps the
+// original small-distance-threshold, no-hold-needed feel.
 (function () {
   const DRAG_THRESHOLD_PX = 8;
   const LONG_PRESS_MS = 350;
@@ -90,6 +97,8 @@
       lastX: e.clientX,
       lastY: e.clientY,
       moved: false,
+      scrolling: false,
+      scrollContainer: chip.closest(".panel"), // horizontal scroller for the grid; vertical uses the page itself
       ghost: null,
       longPressTimer: null,
     };
@@ -104,8 +113,20 @@
 
   function onPointerMove(e) {
     if (!drag || e.pointerId !== drag.pointerId) return;
+    const prevX = drag.lastX, prevY = drag.lastY;
     drag.lastX = e.clientX;
     drag.lastY = e.clientY;
+
+    if (drag.scrolling) {
+      // Native scroll is never available here (touch-action: none), so
+      // this gesture has to keep driving the scroll containers by hand for
+      // as long as the finger is down.
+      e.preventDefault();
+      if (drag.scrollContainer) drag.scrollContainer.scrollLeft -= (e.clientX - prevX);
+      (document.scrollingElement || document.documentElement).scrollTop -= (e.clientY - prevY);
+      return;
+    }
+
     const dx = e.clientX - drag.startX;
     const dy = e.clientY - drag.startY;
     const dist = Math.hypot(dx, dy);
@@ -114,17 +135,20 @@
       if (drag.pointerType === "mouse") {
         if (dist > DRAG_THRESHOLD_PX) armDrag();
       } else if (dist > LONG_PRESS_CANCEL_PX) {
-        // Moved before the hold completed — this is a scroll, not a
-        // pick-up. Drop the drag candidate and let the swipe scroll
-        // normally; touch-action on the chip already permits that.
+        // Moved before the hold completed — this was a scroll attempt, not
+        // a pick-up. Switch to manually forwarding movement to the scroll
+        // containers for the rest of this gesture (see file header).
         clearTimeout(drag.longPressTimer);
-        drag = null;
+        drag.scrolling = true;
+        e.preventDefault();
+        if (drag.scrollContainer) drag.scrollContainer.scrollLeft -= (e.clientX - prevX);
+        (document.scrollingElement || document.documentElement).scrollTop -= (e.clientY - prevY);
         return;
       }
     }
 
-    if (drag && drag.moved) {
-      e.preventDefault(); // stop touch-scroll from fighting the drag, now that it's genuinely armed
+    if (drag.moved) {
+      e.preventDefault();
       drag.ghost.style.left = e.clientX + "px";
       drag.ghost.style.top = e.clientY + "px";
 
@@ -148,11 +172,12 @@
       if (targetCell) {
         moveShift(chip.dataset.shiftId, targetCell.dataset.personId, targetCell.dataset.date);
       }
-    } else if (chip.dataset.href) {
-      // A genuine short tap, not a drag — chips aren't real <a> elements
-      // (see the file header comment for why), so navigation on a plain
-      // tap has to happen explicitly here instead of falling through to a
-      // native link click.
+    } else if (!drag.scrolling && chip.dataset.href) {
+      // A genuine short, stationary tap — not a drag, and not a swipe that
+      // turned into manual scrolling either. Chips aren't real <a>
+      // elements (see the file header comment for why), so navigation on a
+      // plain tap has to happen explicitly here instead of falling through
+      // to a native link click.
       location.href = chip.dataset.href;
     }
     teardownDrag();
