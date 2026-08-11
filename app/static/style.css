@@ -199,7 +199,7 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
   vertical-align: top;
   cursor: pointer;
 }
-.rota-cell a {
+.rota-cell a, .rota-cell .rota-cell-fill {
   display: flex;
   align-items: center;
   justify-content: center;

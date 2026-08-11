@@ -6,9 +6,14 @@
 // inconsistent touch support. No new dependency, consistent with the rest
 // of the app's vanilla-JS, no-build-step approach.
 //
-// A short-movement tap still falls through to the cell's own <a> link
-// (open the edit panel) — only a genuine drag is treated as a move and
-// suppresses that click.
+// A chip is a plain <span data-href="...">, not a real <a> — a genuine
+// <a href> under a sustained hold triggers the browser's own native link
+// menu (iOS Safari's callout, or Chrome for iOS's own "Open in new tab"
+// popup), which pops up over the cell being dropped onto and can't be
+// suppressed from page JS/CSS at all, since it's rendered by the browser
+// chrome above the page before any touch event reaches this script. A
+// short-movement tap navigates via data-href directly instead (see
+// onPointerUp) — only a genuine drag is treated as a move.
 //
 // Touch/pen requires a deliberate hold (LONG_PRESS_MS) before a drag
 // arms, and any movement past LONG_PRESS_CANCEL_PX before that hold
@@ -30,19 +35,10 @@
 
   let drag = null;
 
-  function suppressNextClick(el) {
-    const handler = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    };
-    el.addEventListener("click", handler, { capture: true, once: true });
-  }
-
   function armDrag() {
     if (!drag || drag.moved) return;
     drag.moved = true;
     drag.chip.setPointerCapture(drag.pointerId);
-    if (drag.link) suppressNextClick(drag.link);
     drag.chip.classList.add("dragging-source");
 
     const ghost = drag.chip.cloneNode(true);
@@ -87,7 +83,6 @@
     if (!chip || e.button === 2) return;
     drag = {
       chip,
-      link: chip.closest("a"),
       pointerId: e.pointerId,
       pointerType: e.pointerType,
       startX: e.clientX,
@@ -153,9 +148,26 @@
       if (targetCell) {
         moveShift(chip.dataset.shiftId, targetCell.dataset.personId, targetCell.dataset.date);
       }
+    } else if (chip.dataset.href) {
+      // A genuine short tap, not a drag — chips aren't real <a> elements
+      // (see the file header comment for why), so navigation on a plain
+      // tap has to happen explicitly here instead of falling through to a
+      // native link click.
+      location.href = chip.dataset.href;
     }
     teardownDrag();
   }
+
+  // Chips are focusable (tabindex="0" in the template) but aren't real
+  // links, so Enter/Space needs to trigger navigation explicitly to keep
+  // keyboard access working.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const chip = e.target.closest(".shift-chip");
+    if (!chip || !chip.dataset.href) return;
+    e.preventDefault();
+    location.href = chip.dataset.href;
+  });
 
   function moveShift(shiftId, personId, shiftDate) {
     fetch(`shift/${shiftId}/move`, {
@@ -175,12 +187,12 @@
   }
 
   // Belt-and-suspenders on top of draggable="false"/-webkit-user-drag:none
-  // in the markup/CSS: a shift chip sits inside a link (and sometimes an
-  // avatar <img>), both natively draggable in most browsers. If the
-  // browser's own drag-and-drop ever engages instead of this pointer-based
-  // one, it hijacks the gesture — you'd see the ghost start following, then
-  // never get a real drop, because the OS-level drag swallows the actual
-  // release. This stops that at the source.
+  // in the markup/CSS: a shift chip's avatar <img> is natively draggable in
+  // most browsers by default. If the browser's own drag-and-drop ever
+  // engages instead of this pointer-based one, it hijacks the gesture —
+  // you'd see the ghost start following, then never get a real drop,
+  // because the OS-level drag swallows the actual release. This stops that
+  // at the source.
   document.addEventListener("dragstart", (e) => {
     if (e.target.closest(".shift-chip")) e.preventDefault();
   });

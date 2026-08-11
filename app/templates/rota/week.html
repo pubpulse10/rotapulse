@@ -67,18 +67,32 @@
             {% set d_str = date_strs[loop.index0] %}
             <td class="rota-cell cell-{{ 'shift' if cell['state']=='shift' else ('dayoff' if cell['state']=='day_off' else ('leave' if cell['state']=='leave' else 'empty')) }}"
                 data-person-id="{{ row['member']['person_id'] }}" data-date="{{ d_str }}">
-              <a href="{{ url_for('rota_grid.cell', person_id=row['member']['person_id'], on_date=d_str) }}" draggable="false">
-                {% if cell['state'] == 'shift' %}
+              {% if cell['state'] == 'shift' %}
+                {# Not a real <a> here deliberately — a shift-chip needs a
+                   long-press-to-drag gesture (rota_dragdrop.js), and a real
+                   <a href> under a sustained hold triggers the browser's own
+                   native link menu (iOS Safari's callout, or Chrome for
+                   iOS's own "Open in new tab" popup, which isn't suppressible
+                   from page JS/CSS at all since Chrome renders it above the
+                   page before any touch event reaches our code). Navigation
+                   on a genuine short tap is handled by rota_dragdrop.js via
+                   data-href instead. Empty cells below have no drag gesture
+                   to conflict with, so they keep a plain <a>. #}
+                <div class="rota-cell-fill">
                   {% for s in cell['shifts'] %}
-                    <span class="shift-chip" data-shift-id="{{ s['id'] }}">
+                    <span class="shift-chip" data-shift-id="{{ s['id'] }}"
+                          data-href="{{ url_for('rota_grid.cell', person_id=row['member']['person_id'], on_date=d_str) }}"
+                          tabindex="0" role="link">
                       {% if row['member']['avatar_url'] %}
                         <img class="avatar" src="{{ url_for('media.avatar', stored_filename=row['member']['avatar_url']) }}" alt="" draggable="false">
                       {% endif %}
                       {{ s['start_time'] }}-{{ s['end_time'] }}
                     </span>
                   {% endfor %}
-                {% endif %}
-              </a>
+                </div>
+              {% else %}
+                <a href="{{ url_for('rota_grid.cell', person_id=row['member']['person_id'], on_date=d_str) }}" draggable="false"></a>
+              {% endif %}
             </td>
           {% endfor %}
         </tr>
