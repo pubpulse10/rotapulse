@@ -33,7 +33,7 @@ body {
   flex-wrap: wrap;
 }
 
-.wordmark { display: flex; align-items: center; text-decoration: none; }
+.wordmark { display: flex; align-items: center; text-decoration: none; flex: 0 0 auto; }
 .logo-img {
   /* 120px matches PricePulse's and TaskPulse's logo height exactly — a
      consistent header across the PubPulse app family. The growth comes out
@@ -356,7 +356,12 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
   .content, .flash-container { padding: 12px; }
   .panel, .card { padding: 12px; }
 
-  .nav-toggle { display: inline-flex; }
+  /* margin-left: auto pins this to the far right explicitly, rather than
+     leaning on .topbar's justify-content: space-between to do it — with
+     wordmark now pinned to flex: 0 0 auto too, this removes any ambiguity
+     for a browser's flex implementation to get wrong about where either
+     element's actual box/hit-area ends. */
+  .nav-toggle { display: inline-flex; margin-left: auto; }
   nav {
     display: none;
     position: absolute;
