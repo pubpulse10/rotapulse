@@ -6,7 +6,7 @@
 // cached, purely so the app installs and launches like a native app.
 //
 // Bump CACHE_VERSION any time a precached file's contents change.
-const CACHE_VERSION = "rotapulse-static-v5";
+const CACHE_VERSION = "rotapulse-static-v6";
 
 const PRECACHE_URLS = [
   "/static/style.css",

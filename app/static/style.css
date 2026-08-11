@@ -238,17 +238,20 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 .cell-leave { background: #f1eafb; color: var(--color-leave); }
 .cell-leave a::before { content: "🌴"; font-size: 1.3rem; }
 
-/* Draggable shift chips (app/static/rota_dragdrop.js) — touch-action: none
-   stops the browser's own touch-scroll from fighting a drag gesture on a
-   tablet, which is essential for pointer-based drag to work on touch. Each
-   chip gets its own background/border so a split shift (two shifts for the
-   same person on the same day, e.g. a morning and an evening slot) reads
-   as clearly separate entries instead of blending into one line. */
+/* Draggable shift chips (app/static/rota_dragdrop.js). touch-action: pan-x
+   pan-y (not none) — a plain scroll swipe that happens to start on a chip
+   must still scroll the page/table natively; rota_dragdrop.js only takes
+   over once its own long-press gate has armed a drag, at which point
+   pointermove's preventDefault() is honoured because no native pan will
+   have started yet. Each chip gets its own background/border so a split
+   shift (two shifts for the same person on the same day, e.g. a morning
+   and an evening slot) reads as clearly separate entries instead of
+   blending into one line. */
 .shift-chip {
   display: flex;
   align-items: center;
   cursor: grab;
-  touch-action: none;
+  touch-action: pan-x pan-y;
   padding: 3px 6px;
   border-radius: 6px;
   background: var(--color-surface);
@@ -306,10 +309,11 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
   background: none;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   cursor: pointer;
+  touch-action: manipulation;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
