@@ -31,6 +31,7 @@ body {
   padding: 0 20px;
   border-bottom: 1px solid var(--color-border);
   flex-wrap: wrap;
+  position: relative; /* anchors .nav-toggle's absolute positioning on phone-width screens */
 }
 
 .wordmark { display: flex; align-items: center; text-decoration: none; flex: 0 0 auto; }
@@ -356,12 +357,15 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
   .content, .flash-container { padding: 12px; }
   .panel, .card { padding: 12px; }
 
-  /* margin-left: auto pins this to the far right explicitly, rather than
-     leaning on .topbar's justify-content: space-between to do it — with
-     wordmark now pinned to flex: 0 0 auto too, this removes any ambiguity
-     for a browser's flex implementation to get wrong about where either
-     element's actual box/hit-area ends. */
-  .nav-toggle { display: inline-flex; margin-left: auto; }
+  /* Taken clean out of the flex flow and pinned by absolute position
+     instead of relying on flex spacing (margin-left: auto / space-between)
+     to keep it clear of the logo — a real iPhone confirmed pressing this
+     button's on-screen position was actually hitting the logo link next to
+     it, a flex hit-testing quirk that didn't reproduce in this app's own
+     Chromium-based test environment. Absolute positioning removes any
+     ambiguity: this box is exactly here, full stop, regardless of how the
+     logo or anything else in the topbar is laid out. */
+  .nav-toggle { display: inline-flex; position: absolute; top: 6px; right: 12px; }
   nav {
     display: none;
     position: absolute;
