@@ -61,7 +61,7 @@ PRICEPULSE_LOGIN_URL = os.environ.get(
 # /internal/clock-status (see app/internal.py). Must be identical across
 # all family env vars.
 INTERNAL_API_SECRET = os.environ.get("INTERNAL_API_SECRET")
-PUBPULSE_HUB_URL = os.environ.get("PUBPULSE_HUB_URL", "https://pubpulse.co.uk")
+PUBPULSE_HUB_URL = os.environ.get("PUBPULSE_HUB_URL", "https://app.pubpulse.co.uk")
 
 # Free trial length (days) for a newly-provisioned venue before a
 # subscription is required — matches TaskPulse's own default/reasoning.
