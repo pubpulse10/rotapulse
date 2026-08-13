@@ -24,6 +24,7 @@ import flask
 from werkzeug.utils import secure_filename
 
 from app import storage
+from app.db import get_db
 from app.rota_auth import register_identity, require_permission
 from app.venue_scope import register_venue_scope
 
@@ -80,7 +81,51 @@ def delete_file(kind: str, stored_filename: str) -> None:
     storage.delete(stored_filename, directory)
 
 
+def _is_safe_stored_filename(stored_filename: str) -> bool:
+    """A stored media filename is always a single flat token (token_hex + '_' +
+    secure_filename — no directory part). Anything carrying a path separator, a
+    parent-dir hop, or a NUL is a traversal attempt, never a real key, so it's
+    rejected before any filesystem/R2 access. The route's <path:> converter
+    otherwise lets slashes through."""
+    return not (
+        not stored_filename
+        or "/" in stored_filename
+        or "\\" in stored_filename
+        or ".." in stored_filename
+        or "\x00" in stored_filename
+    )
+
+
+def _avatar_belongs_to_venue(stored_filename: str) -> bool:
+    """True only if this avatar filename is recorded against a person with a
+    membership at the current venue — stops venue A fetching venue B's avatar
+    by guessing its name (the filename itself carries no venue in it)."""
+    row = get_db().execute(
+        """SELECT 1 FROM person
+           JOIN venue_membership ON venue_membership.person_id = person.id
+           WHERE person.avatar_url = ? AND venue_membership.venue_id = ?
+           LIMIT 1""",
+        (stored_filename, flask.g.venue["id"]),
+    ).fetchone()
+    return row is not None
+
+
+def _attendance_photo_belongs_to_venue(stored_filename: str) -> bool:
+    """True only if this attendance-photo filename belongs to a shift at the
+    current venue — same cross-venue-read guard as avatars."""
+    row = get_db().execute(
+        """SELECT 1 FROM attendance
+           JOIN shift ON shift.id = attendance.shift_id
+           WHERE attendance.photo_url = ? AND shift.venue_id = ?
+           LIMIT 1""",
+        (stored_filename, flask.g.venue["id"]),
+    ).fetchone()
+    return row is not None
+
+
 def _serve(stored_filename: str, local_dir):
+    if not _is_safe_stored_filename(stored_filename):
+        flask.abort(404)
     data = storage.read_bytes(stored_filename, local_dir)
     if data is None:
         flask.abort(404)
@@ -99,6 +144,8 @@ def _serve(stored_filename: str, local_dir):
 @media_bp.route("/avatar/<path:stored_filename>")
 @require_permission("app_admin", "rota_admin", "staff")
 def avatar(stored_filename):
+    if not _avatar_belongs_to_venue(stored_filename):
+        flask.abort(404)
     return _serve(stored_filename, AVATAR_DIR)
 
 
@@ -107,4 +154,6 @@ def avatar(stored_filename):
 def attendance_photo(stored_filename):
     # Human-reviewed evidence for a supervisor, not a staff self-view (spec
     # §6.1) — deliberately excludes the plain 'staff' tier.
+    if not _attendance_photo_belongs_to_venue(stored_filename):
+        flask.abort(404)
     return _serve(stored_filename, ATTENDANCE_PHOTO_DIR)

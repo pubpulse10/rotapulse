@@ -81,6 +81,19 @@ def read_bytes(stored_filename: str, local_dir):
     """Return the file's bytes for serving to the browser, or None if it
     can't be found in either backend. R2 first, then a local-disk fallback
     for files not yet migrated."""
+    # Defence in depth against path traversal: a stored_filename is always a
+    # single flat token, so any path separator / parent-dir hop / NUL is bogus
+    # and must never reach the `Path(local_dir) / stored_filename` join below
+    # (nor the R2 key). Callers in app.media reject these too; this closes the
+    # sink itself.
+    if (
+        not stored_filename
+        or "/" in stored_filename
+        or "\\" in stored_filename
+        or ".." in stored_filename
+        or "\x00" in stored_filename
+    ):
+        return None
     if _ENABLED:
         data = _get_r2_bytes(stored_filename)
         if data is not None:

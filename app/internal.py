@@ -17,6 +17,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from app import config
+from app.billing import enforce_band
 from app.db import get_db, get_app_id
 from app.extensions import limiter
 from app.notification_settings import check_missed_clock_ins, check_missed_clock_outs
@@ -140,4 +141,11 @@ def access():
         "VALUES (?, ?, ?, ?, datetime('now'))",
         (membership_id, app_id, perm, aa_status))
     db.commit()
+    # Adding an active grant via the Hub can push the venue into a higher
+    # billing band, but the Hub path never went through the local
+    # invite/approve flow that calls enforce_band — so re-evaluate here too,
+    # otherwise staff added via the Hub would underpay. Safe no-op when the
+    # venue has no live Stripe subscription (still on trial / Stripe not
+    # configured), and only ever moves the band up (mirrors the local flow).
+    enforce_band(venue_id)
     return jsonify({"ok": True})
