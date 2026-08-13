@@ -229,14 +229,21 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 .cell-shift { background: #e7f0f6; }
 .cell-shift a { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px; }
 .cell-shift .avatar { width: 22px; height: 22px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
-.cell-dayoff { background: #ececec; color: var(--color-dayoff); }
+.cell-dayoff { background: transparent; }
+/* "Off" = a rostered non-working day (distinct from 🌴 leave/holiday). A quiet
+   grey pill rather than an emoji — reads as professional, not "asleep". */
 .cell-dayoff a::before {
-  content: "🛏";
-  font-size: 1.3rem;
+  content: "Off";
   display: inline-block;
-  transform: scale(1.7); /* visual-only enlargement — doesn't affect layout/cell height, unlike a bigger font-size would */
+  padding: 2px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #6b7280;
+  background: #e5e7eb;
+  border-radius: 999px;
 }
-.cell-leave { background: #f1eafb; color: var(--color-leave); }
+.cell-leave { background: transparent; color: var(--color-leave); }
 .cell-leave a::before { content: "🌴"; font-size: 1.3rem; }
 
 /* Draggable shift chips (app/static/rota_dragdrop.js). touch-action: none —
