@@ -76,6 +76,65 @@ def test_resend_invite_uses_original_invite_method(app, client, venue, monkeypat
     assert sms_sent[1][0] == "07796123456"
 
 
+def test_resend_invite_can_switch_from_email_to_sms(app, client, venue, monkeypatch):
+    """A person invited by email who never got it should be resendable by
+    SMS instead, not stuck permanently on their original choice."""
+    emails_sent, sms_sent = [], []
+    monkeypatch.setattr("app.admin_config.send_email", lambda *a, **k: emails_sent.append(a) or True)
+    monkeypatch.setattr("app.admin_config.send_sms", lambda *a, **k: sms_sent.append(a) or True)
+
+    login_as_pub(client, venue["pub_id"])
+    _create_invite(client, venue, mobile="07796123456")  # invite_method email, has both contacts
+    access_id = _get_access_id(app, venue)
+    assert len(emails_sent) == 1
+
+    resp = client.post(
+        f"/v/{venue['slug']}/admin/staff/{access_id}/resend-invite",
+        data={"invite_method": "sms"}, follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert b"Invite resent to New Starter." in resp.data
+    assert len(sms_sent) == 1
+    assert len(emails_sent) == 1  # not re-sent by email too
+
+    with app.app_context():
+        conn = db_module.get_db()
+        assert conn.execute(
+            "SELECT invite_method FROM app_access WHERE id = ?", (access_id,)
+        ).fetchone()["invite_method"] == "sms"
+
+
+def test_resend_invite_switch_to_sms_requires_a_mobile_on_file(app, client, venue, monkeypatch):
+    sms_sent = []
+    monkeypatch.setattr("app.admin_config.send_email", lambda *a, **k: True)
+    monkeypatch.setattr("app.admin_config.send_sms", lambda *a, **k: sms_sent.append(a) or True)
+
+    login_as_pub(client, venue["pub_id"])
+    _create_invite(client, venue)  # no mobile on file
+    access_id = _get_access_id(app, venue)
+
+    with app.app_context():
+        conn = db_module.get_db()
+        original_hash = conn.execute(
+            "SELECT invite_token_hash FROM app_access WHERE id = ?", (access_id,)
+        ).fetchone()["invite_token_hash"]
+
+    resp = client.post(
+        f"/v/{venue['slug']}/admin/staff/{access_id}/resend-invite",
+        data={"invite_method": "sms"}, follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert b"no mobile number on file" in resp.data
+    assert sms_sent == []
+
+    with app.app_context():
+        conn = db_module.get_db()
+        # Rejected before rotating the token, so the still-valid existing link isn't burned.
+        assert conn.execute(
+            "SELECT invite_token_hash FROM app_access WHERE id = ?", (access_id,)
+        ).fetchone()["invite_token_hash"] == original_hash
+
+
 def test_resend_invite_404s_once_already_accepted(app, client, venue, monkeypatch):
     monkeypatch.setattr("app.admin_config.send_email", lambda *a, **k: True)
     login_as_pub(client, venue["pub_id"])

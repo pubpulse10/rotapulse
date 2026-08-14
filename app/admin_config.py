@@ -286,7 +286,8 @@ def staff_list():
                   venue_role.name AS role_name,
                   rota_staff_detail.hourly_pay_rate,
                   app_access.permission_level, app_access.status AS access_status,
-                  app_access.id AS access_id, app_access.invite_delivery_status
+                  app_access.id AS access_id, app_access.invite_delivery_status,
+                  app_access.invite_method
            FROM venue_membership
            JOIN person ON person.id = venue_membership.person_id
            LEFT JOIN venue_role ON venue_role.id = venue_membership.job_role_id
@@ -497,7 +498,9 @@ def resend_invite(access_id):
     bug this was added alongside) rather than them just not having gotten
     round to it yet. Issues a fresh token + expiry rather than resending the
     old one, which also naturally invalidates whatever link they may already
-    have half-used."""
+    have half-used. Optionally switches delivery method (email<->sms) via
+    the submitted invite_method — the original invite might have used a
+    method that just doesn't work for this person."""
     db = get_db()
     venue_id = flask.g.venue["id"]
     row = db.execute(
@@ -513,18 +516,31 @@ def resend_invite(access_id):
     if row is None or row["status"] != "invited":
         flask.abort(404)
 
+    # Defaults to whatever method the invite already used, but lets the
+    # owner switch — e.g. an email that never arrived, resent by text
+    # instead — rather than being permanently locked to the original choice.
+    requested_method = flask.request.form.get("invite_method", row["invite_method"])
+    if requested_method not in ("email", "sms"):
+        flask.abort(400)
+    if requested_method == "sms" and not row["mobile"]:
+        flask.flash(f"{row['name']} has no mobile number on file — add one before resending by SMS.", "error")
+        return flask.redirect(flask.url_for("admin_config.staff_list"))
+    if requested_method == "email" and not row["email"]:
+        flask.flash(f"{row['name']} has no email on file — add one before resending by email.", "error")
+        return flask.redirect(flask.url_for("admin_config.staff_list"))
+
     raw_token = secrets.token_urlsafe(32)
     expires_at = (datetime.now(timezone.utc) + timedelta(days=config.INVITE_TOKEN_EXPIRY_DAYS)).isoformat()
     db.execute(
         """UPDATE app_access SET invite_token_hash = ?, invite_expires_at = ?, invited_at = datetime('now'),
-           invite_delivery_status = NULL
+           invite_delivery_status = NULL, invite_method = ?
            WHERE id = ?""",
-        (_hash_token(raw_token), expires_at, access_id),
+        (_hash_token(raw_token), expires_at, requested_method, access_id),
     )
     db.commit()
 
     delivery_status = _send_invite_message(
-        flask.g.venue, flask.g.slug, row["invite_method"], row["email"], row["mobile"], raw_token
+        flask.g.venue, flask.g.slug, requested_method, row["email"], row["mobile"], raw_token
     )
     _record_delivery_status(db, access_id, delivery_status)
 

@@ -21,8 +21,16 @@
         <td><a href="{{ url_for('admin_config.edit_staff', membership_id=member['membership_id']) }}">Edit</a></td>
         <td>
           {% if member['access_status'] == 'invited' %}
-            <form method="post" action="{{ url_for('admin_config.resend_invite', access_id=member['access_id']) }}">
+            <form method="post" action="{{ url_for('admin_config.resend_invite', access_id=member['access_id']) }}" class="inline-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              {% if member['email'] and member['mobile'] %}
+                <select name="invite_method">
+                  <option value="email" {{ 'selected' if member['invite_method'] == 'email' }}>Email</option>
+                  <option value="sms" {{ 'selected' if member['invite_method'] == 'sms' }}>SMS</option>
+                </select>
+              {% else %}
+                <input type="hidden" name="invite_method" value="{{ 'sms' if member['mobile'] else 'email' }}">
+              {% endif %}
               <button type="submit" class="link-button">Resend invite</button>
             </form>
           {% endif %}
