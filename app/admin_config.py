@@ -7,6 +7,7 @@ erasure) or app_admin+rota_admin (day-to-day staff directory) per spec
 
 import hashlib
 import json
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -49,6 +50,16 @@ def settings():
             flask.flash("Venue name is required.", "error")
             return flask.redirect(flask.url_for("admin_config.settings"))
 
+        # Free-text field, no format enforcement before this — a malformed
+        # saved value (e.g. "0101" instead of "01-01") crashed every staff
+        # member's leave page at that venue, since app/leave.py parses it
+        # assuming exactly MM-DD. Caught here now rather than relying only
+        # on that parser's defensive fallback.
+        holiday_year_start_date = form.get("holiday_year_start_date", "").strip() or None
+        if holiday_year_start_date and not re.fullmatch(r"(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])", holiday_year_start_date):
+            flask.flash("Holiday year start must be in MM-DD format, e.g. 01-01.", "error")
+            return flask.redirect(flask.url_for("admin_config.settings"))
+
         current_postcode = flask.g.venue["postcode"] or ""
         if postcode and postcode.upper() != current_postcode.upper():
             # Only re-geocode when the postcode actually changed — this is
@@ -81,7 +92,7 @@ def settings():
                 form.get("pay_period_anchor_date") or None,
                 form.get("pay_period_month_end_day", type=int),
                 form.get("pay_day_offset", type=int),
-                form.get("holiday_year_start_date") or None,
+                holiday_year_start_date,
                 form.get("target_staff_cost_percent", type=float),
                 venue_id,
             ),

@@ -70,6 +70,43 @@ def test_failed_geocode_keeps_previous_coordinates_but_still_saves_name(app, cli
         assert row["longitude"] == 1.3
 
 
+def test_holiday_year_start_date_rejects_malformed_value(app, client, venue):
+    """The real bug: a venue owner saved '0101' (no dash) here with no
+    validation, which later crashed every staff member's leave page (see
+    test_leave.py's malformed-year-start regression test)."""
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(
+        f"/v/{venue['slug']}/admin/settings",
+        data={"venue_name": "Test Venue", "holiday_year_start_date": "0101"},
+        follow_redirects=True,
+    )
+    assert b"MM-DD" in resp.data
+
+    with app.app_context():
+        conn = db_module.get_db()
+        row = conn.execute(
+            "SELECT holiday_year_start_date FROM venue_settings WHERE venue_id = ?", (venue["id"],)
+        ).fetchone()
+        assert row["holiday_year_start_date"] == "01-01"  # unchanged from conftest's seeded value
+
+
+def test_holiday_year_start_date_accepts_valid_mmdd(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(
+        f"/v/{venue['slug']}/admin/settings",
+        data={"venue_name": "Test Venue", "holiday_year_start_date": "04-06"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+
+    with app.app_context():
+        conn = db_module.get_db()
+        row = conn.execute(
+            "SELECT holiday_year_start_date FROM venue_settings WHERE venue_id = ?", (venue["id"],)
+        ).fetchone()
+        assert row["holiday_year_start_date"] == "04-06"
+
+
 def test_empty_venue_name_is_rejected(app, client, venue):
     login_as_pub(client, venue["pub_id"])
     resp = client.post(

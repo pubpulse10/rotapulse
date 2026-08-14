@@ -15,13 +15,23 @@ WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
 def _current_holiday_year_start(year_start_mmdd: str, today: date) -> date:
-    if not year_start_mmdd:
-        return date(today.year, 1, 1)
-    month, day = map(int, year_start_mmdd.split("-"))
-    candidate = date(today.year, month, day)
-    if candidate > today:
-        candidate = date(today.year - 1, month, day)
-    return candidate
+    """Falls back to 1 Jan for anything that isn't a clean MM-DD, rather
+    than raising — the settings field is free text with no format
+    enforcement before this, and a malformed saved value (e.g. "0101"
+    instead of "01-01", a real one found in production) must not take
+    down every staff member's leave page at that venue. Saving now
+    validates the format (see admin_config.py's settings route), but this
+    stays defensive for whatever's already stored from before that."""
+    if year_start_mmdd:
+        try:
+            month, day = map(int, year_start_mmdd.split("-"))
+            candidate = date(today.year, month, day)
+            if candidate > today:
+                candidate = date(today.year - 1, month, day)
+            return candidate
+        except (ValueError, TypeError):
+            pass
+    return date(today.year, 1, 1)
 
 
 def days_taken_count(db, person_id: int, availability_json: str, year_start_mmdd: str, today=None) -> int:

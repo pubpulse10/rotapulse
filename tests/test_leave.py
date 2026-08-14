@@ -43,6 +43,28 @@ def test_days_taken_only_counts_normal_working_days():
     assert count == 5
 
 
+def test_days_taken_falls_back_to_jan_1_for_a_malformed_year_start(app):
+    """Real production crash: a venue's holiday_year_start_date was saved as
+    '0101' (no dash) before save-time validation existed (see
+    admin_config.py's settings route) -- splitting that on '-' yields a
+    single value, and unpacking it into month, day used to raise
+    ValueError, taking down every staff member's leave page at that venue."""
+    class FakeConn:
+        def execute(self, _query, _params):
+            class Result:
+                def fetchall(self_inner):
+                    return [{"start_date": "2026-01-05", "end_date": "2026-01-11"}]
+
+            return Result()
+
+    availability = '{"mon":true,"tue":true,"wed":true,"thu":true,"fri":true,"sat":false,"sun":false}'
+    count = days_taken_count(
+        FakeConn(), person_id=1, availability_json=availability,
+        year_start_mmdd="0101", today=date(2026, 1, 12),
+    )
+    assert count == 5  # same result as a clean "01-01" would give, via the 1 Jan fallback
+
+
 def test_approved_leave_shows_palm_tree_on_grid(app, client, venue):
     person_id, _m, _e = create_active_staff(app, venue["id"])
     today = date.today().isoformat()
