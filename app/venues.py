@@ -59,13 +59,33 @@ def _unique_slug(db, base_slug):
 @venues_bp.route("/")
 def entry():
     pub_id = flask.session.get("pub_id")
-    if pub_id is None:
-        return _login_redirect()
+    if pub_id is not None:
+        venue = _venue_for_pub(get_db(), pub_id)
+        if venue:
+            return flask.redirect(flask.url_for("rota_grid.week", slug=venue["slug"]))
+        return flask.redirect(flask.url_for("venues.setup"))
 
-    venue = _venue_for_pub(get_db(), pub_id)
-    if venue:
-        return flask.redirect(flask.url_for("rota_grid.week", slug=venue["slug"]))
-    return flask.redirect(flask.url_for("venues.setup"))
+    # This is also the PWA's start_url — what a home-screen icon opens with
+    # no venue slug in the URL to work from. A staff member never has
+    # session['pub_id'] (they log in locally, not via PricePulse — see
+    # app/rota_login.py), so without this check they'd always fall through
+    # to the owner-only PricePulse login below, which is wrong for them and
+    # actively confusing (real report, 2026-08-13). If they're still
+    # logged in locally, resolve their venue directly from their own
+    # session instead.
+    person_id = flask.session.get("rotapulse_person_id")
+    if person_id is not None:
+        membership = get_db().execute(
+            """SELECT venue.slug FROM venue_membership
+               JOIN venue ON venue.id = venue_membership.venue_id
+               WHERE venue_membership.person_id = ? AND venue_membership.status = 'active'
+               ORDER BY venue_membership.id LIMIT 1""",
+            (person_id,),
+        ).fetchone()
+        if membership:
+            return flask.redirect(flask.url_for("staff_portal.home", slug=membership["slug"]))
+
+    return _login_redirect()
 
 
 @venues_bp.route("/setup", methods=["GET", "POST"])
