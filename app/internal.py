@@ -82,6 +82,35 @@ def run_shift_notifications():
     return jsonify({"missed_clock_in": missed_in, "missed_clock_out": missed_out})
 
 
+def _link_or_create_person(db, hub_person_id, name, email):
+    """Resolves the Hub-pushed person to a local row — by hub_person_id if
+    already linked, else by email against a person RotaPulse's OWN invite
+    flow (app/admin_config.py::create_staff) already created locally with
+    no hub_person_id at all. Without the email fallback, inviting the same
+    real human through both paths would create two disconnected person
+    records instead of recognising them as one — confirmed possible
+    2026-08-14 since both invite paths are live simultaneously with no
+    reconciliation. Only matches a still-unlinked person (hub_person_id IS
+    NULL), so this can never steal/overwrite a different person's existing
+    Hub link."""
+    person = db.execute("SELECT id FROM person WHERE hub_person_id = ?", (hub_person_id,)).fetchone()
+    if person is not None:
+        return person["id"]
+
+    if email:
+        person = db.execute(
+            "SELECT id FROM person WHERE hub_person_id IS NULL AND email = ?", (email,)
+        ).fetchone()
+        if person is not None:
+            db.execute("UPDATE person SET hub_person_id = ? WHERE id = ?", (hub_person_id, person["id"]))
+            return person["id"]
+
+    cur = db.execute(
+        "INSERT INTO person (name, email, hub_person_id) VALUES (?, ?, ?)", (name, email, hub_person_id)
+    )
+    return cur.lastrowid
+
+
 @internal_bp.route("/access", methods=["POST"])
 @limiter.limit("60 per minute")
 def access():
@@ -90,7 +119,11 @@ def access():
     active venue_membership + one app_access at the mapped level. Hub
     'manager' -> rota_admin, 'staff' -> staff. status 'inactive' -> app_access
     'revoked' (locked out, history kept). This runs alongside RotaPulse's own
-    (now dormant) invite/login system — retired in Phase 4."""
+    invite/login system (app/rota_login.py, app/admin_config.py) — despite
+    once being described as "dormant" here, it's still fully live and is
+    genuinely how staff get invited today; the two were never reconciled.
+    See _link_or_create_person for how that's kept from producing duplicate
+    person records for the same human."""
     if not _authorized():
         return jsonify({"error": "unauthorized"}), 401
 
@@ -106,19 +139,17 @@ def access():
         return jsonify({"ok": True})   # no venue yet -> nothing to attach to
     venue_id = venue["id"]
     name = data.get("name") or ""
-    email = data.get("email") or ""
+    # Lowercased to match app/admin_config.py::create_staff's own convention
+    # (email = form.get("email", "").strip().lower() or None) — otherwise a
+    # case difference between the two invite paths would defeat the
+    # email-reconciliation match in _link_or_create_person below.
+    email = (data.get("email") or "").strip().lower()
     perm = "rota_admin" if data.get("level") == "manager" else "staff"
     aa_status = "active" if data.get("status") == "active" else "revoked"
 
-    # Person keyed by hub_person_id; pub_id stays NULL (that's owner-only).
-    person = db.execute("SELECT id FROM person WHERE hub_person_id = ?", (hub_person_id,)).fetchone()
-    if person is None:
-        cur = db.execute("INSERT INTO person (name, email, hub_person_id) VALUES (?, ?, ?)",
-                         (name, email, hub_person_id))
-        person_id = cur.lastrowid
-    else:
-        person_id = person["id"]
-        db.execute("UPDATE person SET name = ?, email = ? WHERE id = ?", (name, email, person_id))
+    # pub_id stays NULL on this person row (that's owner-only).
+    person_id = _link_or_create_person(db, hub_person_id, name, email)
+    db.execute("UPDATE person SET name = ?, email = ? WHERE id = ?", (name, email, person_id))
 
     membership = db.execute(
         "SELECT id FROM venue_membership WHERE person_id = ? AND venue_id = ?",
