@@ -8,7 +8,7 @@ erasure) or app_admin+rota_admin (day-to-day staff directory) per spec
 import hashlib
 import json
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import flask
 
@@ -17,7 +17,6 @@ from app.billing import enforce_band
 from app.consent import erase_person_sensitive_data
 from app.db import get_app_id, get_db
 from app.geocoding import geocode_postcode
-from app.leave import normalize_holiday_year_start
 from app.notification_settings import METHODS, NOTIFICATION_TYPES
 from app.notifications import send_email, send_sms
 from app.rota_auth import register_identity, require_permission
@@ -35,6 +34,27 @@ def _hash_token(raw_token: str) -> str:
 
 # ---------- Venue settings (app_admin only) ----------
 
+MONTHS = [
+    (1, "January"), (2, "February"), (3, "March"), (4, "April"),
+    (5, "May"), (6, "June"), (7, "July"), (8, "August"),
+    (9, "September"), (10, "October"), (11, "November"), (12, "December"),
+]
+
+
+def _parse_stored_holiday_start(value):
+    """Stored internally as MM-DD (matches app/leave.py's parser) — this
+    just recovers (day, month) ints to pre-select the settings form's two
+    dropdowns. Defensive against any leftover malformed value from before
+    the settings form validated its input, rather than crashing the
+    settings page itself."""
+    if not value:
+        return None, None
+    try:
+        month_s, day_s = value.split("-")
+        return int(day_s), int(month_s)
+    except (ValueError, AttributeError):
+        return None, None
+
 
 @admin_bp.route("/settings", methods=["GET", "POST"])
 @require_permission("app_admin")
@@ -50,22 +70,26 @@ def settings():
             flask.flash("Venue name is required.", "error")
             return flask.redirect(flask.url_for("admin_config.settings"))
 
-        # Free-text field, no format enforcement before this — a malformed
-        # saved value (e.g. "0101" instead of "01-01") crashed every staff
-        # member's leave page at that venue, since app/leave.py parses it
-        # assuming exactly MM-DD. Normalized here (accepts "0101", "01/01",
-        # "1-1", etc. — see normalize_holiday_year_start) rather than
-        # forcing the landlord to type an exact dash-separated format.
-        holiday_year_start_raw = form.get("holiday_year_start_date", "").strip()
-        holiday_year_start_date = None
-        if holiday_year_start_raw:
-            holiday_year_start_date = normalize_holiday_year_start(holiday_year_start_raw)
-            if holiday_year_start_date is None:
-                flask.flash(
-                    "Holiday year start isn't a day and month we recognise — try e.g. 01-01 or 0101 for 1 January.",
-                    "error",
-                )
+        # Day/month dropdowns, not free text — a previous free-text version
+        # of this field let a malformed value ("0101" instead of "01-01")
+        # get saved with no validation at all, which crashed every staff
+        # member's leave page at that venue (app/leave.py's parser assumes
+        # exactly MM-DD). Dropdowns make an ambiguous or malformed value
+        # structurally impossible rather than needing to detect one.
+        holiday_start_day = form.get("holiday_year_start_day", type=int)
+        holiday_start_month = form.get("holiday_year_start_month", type=int)
+        if holiday_start_day and holiday_start_month:
+            try:
+                date(2024, holiday_start_month, holiday_start_day)  # 2024 is a leap year, validates 29 Feb too
+            except ValueError:
+                flask.flash("That's not a real day and month.", "error")
                 return flask.redirect(flask.url_for("admin_config.settings"))
+            holiday_year_start_date = f"{holiday_start_month:02d}-{holiday_start_day:02d}"
+        elif holiday_start_day or holiday_start_month:
+            flask.flash("Choose both a day and a month for the holiday year start, or leave both blank.", "error")
+            return flask.redirect(flask.url_for("admin_config.settings"))
+        else:
+            holiday_year_start_date = None
 
         current_postcode = flask.g.venue["postcode"] or ""
         if postcode and postcode.upper() != current_postcode.upper():
@@ -109,7 +133,11 @@ def settings():
         return flask.redirect(flask.url_for("admin_config.settings"))
 
     row = db.execute("SELECT * FROM venue_settings WHERE venue_id = ?", (venue_id,)).fetchone()
-    return flask.render_template("admin/settings.html", venue=flask.g.venue, settings=row)
+    current_day, current_month = _parse_stored_holiday_start(row["holiday_year_start_date"] if row else None)
+    return flask.render_template(
+        "admin/settings.html", venue=flask.g.venue, settings=row, MONTHS=MONTHS,
+        holiday_year_start_day=current_day, holiday_year_start_month=current_month,
+    )
 
 
 # ---------- Roles (app_admin only, spec §5.2) ----------

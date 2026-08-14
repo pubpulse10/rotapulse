@@ -1,26 +1,8 @@
 from datetime import date, timedelta
 
 from app import db as db_module
-from app.leave import days_taken_count, normalize_holiday_year_start
+from app.leave import days_taken_count
 from tests.conftest import create_active_staff, login_as_person, login_as_pub
-
-
-def test_normalize_holiday_year_start_accepts_common_formats():
-    assert normalize_holiday_year_start("01-01") == "01-01"
-    assert normalize_holiday_year_start("0101") == "01-01"
-    assert normalize_holiday_year_start("01/01") == "01-01"
-    assert normalize_holiday_year_start("01.01") == "01-01"
-    assert normalize_holiday_year_start("1 1") == "01-01"
-    assert normalize_holiday_year_start("4-6") == "04-06"
-    assert normalize_holiday_year_start("02-29") == "02-29"  # validated against a leap year
-
-
-def test_normalize_holiday_year_start_rejects_ambiguous_and_invalid_input():
-    assert normalize_holiday_year_start("") is None
-    assert normalize_holiday_year_start("101") is None  # ambiguous: 1st-01 or 10th-1?
-    assert normalize_holiday_year_start("not a date") is None
-    assert normalize_holiday_year_start("13-01") is None  # no month 13
-    assert normalize_holiday_year_start("02-30") is None  # no 30 Feb
 
 
 def test_staff_can_request_leave_and_admin_can_approve(app, client, venue):

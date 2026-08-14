@@ -70,14 +70,38 @@ def test_failed_geocode_keeps_previous_coordinates_but_still_saves_name(app, cli
         assert row["longitude"] == 1.3
 
 
-def test_holiday_year_start_date_rejects_unparseable_value(app, client, venue):
+def test_holiday_year_start_day_month_dropdowns_save_correctly(app, client, venue):
+    """The field was originally free text expecting an exact 'MM-DD' the
+    landlord had to remember to type, including a literal dash — a real
+    saved value of '0101' (no dash) crashed every staff member's leave page
+    at that venue (see test_leave.py). Two validated dropdowns make a
+    malformed value structurally impossible instead of needing to detect
+    one, and read in UK day-then-month order rather than the internal
+    storage convention."""
     login_as_pub(client, venue["pub_id"])
     resp = client.post(
         f"/v/{venue['slug']}/admin/settings",
-        data={"venue_name": "Test Venue", "holiday_year_start_date": "not a date"},
+        data={"venue_name": "Test Venue", "holiday_year_start_day": "6", "holiday_year_start_month": "4"},
         follow_redirects=True,
     )
-    assert b"day and month" in resp.data
+    assert resp.status_code == 200
+
+    with app.app_context():
+        conn = db_module.get_db()
+        row = conn.execute(
+            "SELECT holiday_year_start_date FROM venue_settings WHERE venue_id = ?", (venue["id"],)
+        ).fetchone()
+        assert row["holiday_year_start_date"] == "04-06"  # stored MM-DD; 6 April as entered day-then-month
+
+
+def test_holiday_year_start_rejects_an_impossible_day_month_combo(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(
+        f"/v/{venue['slug']}/admin/settings",
+        data={"venue_name": "Test Venue", "holiday_year_start_day": "30", "holiday_year_start_month": "2"},
+        follow_redirects=True,
+    )
+    assert b"not a real day and month" in resp.data
 
     with app.app_context():
         conn = db_module.get_db()
@@ -87,16 +111,28 @@ def test_holiday_year_start_date_rejects_unparseable_value(app, client, venue):
         assert row["holiday_year_start_date"] == "01-01"  # unchanged from conftest's seeded value
 
 
-def test_holiday_year_start_date_is_normalized_on_save(app, client, venue):
-    """The real bug: a venue owner saved '0101' (no dash) here with no
-    validation, which later crashed every staff member's leave page (see
-    test_leave.py's malformed-year-start regression test). Now normalized
-    to the canonical MM-DD rather than either crashing or being rejected
-    outright — the landlord shouldn't have to remember an exact format."""
+def test_holiday_year_start_requires_both_day_and_month_together(app, client, venue):
     login_as_pub(client, venue["pub_id"])
     resp = client.post(
         f"/v/{venue['slug']}/admin/settings",
-        data={"venue_name": "Test Venue", "holiday_year_start_date": "0101"},
+        data={"venue_name": "Test Venue", "holiday_year_start_day": "6"},  # month left blank
+        follow_redirects=True,
+    )
+    assert b"both a day and a month" in resp.data
+
+    with app.app_context():
+        conn = db_module.get_db()
+        row = conn.execute(
+            "SELECT holiday_year_start_date FROM venue_settings WHERE venue_id = ?", (venue["id"],)
+        ).fetchone()
+        assert row["holiday_year_start_date"] == "01-01"  # unchanged
+
+
+def test_holiday_year_start_can_be_cleared(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(
+        f"/v/{venue['slug']}/admin/settings",
+        data={"venue_name": "Test Venue"},  # both day and month left blank
         follow_redirects=True,
     )
     assert resp.status_code == 200
@@ -106,24 +142,26 @@ def test_holiday_year_start_date_is_normalized_on_save(app, client, venue):
         row = conn.execute(
             "SELECT holiday_year_start_date FROM venue_settings WHERE venue_id = ?", (venue["id"],)
         ).fetchone()
-        assert row["holiday_year_start_date"] == "01-01"
+        assert row["holiday_year_start_date"] is None
 
 
-def test_holiday_year_start_date_accepts_slash_and_single_digits(app, client, venue):
+def test_settings_page_preselects_the_stored_day_and_month(app, client, venue):
+    """Stored internally as '04-06' (MM-DD) — the day dropdown should show
+    6 selected and the month dropdown April, not the raw stored order."""
     login_as_pub(client, venue["pub_id"])
-    resp = client.post(
-        f"/v/{venue['slug']}/admin/settings",
-        data={"venue_name": "Test Venue", "holiday_year_start_date": "4/6"},
-        follow_redirects=True,
-    )
-    assert resp.status_code == 200
-
     with app.app_context():
         conn = db_module.get_db()
-        row = conn.execute(
-            "SELECT holiday_year_start_date FROM venue_settings WHERE venue_id = ?", (venue["id"],)
-        ).fetchone()
-        assert row["holiday_year_start_date"] == "04-06"
+        conn.execute(
+            "UPDATE venue_settings SET holiday_year_start_date = '04-06' WHERE venue_id = ?", (venue["id"],)
+        )
+        conn.commit()
+
+    resp = client.get(f"/v/{venue['slug']}/admin/settings")
+    html = resp.data.decode()
+    day_select = html.split('name="holiday_year_start_day"')[1].split("</select>")[0]
+    month_select = html.split('name="holiday_year_start_month"')[1].split("</select>")[0]
+    assert '<option value="6" selected' in day_select
+    assert '<option value="4" selected' in month_select
 
 
 def test_empty_venue_name_is_rejected(app, client, venue):
