@@ -70,17 +70,14 @@ def test_failed_geocode_keeps_previous_coordinates_but_still_saves_name(app, cli
         assert row["longitude"] == 1.3
 
 
-def test_holiday_year_start_date_rejects_malformed_value(app, client, venue):
-    """The real bug: a venue owner saved '0101' (no dash) here with no
-    validation, which later crashed every staff member's leave page (see
-    test_leave.py's malformed-year-start regression test)."""
+def test_holiday_year_start_date_rejects_unparseable_value(app, client, venue):
     login_as_pub(client, venue["pub_id"])
     resp = client.post(
         f"/v/{venue['slug']}/admin/settings",
-        data={"venue_name": "Test Venue", "holiday_year_start_date": "0101"},
+        data={"venue_name": "Test Venue", "holiday_year_start_date": "not a date"},
         follow_redirects=True,
     )
-    assert b"MM-DD" in resp.data
+    assert b"day and month" in resp.data
 
     with app.app_context():
         conn = db_module.get_db()
@@ -90,11 +87,33 @@ def test_holiday_year_start_date_rejects_malformed_value(app, client, venue):
         assert row["holiday_year_start_date"] == "01-01"  # unchanged from conftest's seeded value
 
 
-def test_holiday_year_start_date_accepts_valid_mmdd(app, client, venue):
+def test_holiday_year_start_date_is_normalized_on_save(app, client, venue):
+    """The real bug: a venue owner saved '0101' (no dash) here with no
+    validation, which later crashed every staff member's leave page (see
+    test_leave.py's malformed-year-start regression test). Now normalized
+    to the canonical MM-DD rather than either crashing or being rejected
+    outright — the landlord shouldn't have to remember an exact format."""
     login_as_pub(client, venue["pub_id"])
     resp = client.post(
         f"/v/{venue['slug']}/admin/settings",
-        data={"venue_name": "Test Venue", "holiday_year_start_date": "04-06"},
+        data={"venue_name": "Test Venue", "holiday_year_start_date": "0101"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+
+    with app.app_context():
+        conn = db_module.get_db()
+        row = conn.execute(
+            "SELECT holiday_year_start_date FROM venue_settings WHERE venue_id = ?", (venue["id"],)
+        ).fetchone()
+        assert row["holiday_year_start_date"] == "01-01"
+
+
+def test_holiday_year_start_date_accepts_slash_and_single_digits(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(
+        f"/v/{venue['slug']}/admin/settings",
+        data={"venue_name": "Test Venue", "holiday_year_start_date": "4/6"},
         follow_redirects=True,
     )
     assert resp.status_code == 200

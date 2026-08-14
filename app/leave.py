@@ -9,9 +9,39 @@ fixed calendar year) — mirrors the pay-period settings' own pattern.
 """
 
 import json
+import re
 from datetime import date, timedelta
 
 WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+_SEPARATED = re.compile(r"\d{1,2}[-/. ]\d{1,2}")
+
+
+def normalize_holiday_year_start(raw: str) -> str | None:
+    """Best-effort parse of a day/month entry into the canonical MM-DD this
+    module stores and expects — landlords shouldn't have to remember to
+    type a literal dash. Accepts '01-01', '01/01', '01.01', '01 01', '1-1',
+    and plain 4-digit MM-DD like '0101'. A bare 3-digit run (e.g. '101') is
+    deliberately NOT guessed at — it's genuinely ambiguous between
+    "1st, 01" and "10th, 1" depending which side is truncated, and getting
+    that silently wrong is worse than asking for another attempt. Returns
+    None if it can't be confidently parsed as a real month/day.
+    """
+    if not raw:
+        return None
+    raw = raw.strip()
+    if _SEPARATED.fullmatch(raw):
+        month_s, day_s = re.split(r"[-/. ]", raw)
+    elif re.fullmatch(r"\d{4}", raw):
+        month_s, day_s = raw[:2], raw[2:]
+    else:
+        return None
+    try:
+        month, day = int(month_s), int(day_s)
+        date(2024, month, day)  # 2024 is a leap year, so 29 Feb validates too
+    except ValueError:
+        return None
+    return f"{month:02d}-{day:02d}"
 
 
 def _current_holiday_year_start(year_start_mmdd: str, today: date) -> date:

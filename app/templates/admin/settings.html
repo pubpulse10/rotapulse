@@ -36,11 +36,10 @@
     <input type="number" id="pay_day_offset" name="pay_day_offset" min="0"
            value="{{ settings['pay_day_offset'] if settings else '' }}">
 
-    <label for="holiday_year_start_date">Holiday year start — month and day, with a dash (e.g. 01-01 for 1 January)</label>
-    <input type="text" id="holiday_year_start_date" name="holiday_year_start_date" placeholder="01-01"
-           pattern="(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])"
-           title="Month and day as two-digit numbers separated by a dash, e.g. 01-01 for 1 January or 04-06 for 6 April"
+    <label for="holiday_year_start_date">Holiday year start — the month and day it resets each year (e.g. 1 January)</label>
+    <input type="text" id="holiday_year_start_date" name="holiday_year_start_date" placeholder="e.g. 01-01, 0101, or 1/1"
            value="{{ settings['holiday_year_start_date'] if settings else '' }}">
+    <p class="hint">Type it however's natural — we'll format it for you.</p>
 
     <label for="target_staff_cost_percent">Target staff cost %</label>
     <input type="number" step="0.1" id="target_staff_cost_percent" name="target_staff_cost_percent"

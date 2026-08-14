@@ -7,7 +7,6 @@ erasure) or app_admin+rota_admin (day-to-day staff directory) per spec
 
 import hashlib
 import json
-import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -18,6 +17,7 @@ from app.billing import enforce_band
 from app.consent import erase_person_sensitive_data
 from app.db import get_app_id, get_db
 from app.geocoding import geocode_postcode
+from app.leave import normalize_holiday_year_start
 from app.notification_settings import METHODS, NOTIFICATION_TYPES
 from app.notifications import send_email, send_sms
 from app.rota_auth import register_identity, require_permission
@@ -53,12 +53,19 @@ def settings():
         # Free-text field, no format enforcement before this — a malformed
         # saved value (e.g. "0101" instead of "01-01") crashed every staff
         # member's leave page at that venue, since app/leave.py parses it
-        # assuming exactly MM-DD. Caught here now rather than relying only
-        # on that parser's defensive fallback.
-        holiday_year_start_date = form.get("holiday_year_start_date", "").strip() or None
-        if holiday_year_start_date and not re.fullmatch(r"(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])", holiday_year_start_date):
-            flask.flash("Holiday year start must be in MM-DD format, e.g. 01-01.", "error")
-            return flask.redirect(flask.url_for("admin_config.settings"))
+        # assuming exactly MM-DD. Normalized here (accepts "0101", "01/01",
+        # "1-1", etc. — see normalize_holiday_year_start) rather than
+        # forcing the landlord to type an exact dash-separated format.
+        holiday_year_start_raw = form.get("holiday_year_start_date", "").strip()
+        holiday_year_start_date = None
+        if holiday_year_start_raw:
+            holiday_year_start_date = normalize_holiday_year_start(holiday_year_start_raw)
+            if holiday_year_start_date is None:
+                flask.flash(
+                    "Holiday year start isn't a day and month we recognise — try e.g. 01-01 or 0101 for 1 January.",
+                    "error",
+                )
+                return flask.redirect(flask.url_for("admin_config.settings"))
 
         current_postcode = flask.g.venue["postcode"] or ""
         if postcode and postcode.upper() != current_postcode.upper():
