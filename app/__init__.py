@@ -121,6 +121,16 @@ def create_app():
         404 and fall back to a generic icon."""
         return app.send_static_file("icons/favicon.ico")
 
+    @app.route("/robots.txt")
+    def robots_txt():
+        """Search engines should index the marketing site at
+        www.pubpulse.co.uk only — never this application host. Served from a
+        route rather than a static file so it works identically on Render
+        regardless of how static assets are mounted."""
+        return app.response_class(
+            "User-agent: *\nDisallow: /\n", mimetype="text/plain"
+        )
+
     # Server-to-server only (bearer-secret authed, no session/CSRF token) —
     # exempted the same way the Stripe webhook is below.
     csrf.exempt(internal_bp)
@@ -158,6 +168,10 @@ def create_app():
     def set_security_headers(resp):
         # Baseline hardening headers. setdefault() so a view that sets its own
         # header (e.g. the service worker above) is never overridden.
+        # Application host, not the marketing site: keep every response out of
+        # search results. robots.txt stops the crawl; this header stops the URL
+        # being listed even if a crawler finds it linked from somewhere else.
+        resp.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
