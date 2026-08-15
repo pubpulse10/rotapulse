@@ -57,7 +57,10 @@ def test_run_shift_notifications_reports_counts_and_notifies(app, client, venue,
     )
     assert resp.status_code == 200
     body = resp.get_json()
-    assert body == {"missed_clock_in": 1, "missed_clock_out": 0}
+    # staff_clock_in_reminders is 0 here since this person has no mobile on
+    # file (create_active_staff doesn't set one) -- see
+    # test_check_shift_notifications.py for that behaviour's own coverage.
+    assert body == {"missed_clock_in": 1, "missed_clock_out": 0, "staff_clock_in_reminders": 0}
     assert len(sent) == 1
 
 

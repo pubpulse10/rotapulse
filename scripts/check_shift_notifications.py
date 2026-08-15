@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import create_app
 from app.db import get_connection
-from app.notification_settings import check_missed_clock_ins, check_missed_clock_outs
+from app.notification_settings import check_missed_clock_ins, check_missed_clock_outs, remind_staff_to_clock_in
 
 if __name__ == "__main__":
     app = create_app()
@@ -31,5 +31,9 @@ if __name__ == "__main__":
         now = datetime.now()
         missed_in = check_missed_clock_ins(conn, now)
         missed_out = check_missed_clock_outs(conn, now)
+        staff_reminders = remind_staff_to_clock_in(conn, now)
         conn.close()
-        print(f"Checked shifts: {missed_in} missed clock-in notice(s), {missed_out} missed clock-out notice(s) considered.")
+        print(
+            f"Checked shifts: {missed_in} missed clock-in notice(s), {missed_out} missed clock-out "
+            f"notice(s) considered, {staff_reminders} staff clock-in reminder(s) sent."
+        )

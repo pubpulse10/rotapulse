@@ -39,3 +39,18 @@ def format_uk_datetime(value) -> str:
         except ValueError:
             return value
     return f"{value.day} {value.strftime('%B %Y, %H:%M')}"
+
+
+def format_uk_time(value) -> str:
+    """Time only (24-hour, "HH:MM") — for showing an actual clock-in/out
+    time alongside a date that's already displayed separately (the rota
+    grid's shift panel, the payroll report), where repeating the full date
+    via format_uk_datetime would be redundant."""
+    if not value:
+        return value
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    return value.strftime("%H:%M")

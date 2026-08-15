@@ -11,7 +11,7 @@ from datetime import date
 
 import flask
 
-from app.date_format import format_uk_date
+from app.date_format import format_uk_date, format_uk_time
 from app.db import get_db
 from app.pay_periods import period_containing
 from app.rota_auth import register_identity, require_permission
@@ -49,7 +49,10 @@ def _report_rows(db, venue_id, start_date, end_date):
         entry = by_person.setdefault(
             row["person_id"], {"name": row["name"], "days": [], "total_hours": 0.0, "total_pay": 0.0}
         )
-        entry["days"].append({"date": row["shift_date"], "hours": hours, "pay": round(hours * rate, 2)})
+        entry["days"].append({
+            "date": row["shift_date"], "hours": hours, "pay": round(hours * rate, 2),
+            "clock_in_at": row["clock_in_at"], "clock_out_at": row["clock_out_at"],
+        })
         entry["total_hours"] = round(entry["total_hours"] + hours, 2)
         entry["total_pay"] = round(entry["total_pay"] + hours * rate, 2)
     return by_person
@@ -87,7 +90,7 @@ def export_csv():
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["Name", "Date", "Hours", "Pay"])
+    writer.writerow(["Name", "Date", "Clocked in", "Clocked out", "Hours", "Pay"])
     if not by_person:
         # Same reasoning as export_pdf's empty-state message — payroll is
         # attendance-based, so a fully-rostered week can still be empty
@@ -95,8 +98,12 @@ def export_csv():
         writer.writerow(["No completed shifts in this period — staff haven't clocked in/out yet for these dates."])
     for entry in by_person.values():
         for day in entry["days"]:
-            writer.writerow([entry["name"], format_uk_date(day["date"]), day["hours"], day["pay"]])
-        writer.writerow([entry["name"], "TOTAL", entry["total_hours"], entry["total_pay"]])
+            writer.writerow([
+                entry["name"], format_uk_date(day["date"]),
+                format_uk_time(day["clock_in_at"]), format_uk_time(day["clock_out_at"]),
+                day["hours"], day["pay"],
+            ])
+        writer.writerow([entry["name"], "TOTAL", "", "", entry["total_hours"], entry["total_pay"]])
 
     resp = flask.Response(buffer.getvalue(), mimetype="text/csv")
     resp.headers["Content-Disposition"] = f"attachment; filename=payroll_{start_date}_to_{end_date}.csv"
@@ -137,13 +144,17 @@ def export_pdf():
             styles["Normal"],
         ))
     else:
-        data = [["Name", "Date", "Hours", "Pay"]]
+        data = [["Name", "Date", "Clocked in", "Clocked out", "Hours", "Pay"]]
         for entry in by_person.values():
             for day in entry["days"]:
-                data.append([entry["name"], format_uk_date(day["date"]), day["hours"], f"£{day['pay']:.2f}"])
-            data.append([entry["name"], "TOTAL", entry["total_hours"], f"£{entry['total_pay']:.2f}"])
+                data.append([
+                    entry["name"], format_uk_date(day["date"]),
+                    format_uk_time(day["clock_in_at"]) or "", format_uk_time(day["clock_out_at"]) or "",
+                    day["hours"], f"£{day['pay']:.2f}",
+                ])
+            data.append([entry["name"], "TOTAL", "", "", entry["total_hours"], f"£{entry['total_pay']:.2f}"])
 
-        table = Table(data, colWidths=[150, 100, 80, 80])
+        table = Table(data, colWidths=[110, 90, 65, 65, 60, 70])
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#06223b")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),

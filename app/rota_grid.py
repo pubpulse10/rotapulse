@@ -359,8 +359,16 @@ def cell(person_id, on_date):
     db = get_db()
     venue = flask.g.venue
     person = db.execute("SELECT * FROM person WHERE id = ?", (person_id,)).fetchone()
+    # LEFT JOIN attendance so the panel can show the actual clock-in/out
+    # time next to the scheduled one — previously only ever shown to the
+    # staff member themselves (app/staff_portal.py), never to an admin.
     shifts = db.execute(
-        "SELECT * FROM shift WHERE venue_id = ? AND person_id = ? AND shift_date = ?",
+        """SELECT shift.*, attendance.clock_in_at, attendance.clock_out_at,
+                  attendance.variance_flag, attendance.clock_in_location_confirmed,
+                  attendance.clock_out_location_confirmed
+           FROM shift
+           LEFT JOIN attendance ON attendance.shift_id = shift.id
+           WHERE shift.venue_id = ? AND shift.person_id = ? AND shift.shift_date = ?""",
         (venue["id"], person_id, on_date),
     ).fetchall()
     override = db.execute(

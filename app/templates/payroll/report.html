@@ -18,11 +18,17 @@
   {% for person_id, entry in by_person.items() %}
     <h2>{{ entry['name'] }}</h2>
     <table>
-      <tr><th>Date</th><th>Hours</th><th>Pay</th></tr>
+      <tr><th>Date</th><th>Clocked in</th><th>Clocked out</th><th>Hours</th><th>Pay</th></tr>
       {% for day in entry['days'] %}
-        <tr><td>{{ day['date']|uk_date }}</td><td>{{ day['hours'] }}</td><td>£{{ '%.2f'|format(day['pay']) }}</td></tr>
+        <tr>
+          <td>{{ day['date']|uk_date }}</td>
+          <td>{{ day['clock_in_at']|uk_time }}</td>
+          <td>{{ day['clock_out_at']|uk_time }}</td>
+          <td>{{ day['hours'] }}</td>
+          <td>£{{ '%.2f'|format(day['pay']) }}</td>
+        </tr>
       {% endfor %}
-      <tr><td><strong>Total</strong></td><td><strong>{{ entry['total_hours'] }}</strong></td><td><strong>£{{ '%.2f'|format(entry['total_pay']) }}</strong></td></tr>
+      <tr><td><strong>Total</strong></td><td></td><td></td><td><strong>{{ entry['total_hours'] }}</strong></td><td><strong>£{{ '%.2f'|format(entry['total_pay']) }}</strong></td></tr>
     </table>
   {% endfor %}
   {% if not by_person %}<p class="hint">No completed shifts in this period yet.</p>{% endif %}

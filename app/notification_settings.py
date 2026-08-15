@@ -15,6 +15,12 @@ Two triggers feed into the same notify_admins() helper:
   Cron Job has no persistent disk of its own, so it calls that endpoint over
   HTTP instead of opening the database directly. scripts/check_shift_notifications.py
   still exists as a thin wrapper for local/manual runs.
+
+remind_staff_to_clock_in() is a separate, simpler thing entirely: a direct
+SMS to the staff member who's actually late, not an admin notification. It
+runs on the same schedule but is NOT part of the owner-configurable
+enabled/method/recipients system above — always on, no off switch, per a
+direct 2026-08-14 request.
 """
 
 from datetime import datetime, timedelta
@@ -114,6 +120,55 @@ def check_missed_clock_ins(db, now: datetime) -> int:
         )
         _mark_considered(db, row["shift_id"], "missed_clock_in")
         sent += 1
+    db.commit()
+    return sent
+
+
+STAFF_REMINDER_GRACE_MINUTES = 10
+
+
+def remind_staff_to_clock_in(db, now: datetime) -> int:
+    """An SMS nudge direct to the staff member themselves, requested
+    2026-08-14 alongside making actual clock-in/out times visible to
+    admins (staff being paid for actual time worked was the stated
+    motivation for both). Deliberately distinct from check_missed_clock_ins
+    just below: that one tells ADMINS, is owner-configurable via
+    notification_setting, and fires later at GRACE_MINUTES. This one is a
+    simple, always-on reminder to the person who's actually late — not
+    tied to the owner-configurable system, which is specifically about who
+    among the admin tier hears about problems, not about staff-facing
+    reminders. Uses its own shift_notification_log entry type so it runs
+    independently of (and doesn't get skipped by) the admin-facing check
+    for the same shift."""
+    cutoff = (now - timedelta(minutes=STAFF_REMINDER_GRACE_MINUTES)).strftime("%Y-%m-%d %H:%M")
+    earliest = (now - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%d %H:%M")
+    rows = db.execute(
+        """SELECT shift.id AS shift_id, shift.venue_id, shift.start_time,
+                  person.name AS person_name, person.mobile AS person_mobile
+           FROM shift
+           JOIN person ON person.id = shift.person_id
+           LEFT JOIN attendance ON attendance.shift_id = shift.id
+           WHERE shift.status = 'scheduled' AND shift.person_id IS NOT NULL
+           AND attendance.clock_in_at IS NULL
+           AND (shift.shift_date || ' ' || shift.start_time) <= ?
+           AND (shift.shift_date || ' ' || shift.start_time) >= ?""",
+        (cutoff, earliest),
+    ).fetchall()
+
+    sent = 0
+    for row in rows:
+        if _already_considered(db, row["shift_id"], "staff_clock_in_reminder"):
+            continue
+        _mark_considered(db, row["shift_id"], "staff_clock_in_reminder")
+        if row["person_mobile"]:
+            venue = db.execute("SELECT name FROM venue WHERE id = ?", (row["venue_id"],)).fetchone()
+            delivered = send_sms(
+                row["person_mobile"],
+                f"Hi {row['person_name']}, you're due in for your {row['start_time']} shift at "
+                f"{venue['name']} — don't forget to clock in when you arrive.",
+            )
+            if delivered:
+                sent += 1
     db.commit()
     return sent
 

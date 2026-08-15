@@ -223,3 +223,154 @@ def test_missed_clock_out_not_flagged_once_clocked_out(app, venue, monkeypatch):
 
     assert count == 0
     assert sent == []
+
+
+def _set_mobile(app, person_id, mobile):
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute("UPDATE person SET mobile = ? WHERE id = ?", (mobile, person_id))
+        conn.commit()
+
+
+def test_staff_reminder_sms_sent_after_grace_period(app, venue, monkeypatch):
+    from scripts.check_shift_notifications import remind_staff_to_clock_in
+
+    sms_sent = []
+    monkeypatch.setattr("app.notification_settings.send_sms", lambda *a, **k: sms_sent.append(a) or True)
+
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Needs A Nudge")
+    _set_mobile(app, person_id, "07700900123")
+    today = date.today()
+    shift_start = datetime.combine(today, datetime.min.time()) + timedelta(hours=9)
+    _make_scheduled_shift(app, venue["id"], person_id, today.isoformat(), "09:00", "17:00")
+
+    now = shift_start + timedelta(minutes=11)  # past the 10 min grace
+    with app.app_context():
+        conn = db_module.get_db()
+        count = remind_staff_to_clock_in(conn, now)
+
+    assert count == 1
+    assert len(sms_sent) == 1
+    assert sms_sent[0][0] == "07700900123"
+    assert "Needs A Nudge" in sms_sent[0][1]
+
+
+def test_staff_reminder_not_sent_within_grace_period(app, venue, monkeypatch):
+    from scripts.check_shift_notifications import remind_staff_to_clock_in
+
+    sms_sent = []
+    monkeypatch.setattr("app.notification_settings.send_sms", lambda *a, **k: sms_sent.append(a) or True)
+
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="On Time Ish")
+    _set_mobile(app, person_id, "07700900123")
+    today = date.today()
+    shift_start = datetime.combine(today, datetime.min.time()) + timedelta(hours=9)
+    _make_scheduled_shift(app, venue["id"], person_id, today.isoformat(), "09:00", "17:00")
+
+    now = shift_start + timedelta(minutes=5)  # still within the 10 min grace
+    with app.app_context():
+        conn = db_module.get_db()
+        count = remind_staff_to_clock_in(conn, now)
+
+    assert count == 0
+    assert sms_sent == []
+
+
+def test_staff_reminder_not_sent_once_clocked_in(app, venue, monkeypatch):
+    from scripts.check_shift_notifications import remind_staff_to_clock_in
+
+    sms_sent = []
+    monkeypatch.setattr("app.notification_settings.send_sms", lambda *a, **k: sms_sent.append(a) or True)
+
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Already Here")
+    _set_mobile(app, person_id, "07700900123")
+    today = date.today()
+    shift_start = datetime.combine(today, datetime.min.time()) + timedelta(hours=9)
+    shift_id = _make_scheduled_shift(app, venue["id"], person_id, today.isoformat(), "09:00", "17:00")
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at) VALUES (?, ?)",
+            (shift_id, datetime.now().isoformat()),
+        )
+        conn.commit()
+
+    now = shift_start + timedelta(minutes=11)
+    with app.app_context():
+        conn = db_module.get_db()
+        count = remind_staff_to_clock_in(conn, now)
+
+    assert count == 0
+    assert sms_sent == []
+
+
+def test_staff_reminder_only_sent_once_across_repeated_runs(app, venue, monkeypatch):
+    from scripts.check_shift_notifications import remind_staff_to_clock_in
+
+    sms_sent = []
+    monkeypatch.setattr("app.notification_settings.send_sms", lambda *a, **k: sms_sent.append(a) or True)
+
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Checked Twice")
+    _set_mobile(app, person_id, "07700900123")
+    today = date.today()
+    shift_start = datetime.combine(today, datetime.min.time()) + timedelta(hours=9)
+    _make_scheduled_shift(app, venue["id"], person_id, today.isoformat(), "09:00", "17:00")
+
+    now = shift_start + timedelta(minutes=11)
+    with app.app_context():
+        conn = db_module.get_db()
+        first_count = remind_staff_to_clock_in(conn, now)
+        second_count = remind_staff_to_clock_in(conn, now + timedelta(minutes=5))
+
+    assert first_count == 1
+    assert second_count == 0
+    assert len(sms_sent) == 1
+
+
+def test_staff_reminder_skipped_gracefully_with_no_mobile_on_file(app, venue, monkeypatch):
+    from scripts.check_shift_notifications import remind_staff_to_clock_in
+
+    sms_sent = []
+    monkeypatch.setattr("app.notification_settings.send_sms", lambda *a, **k: sms_sent.append(a) or True)
+
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="No Mobile On File")
+    today = date.today()
+    shift_start = datetime.combine(today, datetime.min.time()) + timedelta(hours=9)
+    _make_scheduled_shift(app, venue["id"], person_id, today.isoformat(), "09:00", "17:00")
+
+    now = shift_start + timedelta(minutes=11)
+    with app.app_context():
+        conn = db_module.get_db()
+        count = remind_staff_to_clock_in(conn, now)
+
+    assert count == 0  # nothing delivered, but no crash
+    assert sms_sent == []
+
+
+def test_staff_reminder_and_admin_missed_clock_in_notice_both_fire_independently(app, venue, monkeypatch):
+    """The two checks use separate shift_notification_log entries -- confirm
+    neither one's dedup accidentally suppresses the other for the same
+    shift."""
+    from scripts.check_shift_notifications import check_missed_clock_ins, remind_staff_to_clock_in
+
+    sms_sent, emails_sent = [], []
+    monkeypatch.setattr("app.notification_settings.send_sms", lambda *a, **k: sms_sent.append(a) or True)
+    monkeypatch.setattr("app.notification_settings.send_email", lambda *a, **k: emails_sent.append(a) or True)
+    _enable_notification(app, venue, "missed_clock_in", venue["owner_person_id"])
+
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Double Checked")
+    _set_mobile(app, person_id, "07700900123")
+    today = date.today()
+    shift_start = datetime.combine(today, datetime.min.time()) + timedelta(hours=9)
+    _make_scheduled_shift(app, venue["id"], person_id, today.isoformat(), "09:00", "17:00")
+
+    now = shift_start + timedelta(minutes=20)  # past both the 10 min and 15 min grace periods
+    with app.app_context():
+        conn = db_module.get_db()
+        reminder_count = remind_staff_to_clock_in(conn, now)
+        admin_count = check_missed_clock_ins(conn, now)
+
+    assert reminder_count == 1
+    assert admin_count == 1
+    assert len(sms_sent) == 1
+    assert len(emails_sent) == 1

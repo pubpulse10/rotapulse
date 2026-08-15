@@ -11,6 +11,23 @@
         {% if s['status'] == 'open' %}
           <em>Open — no one assigned</em>
         {% endif %}
+        {% if s['clock_in_at'] or s['clock_out_at'] %}
+          <p class="hint">
+            Actual:
+            {% if s['clock_in_at'] %}
+              clocked in {{ s['clock_in_at']|uk_time }}{% if s['clock_in_location_confirmed'] == 0 %} (location not confirmed){% endif %}
+            {% else %}
+              not clocked in yet
+            {% endif %}
+            —
+            {% if s['clock_out_at'] %}
+              clocked out {{ s['clock_out_at']|uk_time }}{% if s['clock_out_location_confirmed'] == 0 %} (location not confirmed){% endif %}
+            {% else %}
+              not clocked out yet
+            {% endif %}
+            {% if s['variance_flag'] %}<span class="badge badge-over-target">Late</span>{% endif %}
+          </p>
+        {% endif %}
         <form method="post" action="{{ url_for('rota_grid.update_shift', shift_id=s['id']) }}" style="display:flex; gap:8px; align-items:flex-end;">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="shift_date" value="{{ on_date }}">

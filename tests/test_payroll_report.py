@@ -29,6 +29,54 @@ def test_payroll_report_computes_gross_pay(app, client, venue):
     assert b"100.0" in resp.data or b"100.00" in resp.data
 
 
+def test_payroll_report_shows_actual_clock_in_and_out_times(app, client, venue):
+    """Owner-stated concern: staff are paid for actual time worked, so the
+    payroll report needs to show the actual clock times behind each hours
+    figure, not just the computed total."""
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="ClockTimesTest")
+    today = date.today().isoformat()
+    with app.app_context():
+        conn = db_module.get_db()
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, ?, '09:00', '17:00', 'scheduled')",
+            (venue["id"], person_id, today),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at, clock_out_at) VALUES (?, ?, ?)",
+            (shift_id, f"{today}T09:04:00", f"{today}T17:11:00"),
+        )
+        conn.commit()
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/payroll/?start={today}&end={today}")
+    assert resp.status_code == 200
+    assert b"09:04" in resp.data
+    assert b"17:11" in resp.data
+
+
+def test_payroll_csv_export_includes_clock_times(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="CsvClockTest")
+    today = date.today().isoformat()
+    with app.app_context():
+        conn = db_module.get_db()
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, ?, '09:00', '17:00', 'scheduled')",
+            (venue["id"], person_id, today),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at, clock_out_at) VALUES (?, ?, ?)",
+            (shift_id, f"{today}T09:04:00", f"{today}T17:11:00"),
+        )
+        conn.commit()
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/payroll/export.csv?start={today}&end={today}")
+    assert resp.status_code == 200
+    assert b"09:04" in resp.data
+    assert b"17:11" in resp.data
+    assert b"Clocked in" in resp.data
+
+
 def test_payroll_pdf_export_works_with_data(app, client, venue):
     person_id, _m, _e = create_active_staff(app, venue["id"], name="PdfTest")
     today = date.today().isoformat()

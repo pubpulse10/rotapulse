@@ -20,7 +20,7 @@ from app import config
 from app.billing import enforce_band
 from app.db import get_db, get_app_id
 from app.extensions import limiter
-from app.notification_settings import check_missed_clock_ins, check_missed_clock_outs
+from app.notification_settings import check_missed_clock_ins, check_missed_clock_outs, remind_staff_to_clock_in
 
 internal_bp = Blueprint("internal", __name__, url_prefix="/internal")
 
@@ -79,7 +79,11 @@ def run_shift_notifications():
     now = datetime.now()
     missed_in = check_missed_clock_ins(db, now)
     missed_out = check_missed_clock_outs(db, now)
-    return jsonify({"missed_clock_in": missed_in, "missed_clock_out": missed_out})
+    staff_reminders = remind_staff_to_clock_in(db, now)
+    return jsonify({
+        "missed_clock_in": missed_in, "missed_clock_out": missed_out,
+        "staff_clock_in_reminders": staff_reminders,
+    })
 
 
 def _link_or_create_person(db, hub_person_id, name, email):
