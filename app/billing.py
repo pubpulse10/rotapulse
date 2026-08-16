@@ -224,9 +224,23 @@ def upgrade():
             "metadata": {"pubpulse_app": "rotapulse"},
         },
         "payment_method_collection": "always",
+        # VAT. Stripe Tax is on with a UK registration, and prices are
+        # tax-exclusive (Tax settings -> "Include tax in prices" = No), so VAT is
+        # added on top at checkout — matching the "+ VAT" prices on pubpulse.co.uk.
+        # automatic_tax needs a customer location to pick a jurisdiction, which is
+        # why the billing address is required. tax_id_collection lets a
+        # VAT-registered pub enter its own number so its invoice is reclaimable.
+        "automatic_tax": {"enabled": True},
+        "billing_address_collection": "required",
+        "tax_id_collection": {"enabled": True},
     }
     if existing and existing["stripe_customer_id"]:
         session_kwargs["customer"] = existing["stripe_customer_id"]
+        # With an existing Customer, Checkout ignores the address collected
+        # on the page unless customer_update.address is 'auto' — without
+        # this it would fall back to the Customer's stored address (or none)
+        # and could calculate no VAT at all.
+        session_kwargs["customer_update"] = {"address": "auto"}
     else:
         landlord_email = session.get("landlord_email")
         if landlord_email:
