@@ -432,3 +432,45 @@ def get_rota_subscription(conn, venue_id):
 def get_app_id(conn, key):
     row = conn.execute("SELECT id FROM app WHERE key = ?", (key,)).fetchone()
     return row["id"] if row else None
+
+
+def delete_venue_by_pub_id(conn, pub_id):
+    """Delete a venue and every row that hangs off it, scoped to one pub_id.
+    Same cascade as scripts/delete_test_venues.py (which now delegates here),
+    reused by the /internal/venues/delete endpoint so a PricePulse account
+    delete can clean up RotaPulse's own data automatically. Returns
+    {table: rowcount} deleted, or {} if no venue exists for this pub_id
+    (idempotent — safe to call on an already-clean pub)."""
+    conn.execute("PRAGMA foreign_keys = OFF")
+    tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    vt = "venues" if "venues" in tables else "venue"
+    ids = [r["id"] for r in conn.execute(f"SELECT id FROM {vt} WHERE pub_id = ?", (pub_id,))]
+    if not ids:
+        return {}
+    ph = ",".join("?" * len(ids))
+    deleted = {}
+
+    # venue_membership-chain children hang off venue_membership, not venue_id.
+    if "venue_membership" in tables:
+        mem = [r["id"] for r in conn.execute(
+            f"SELECT id FROM venue_membership WHERE venue_id IN ({ph})", ids)]
+        if mem:
+            mph = ",".join("?" * len(mem))
+            for child in ("app_access", "rota_staff_detail"):
+                if child in tables:
+                    c = conn.execute(f"DELETE FROM {child} WHERE venue_membership_id IN ({mph})", mem)
+                    if c.rowcount:
+                        deleted[child] = c.rowcount
+
+    for t in tables:
+        if t == vt:
+            continue
+        colnames = {c["name"] for c in conn.execute(f"PRAGMA table_info({t})")}
+        if "venue_id" in colnames:
+            c = conn.execute(f"DELETE FROM {t} WHERE venue_id IN ({ph})", ids)
+            if c.rowcount:
+                deleted[t] = c.rowcount
+    c = conn.execute(f"DELETE FROM {vt} WHERE id IN ({ph})", ids)
+    deleted[vt] = c.rowcount
+    conn.commit()
+    return deleted

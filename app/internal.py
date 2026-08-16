@@ -18,7 +18,7 @@ from flask import Blueprint, jsonify, request
 
 from app import config
 from app.billing import enforce_band
-from app.db import get_db, get_app_id
+from app.db import get_db, get_app_id, delete_venue_by_pub_id
 from app.extensions import limiter
 from app.notification_settings import check_missed_clock_ins, check_missed_clock_outs, remind_staff_to_clock_in
 
@@ -184,3 +184,22 @@ def access():
     # configured), and only ever moves the band up (mirrors the local flow).
     enforce_band(venue_id)
     return jsonify({"ok": True})
+
+
+@internal_bp.route("/venues/delete", methods=["POST"])
+@limiter.limit("60 per minute")
+def venues_delete():
+    """PricePulse calls this when a family account is deleted, so RotaPulse's
+    own venue data for that pub_id is cleaned up automatically instead of
+    needing scripts/delete_test_venues.py run by hand via Render Shell."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    pub_id = data.get("pub_id")
+    if pub_id is None:
+        return jsonify({"error": "pub_id is required"}), 400
+
+    db = get_db()
+    deleted = delete_venue_by_pub_id(db, pub_id)
+    return jsonify({"ok": True, "deleted": deleted})

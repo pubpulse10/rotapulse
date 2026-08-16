@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.db import get_connection
+from app.db import get_connection, delete_venue_by_pub_id
 
 KEEP_PUB_IDS = {2}          # THE COCK's shared PubPulse pub_id
 KEEP_NAMES = {"THE COCK"}   # belt-and-braces: keep by name too
@@ -54,34 +54,10 @@ def main():
         conn.close()
         return
 
-    ids = [vid for vid, _, _ in targets]
-    ph = ",".join("?" * len(ids))
     deleted = {}
-
-    # venue_membership-chain children (RotaPulse): app_access / rota_staff_detail
-    # hang off venue_membership, not venue_id — clear them first.
-    if "venue_membership" in tables:
-        mem = [r["id"] for r in conn.execute(
-            f"SELECT id FROM venue_membership WHERE venue_id IN ({ph})", ids)]
-        if mem:
-            mph = ",".join("?" * len(mem))
-            for child in ("app_access", "rota_staff_detail"):
-                if child in tables:
-                    c = conn.execute(f"DELETE FROM {child} WHERE venue_membership_id IN ({mph})", mem)
-                    if c.rowcount:
-                        deleted[child] = c.rowcount
-
-    for t in tables:
-        if t == vt:
-            continue
-        colnames = {c["name"] for c in conn.execute(f"PRAGMA table_info({t})")}
-        if "venue_id" in colnames:
-            c = conn.execute(f"DELETE FROM {t} WHERE venue_id IN ({ph})", ids)
-            if c.rowcount:
-                deleted[t] = c.rowcount
-    c = conn.execute(f"DELETE FROM {vt} WHERE id IN ({ph})", ids)
-    deleted[vt] = c.rowcount
-    conn.commit()
+    for _, _, pub_id in targets:
+        for table, count in delete_venue_by_pub_id(conn, pub_id).items():
+            deleted[table] = deleted.get(table, 0) + count
 
     print("\nDeleted:")
     for t, n in sorted(deleted.items()):
