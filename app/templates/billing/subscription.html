@@ -4,7 +4,7 @@
 <div class="panel narrow">
   <h1>Subscription</h1>
   <p>Plan status: <strong>{{ plan }}</strong>{% if current_band and bands %}
-     · Band {{ current_band }} (£{{ '%.2f'|format(bands[current_band-1].price) }}/month){% endif %}</p>
+     · Band {{ current_band }} (£{{ '%.2f'|format(bands[current_band-1].price) }}/month + VAT){% endif %}</p>
   {% if sub and sub['trial_ends_at'] and plan == 'active' and not sub['stripe_subscription_id'] %}
     <p class="hint">Free trial ends {{ sub['trial_ends_at']|uk_date }}.</p>
   {% endif %}
@@ -16,12 +16,12 @@
   {% else %}
     {% if active %}
       <h2>Change band</h2>
-      <p class="hint">Your price is a flat monthly fee for your band. If your staff grow past
+      <p class="hint">Your price is a flat monthly fee for your band, plus VAT. If your staff grow past
         your band we move you up automatically and email you — the new price starts at your
         next monthly bill. A change you make here also takes effect at your next bill.</p>
     {% else %}
       <h2>Choose your band</h2>
-      <p class="hint">Your price is a flat monthly fee based on how many staff you have. Pick the
+      <p class="hint">Your price is a flat monthly fee based on how many staff you have, plus VAT. Pick the
         band that fits — if you grow past it later we move you up automatically and email you
         (new price from your next bill). Subscribing starts your free trial: you'll add a card,
         but nothing is charged until the trial ends.</p>
@@ -35,7 +35,7 @@
           <input type="radio" name="band" value="{{ b.n }}"
                  {% if b.n == (current_band if active else required_band) %}checked{% endif %}
                  {% if b.n < required_band %}disabled{% endif %}>
-          <strong>Band {{ b.n }}</strong>: up to {{ b.max }} staff — £{{ '%.2f'|format(b.price) }}/month
+          <strong>Band {{ b.n }}</strong>: up to {{ b.max }} staff — £{{ '%.2f'|format(b.price) }}/month + VAT
           {% if b.n < required_band %}<span class="hint">(too small for your staff count)</span>{% endif %}
         </label>
       </p>
