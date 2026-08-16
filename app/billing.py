@@ -240,7 +240,7 @@ def upgrade():
         # on the page unless customer_update.address is 'auto' — without
         # this it would fall back to the Customer's stored address (or none)
         # and could calculate no VAT at all.
-        session_kwargs["customer_update"] = {"address": "auto"}
+        session_kwargs["customer_update"] = {"address": "auto", "name": "auto"}
     else:
         # Pre-create the Customer with country=GB so Stripe Tax can price VAT
         # immediately on page load, instead of showing "Enter address to
@@ -255,7 +255,7 @@ def upgrade():
             customer_kwargs["email"] = landlord_email
         customer = stripe.Customer.create(**customer_kwargs)
         session_kwargs["customer"] = customer.id
-        session_kwargs["customer_update"] = {"address": "auto"}
+        session_kwargs["customer_update"] = {"address": "auto", "name": "auto"}
 
     checkout_session = stripe.checkout.Session.create(**session_kwargs)
     return redirect(checkout_session.url, code=303)
