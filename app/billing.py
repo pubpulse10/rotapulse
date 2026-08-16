@@ -242,20 +242,9 @@ def upgrade():
         # and could calculate no VAT at all.
         session_kwargs["customer_update"] = {"address": "auto", "name": "auto"}
     else:
-        # Pre-create the Customer with country=GB so Stripe Tax can price VAT
-        # immediately on page load, instead of showing "Enter address to
-        # calculate" until the landlord types their own address — every
-        # RotaPulse venue is a UK pub, and UK VAT is a flat 20% with no
-        # regional variation, so country alone is enough. customer_update
-        # still lets Checkout save whatever fuller address they actually
-        # enter back onto this Customer record.
         landlord_email = session.get("landlord_email")
-        customer_kwargs = {"address": {"country": "GB"}}
         if landlord_email:
-            customer_kwargs["email"] = landlord_email
-        customer = stripe.Customer.create(**customer_kwargs)
-        session_kwargs["customer"] = customer.id
-        session_kwargs["customer_update"] = {"address": "auto", "name": "auto"}
+            session_kwargs["customer_email"] = landlord_email
 
     checkout_session = stripe.checkout.Session.create(**session_kwargs)
     return redirect(checkout_session.url, code=303)
