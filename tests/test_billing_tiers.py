@@ -254,6 +254,10 @@ def test_upgrade_uses_the_chosen_band_price(app, client, venue, monkeypatch):
         stripe.checkout.Session, "create",
         lambda **kw: captured.update(kw) or SimpleNamespace(url="https://checkout.example/x"),
     )
+    monkeypatch.setattr(
+        stripe.Customer, "create",
+        lambda **kw: SimpleNamespace(id="cus_new_gb", **kw),
+    )
 
     login_as_pub(client, venue["pub_id"])
     resp = client.post(f"/v/{venue['slug']}/billing/upgrade", data={"band": "2"})
@@ -261,6 +265,11 @@ def test_upgrade_uses_the_chosen_band_price(app, client, venue, monkeypatch):
     assert captured["line_items"] == [{"price": "price_band2", "quantity": 1}]
     assert captured["subscription_data"]["trial_period_days"] == billing_module.config.ROTAPULSE_TRIAL_DAYS
     assert captured["metadata"] == {"pubpulse_app": "rotapulse"}
+    # A brand-new customer is pre-created with country=GB (so Stripe Tax can
+    # price VAT immediately instead of showing "enter address to calculate")
+    # and referenced by id, not customer_email.
+    assert captured["customer"] == "cus_new_gb"
+    assert "customer_email" not in captured
 
     with app.app_context():
         conn = db_module.get_db()
