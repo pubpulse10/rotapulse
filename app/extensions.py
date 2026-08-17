@@ -11,9 +11,14 @@ def _client_ip():
     # concurrent requests through the real Cloudflare->Render chain against
     # /internal/clock-status never tripped a 429, despite passing every local
     # test (the test client has no real proxy chain to expose the bug).
-    # ProxyFix's hop-count assumption is the suspected cause; this sidesteps
-    # it entirely. Falls back to the proxied address locally, where the
-    # Cloudflare header isn't present.
+    # Root cause confirmed 2026-08-17, and it is not ProxyFix's hop count:
+    # waitress runs with clear_untrusted_proxy_headers=True and trusted_proxy
+    # unset, so it STRIPS X-Forwarded-For before ProxyFix ever sees it.
+    # CF-Connecting-IP survives only because waitress clears the standard
+    # X-Forwarded-* set and nothing else — which is exactly why this
+    # workaround works. The same stripping put every url_for(_external) on
+    # http; see config.pin_https_scheme. Falls back to the proxied address
+    # locally, where the Cloudflare header isn't present.
     return request.headers.get("CF-Connecting-IP") or get_remote_address()
 
 

@@ -136,3 +136,59 @@ def apply(app):
     app.config["SESSION_REFRESH_EACH_REQUEST"] = SESSION_REFRESH_EACH_REQUEST
     app.config["SESSION_COOKIE_SECURE"] = SESSION_COOKIE_SECURE
     app.config["SESSION_COOKIE_DOMAIN"] = SESSION_COOKIE_DOMAIN
+
+
+def pin_https_scheme(app):
+    """Guarantee url_for(_external=True) emits https in production.
+
+    Must be called AFTER ProxyFix is installed — it wraps whatever is already
+    on app.wsgi_app.
+
+    Every external URL this app hands out is built by url_for(_external=True),
+    which takes its scheme from request.scheme, which ProxyFix derives from
+    X-Forwarded-Proto. But in production ProxyFix never sees that header:
+    waitress defaults to clear_untrusted_proxy_headers=True with trusted_proxy
+    unset, so it STRIPS every X-Forwarded-* header before calling the WSGI
+    app. ProxyFix is left with nothing to read and the scheme stays http.
+
+    Confirmed against a real waitress 3.0.2 server rather than inferred: a
+    request sent with "X-Forwarded-Proto: https" reaches the app as None.
+    Flask's test client can't show this — it has no server layer, which is
+    why the wiring looked correct in every local test.
+
+    The cost was Stripe Checkout sessions created with http success_url /
+    cancel_url, plus every staff invite link, password-reset link and
+    open-shift claim URL texted to staff — all carrying single-use tokens
+    over cleartext.
+
+    Same stripping is what broke rate-limit keying: X-Forwarded-For was being
+    removed too, so get_remote_address() returned the proxy and per-IP limits
+    never tripped. The CF-Connecting-IP workaround in app/extensions.py works
+    precisely because waitress clears only the standard X-Forwarded-* set, not
+    Cloudflare's own header. (DiaryPulse was never affected by any of this —
+    it runs gunicorn, which passes the headers through. That, not anything in
+    the app code, is the entire difference between the four apps.)
+
+    Fixing it at the waitress layer would mean setting --trusted-proxy, but
+    Render's internal proxy address isn't stable enough to pin to. Injecting
+    the header here is independent of that: at the edge production is
+    https-only, so http is never the right answer. Side benefit — a client
+    can no longer send "X-Forwarded-Proto: http" to downgrade a generated link.
+
+    Left off outside production so local http:// development is unaffected.
+    Same helper in PricePulse/TaskPulse — change one, change all.
+    """
+    if os.environ.get("FLASK_ENV") != "production":
+        return
+
+    # Covers url_for(_external=True) called with no request context (e.g. the
+    # shift-notification cron entrypoint), where there is no header to read.
+    app.config["PREFERRED_URL_SCHEME"] = "https"
+
+    proxied = app.wsgi_app
+
+    def force_https(environ, start_response):
+        environ["HTTP_X_FORWARDED_PROTO"] = "https"
+        return proxied(environ, start_response)
+
+    app.wsgi_app = force_https

@@ -21,6 +21,9 @@ def create_app():
     # honours X-Forwarded-Proto.
     from werkzeug.middleware.proxy_fix import ProxyFix
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+    # ...except waitress strips X-Forwarded-* before ProxyFix can read them,
+    # so that alone leaves url_for(_external) on http. After ProxyFix.
+    config.pin_https_scheme(app)
 
     # In-memory limiter storage is correct for a single Waitress process (the
     # current deployment). A multi-instance/multi-process deployment would
