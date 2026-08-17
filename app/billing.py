@@ -76,6 +76,18 @@ def _period_end_iso(stripe_subscription_obj) -> str | None:
     helper exactly."""
     ts = getattr(stripe_subscription_obj, "current_period_end", None)
     if ts is None:
+        # Newer Stripe API versions moved current_period_end OFF the
+        # subscription and onto each subscription ITEM. Verified against the
+        # live account 2026-08-17 (SDK 15.3.1): the top-level field is simply
+        # absent, so this returned None for EVERY subscription — which is why
+        # current_period_end was never stored, renewal_at always reached the
+        # Hub empty, and the Hub launcher fell back to the stale legacy
+        # trial_ends_at and showed a date a fortnight out.
+        items = getattr(stripe_subscription_obj, "items", None)
+        data = getattr(items, "data", None) if items is not None else None
+        if data:
+            ts = getattr(data[0], "current_period_end", None)
+    if ts is None:
         return None
     return datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
 
