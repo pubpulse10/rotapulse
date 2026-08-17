@@ -3,17 +3,30 @@
 {% block content %}
 <div class="panel">
   <h1>Choose a venue to support</h1>
-  <p>Read-only — you'll see this venue's rota exactly as its owner does. No write actions are available in support mode.</p>
+  <p>Read-only — you'll see this venue's rota exactly as its owner does. Granting complimentary
+    access is the one write available in support mode.</p>
 
   <table>
-    <tr><th>Venue</th><th></th></tr>
+    <tr><th>Venue</th><th>Plan</th><th></th><th></th></tr>
     {% for v in venues %}
+      {% set comped = v.subscription_status == 'comp' %}
       <tr>
         <td>{{ v.name }}</td>
+        <td>{% if comped %}Complimentary{% elif v.plan == 'active' %}Active{% else %}Not subscribed{% endif %}</td>
         <td><a href="{{ url_for('rota_grid.week', slug=v.slug) }}">View</a></td>
+        <td>
+          {# Comp gives full access with no Stripe object at all — how internal
+             venues are carried, so nothing reaches the VAT return. Owner-proof:
+             only reachable from the family-admin picker. #}
+          <form method="post" action="{{ url_for('family_admin.comp', venue_id=v.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="{{ 'revoke' if comped else 'grant' }}">
+            <button type="submit" class="btn-secondary">{{ 'Remove comp' if comped else 'Comp' }}</button>
+          </form>
+        </td>
       </tr>
     {% else %}
-      <tr><td colspan="2">No venues yet.</td></tr>
+      <tr><td colspan="4">No venues yet.</td></tr>
     {% endfor %}
   </table>
 </div>

@@ -130,6 +130,11 @@ def current_venue_plan(venue_id: int) -> str:
     # trial_ends_at is a LEGACY cardless-trial leftover from before
     # card-to-start-a-trial (commit 63b6ac2); it no longer grants access, since
     # venue creation sets no cardless trial and all trials now need a card.
+    # A complimentary venue (granted by family admin — see family_admin.comp)
+    # has no Stripe subscription at all, so nothing should ever revoke it.
+    # Checked ahead of plan so a stray webhook can't take the access away.
+    if row["subscription_status"] == "comp":
+        return "active"
     return "active" if row["plan"] == "active" else "inactive"
 
 
@@ -166,6 +171,11 @@ def subscription_summary(status, subscription_id, period_end):
         "next_amount_pence": None,
         "is_free": False,
     }
+    if status == 'comp':
+        # A comped venue has no Stripe object to preview; it is free by
+        # definition, and must not read like a paying one.
+        summary['is_free'] = True
+        return summary
     if not subscription_id or not config.STRIPE_SECRET_KEY:
         return summary
     try:
