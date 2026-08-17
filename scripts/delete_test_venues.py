@@ -33,7 +33,12 @@ def main():
 
     keep, targets = [], []
     for r in conn.execute(f"SELECT id, name, pub_id FROM {vt} ORDER BY pub_id"):
-        is_keep = r["pub_id"] in KEEP_PUB_IDS or (r["name"] or "").strip().upper() in KEEP_NAMES
+        name_upper = (r["name"] or "").strip().upper()
+        # Substring, not equality: the venue is named e.g. "The Cock, Dereham"
+        # in RotaPulse, which never equalled "THE COCK" — so this
+        # belt-and-braces guard silently did nothing and protection rested
+        # entirely on the pub_id check.
+        is_keep = r["pub_id"] in KEEP_PUB_IDS or any(k in name_upper for k in KEEP_NAMES)
         (keep if is_keep else targets).append((r["id"], r["name"], r["pub_id"]))
 
     def show(label, items):
