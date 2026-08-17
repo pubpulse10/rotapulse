@@ -270,6 +270,64 @@ def test_upgrade_uses_the_chosen_band_price(app, client, venue, monkeypatch):
     assert sub["current_tier"] == 2
 
 
+def test_upgrade_enables_automatic_tax(app, client, venue, monkeypatch):
+    """VAT regression guard. All four band prices are tax_behavior='exclusive',
+    so VAT is only added if the Checkout Session asks Stripe Tax to calculate
+    it. That made the fault invisible: the price-level config looked correct
+    while subscriptions were created with automatic_tax disabled and would
+    have charged £48 instead of £57.60."""
+    import stripe
+
+    _set_band_prices(monkeypatch)
+
+    captured = {}
+    monkeypatch.setattr(
+        stripe.checkout.Session, "create",
+        lambda **kw: captured.update(kw) or SimpleNamespace(url="https://checkout.example/x"),
+    )
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(f"/v/{venue['slug']}/billing/upgrade", data={"band": "2"})
+    assert resp.status_code == 303
+
+    assert captured["automatic_tax"] == {"enabled": True}
+    # Stripe Tax needs a customer location to pick a jurisdiction.
+    assert captured["billing_address_collection"] == "required"
+    # Lets a VAT-registered pub enter its own number, so its invoice is reclaimable.
+    assert captured["tax_id_collection"] == {"enabled": True}
+    # Manual tax_rates alongside Stripe Tax would double-tax the invoice.
+    assert "default_tax_rates" not in captured
+
+
+def test_upgrade_sets_customer_update_for_existing_customer(app, client, venue, monkeypatch):
+    """With an existing Customer, Checkout ignores the address collected on the
+    page unless customer_update.address is 'auto' — it would fall back to the
+    Customer's stored address (or none) and calculate no VAT at all."""
+    import stripe
+
+    _set_band_prices(monkeypatch)
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "UPDATE rota_subscription SET stripe_customer_id = ? WHERE venue_id = ?",
+            ("cus_existing", venue["id"]),
+        )
+        conn.commit()
+
+    captured = {}
+    monkeypatch.setattr(
+        stripe.checkout.Session, "create",
+        lambda **kw: captured.update(kw) or SimpleNamespace(url="https://checkout.example/x"),
+    )
+
+    login_as_pub(client, venue["pub_id"])
+    client.post(f"/v/{venue['slug']}/billing/upgrade", data={"band": "1"})
+
+    assert captured["customer"] == "cus_existing"
+    assert captured["automatic_tax"] == {"enabled": True}
+    assert captured["customer_update"] == {"address": "auto", "name": "auto"}
+
+
 def test_upgrade_rejects_band_below_staff_requirement(app, client, venue, monkeypatch):
     _set_band_prices(monkeypatch)
     for i in range(6):  # 6 billable staff -> needs at least band 2
