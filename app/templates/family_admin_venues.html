@@ -21,7 +21,7 @@
           <form method="post" action="{{ url_for('family_admin.comp', venue_id=v.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="{{ 'revoke' if comped else 'grant' }}">
-            <button type="submit" class="btn-secondary">{{ 'Remove comp' if comped else 'Comp' }}</button>
+            <button type="submit" class="btn-secondary">{{ 'Remove free access' if comped else 'Give free access' }}</button>
           </form>
         </td>
       </tr>
