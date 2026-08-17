@@ -181,7 +181,8 @@ def access():
     # invite/approve flow that calls enforce_band — so re-evaluate here too,
     # otherwise staff added via the Hub would underpay. Safe no-op when the
     # venue has no live Stripe subscription (still on trial / Stripe not
-    # configured), and only ever moves the band up (mirrors the local flow).
+    # configured), and moves the band in whichever direction now fits,
+    # prorated (mirrors the local flow).
     enforce_band(venue_id)
     return jsonify({"ok": True})
 

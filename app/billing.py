@@ -129,46 +129,68 @@ def _band_price(band: int) -> str | None:
 
 
 def enforce_band(venue_id: int) -> None:
-    """Called whenever the billable staff count changes. If the venue has grown
-    past its current band, move the Stripe subscription UP to the band that fits
-    and email the owner. The new price takes effect at the NEXT monthly bill
-    (proration_behavior='none') — no surprise mid-month charge. Never
-    auto-downgrades (a shrinking venue keeps its band until it lowers it
-    itself). No-ops if there's no live Stripe subscription yet (still on trial,
-    or Stripe isn't configured)."""
+    """Called whenever the billable staff count changes. Moves the Stripe
+    subscription to whichever band now fits — UP when the venue grows, DOWN
+    when it shrinks — and emails the owner either way.
+
+    Prorated immediately (proration_behavior='always_invoice', per spec §9.1):
+    growing past a band invoices the difference for the rest of the period
+    rather than waiting for the next bill; shrinking issues the matching
+    credit. This is what pubpulse.co.uk states, so the two must not diverge.
+
+    No-ops when the band is unchanged, and when there's no live Stripe
+    subscription yet (still on trial, or Stripe isn't configured). Stripe
+    doesn't generate prorations during a trial, so a card-trialing venue
+    moves band without any charge."""
     db = get_db()
     sub = get_rota_subscription(db, venue_id)
     if not sub or not sub["stripe_subscription_id"] or not sub["stripe_subscription_item_id"]:
         return
     required = tier_for_count(count_billable_staff(venue_id))
     current = sub["current_tier"] or 1
-    if required <= current:
-        return  # still within band, or a shrink we don't act on automatically
+    if required == current:
+        return  # still within band — nothing to do
     new_price = _band_price(required)
     if not new_price:
         return
     stripe.Subscription.modify(
         sub["stripe_subscription_id"],
         items=[{"id": sub["stripe_subscription_item_id"], "price": new_price, "quantity": 1}],
-        proration_behavior="none",  # applies at the next monthly bill, no mid-month charge
+        proration_behavior="always_invoice",  # bill/credit the difference now
     )
     db.execute("UPDATE rota_subscription SET current_tier = ? WHERE venue_id = ?", (required, venue_id))
     db.commit()
-    _notify_band_change(db, venue_id, required)
+    _notify_band_change(db, venue_id, required, grew=required > current)
 
 
-def _notify_band_change(db, venue_id: int, new_band: int) -> None:
+def _notify_band_change(db, venue_id: int, new_band: int, grew: bool = True) -> None:
     """Best-effort email to the venue owner (and the subscriber-notify inbox)
-    that their band moved up — a failed email must never break staff management."""
+    that their band moved — a failed email must never break staff management.
+    Bands move in both directions now, and the wording has to be honest about
+    which happened and about the proration, since the charge (or credit) lands
+    immediately rather than at the next bill."""
     venue = db.execute("SELECT name, pub_id FROM venue WHERE id = ?", (venue_id,)).fetchone()
     if venue is None:
         return
     venue_name = venue["name"] or "your venue"
     max_staff, pence = config.STAFF_TIERS[new_band - 1]
+    if grew:
+        subject = "Your RotaPulse plan has moved up a band"
+        movement = "has grown"
+        money = (
+            "We've charged the difference for the rest of your current month, pro rata — "
+            "from your next bill you'll pay the new price in full."
+        )
+    else:
+        subject = "Your RotaPulse plan has moved down a band"
+        movement = "has fallen"
+        money = (
+            "We've credited you the difference for the rest of your current month, pro rata — "
+            "from your next bill you'll pay the new, lower price."
+        )
     body = (
-        f"Your staff count on {venue_name} has grown, so RotaPulse has moved you to the band "
-        f"for up to {max_staff} staff (£{pence / 100:.2f}/month). The new price takes effect "
-        f"from your next monthly bill — nothing is charged mid-month. You can review it any "
+        f"Your staff count on {venue_name} {movement}, so RotaPulse has moved you to the band "
+        f"for up to {max_staff} staff (£{pence / 100:.2f}/month). {money} You can review it any "
         f"time on your RotaPulse subscription page."
     )
     owner = db.execute(
@@ -177,7 +199,7 @@ def _notify_band_change(db, venue_id: int, new_band: int) -> None:
     ).fetchone()
     for to in filter(None, [owner["email"] if owner else None, config.SUBSCRIBER_NOTIFY_EMAIL]):
         try:
-            send_email(to, "Your RotaPulse plan has moved up a band", body)
+            send_email(to, subject, body)
         except Exception:
             pass
 
@@ -253,9 +275,10 @@ def upgrade():
 @billing_bp.route("/change-band", methods=["POST"])
 @require_permission("app_admin")
 def change_band():
-    """Manually move an ACTIVE subscription to a different band. The new price
-    takes effect at the next monthly bill (proration_behavior='none'). You
-    can't drop below the band your current staff count needs."""
+    """Manually move an ACTIVE subscription to a different band, prorated
+    immediately (same behaviour as the automatic move in enforce_band). You
+    can't drop below the band your current staff count needs — enforce_band
+    would only move you straight back up on the next staff change anyway."""
     venue = g.venue
     band = request.form.get("band", type=int)
     db = get_db()
@@ -273,11 +296,11 @@ def change_band():
     stripe.Subscription.modify(
         sub["stripe_subscription_id"],
         items=[{"id": sub["stripe_subscription_item_id"], "price": new_price, "quantity": 1}],
-        proration_behavior="none",
+        proration_behavior="always_invoice",
     )
     db.execute("UPDATE rota_subscription SET current_tier = ? WHERE venue_id = ?", (band, venue["id"]))
     db.commit()
-    flash("Band updated — the new price applies from your next monthly bill.")
+    flash("Band updated — we've settled the difference for the rest of this month pro rata.")
     return redirect(url_for("billing.subscription"))
 
 

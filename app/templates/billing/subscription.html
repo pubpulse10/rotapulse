@@ -16,15 +16,16 @@
   {% else %}
     {% if active %}
       <h2>Change band</h2>
-      <p class="hint">Your price is a flat monthly fee for your band, plus VAT. If your staff grow past
-        your band we move you up automatically and email you — the new price starts at your
-        next monthly bill. A change you make here also takes effect at your next bill.</p>
+      <p class="hint">Your price is a flat monthly fee for your band, plus VAT. As your staff numbers
+        change we move you between bands automatically and email you — we charge or credit the
+        difference for the rest of the month pro rata, so you only ever pay for the band you're
+        actually on. A change you make here works the same way.</p>
     {% else %}
       <h2>Choose your band</h2>
       <p class="hint">Your price is a flat monthly fee based on how many staff you have, plus VAT. Pick the
-        band that fits — if you grow past it later we move you up automatically and email you
-        (new price from your next bill). Subscribing starts your free trial: you'll add a card,
-        but nothing is charged until the trial ends.</p>
+        band that fits — as your numbers change later we move you between bands automatically and
+        email you, charging or crediting the difference pro rata. Subscribing starts your free
+        trial: you'll add a card, but nothing is charged until the trial ends.</p>
     {% endif %}
 
     <form method="post" action="{{ url_for('billing.change_band') if active else url_for('billing.upgrade') }}">

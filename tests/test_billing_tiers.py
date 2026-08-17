@@ -339,8 +339,8 @@ def test_upgrade_rejects_band_below_staff_requirement(app, client, venue, monkey
 
 def test_approving_staff_bumps_band_when_it_grows_past_current(app, client, venue, monkeypatch):
     """Approving a staff member that pushes the count past the current band
-    moves the subscription UP a band — repriced to the higher band's flat price
-    at the next bill (proration 'none'), not immediately."""
+    moves the subscription UP a band, prorated immediately — the difference for
+    the rest of the month is invoiced now, which is what pubpulse.co.uk says."""
     import stripe
 
     _set_band_prices(monkeypatch)
@@ -360,10 +360,10 @@ def test_approving_staff_bumps_band_when_it_grows_past_current(app, client, venu
     resp = client.post(f"/v/{venue['slug']}/admin/staff/{access_id}/approve")
     assert resp.status_code == 302
 
-    # 5 existing + 1 approved = 6 -> band 2, repriced at next bill.
+    # 5 existing + 1 approved = 6 -> band 2, prorated now.
     assert captured["sub_id"] == "sub_live1"
     assert captured["items"] == [{"id": "si_live1", "price": "price_band2", "quantity": 1}]
-    assert captured["proration_behavior"] == "none"
+    assert captured["proration_behavior"] == "always_invoice"
 
     with app.app_context():
         conn = db_module.get_db()
@@ -373,15 +373,50 @@ def test_approving_staff_bumps_band_when_it_grows_past_current(app, client, venu
     assert sub["current_tier"] == 2
 
 
-def test_marking_staff_left_does_not_downgrade_band(app, client, venue, monkeypatch):
-    """No auto-downgrade: a shrinking venue keeps its band (and no Stripe call
-    is made) until the landlord lowers it themselves."""
+def test_marking_staff_left_downgrades_band(app, client, venue, monkeypatch):
+    """Bands move DOWN as well as up: a venue that shrinks out of its band is
+    repriced to the lower one and credited the difference pro rata. The site
+    says band changes are automatic, so this has to hold in both directions."""
     import stripe
 
     _set_band_prices(monkeypatch)
     _give_venue_a_live_stripe_subscription(app, venue["id"], band=2)
     _person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Leaver")
     for i in range(5):
+        create_active_staff(app, venue["id"], name=f"Remaining {i}")
+
+    captured = {}
+    monkeypatch.setattr(
+        stripe.Subscription, "modify",
+        lambda sub_id, items=None, proration_behavior=None: captured.update(
+            sub_id=sub_id, items=items, proration_behavior=proration_behavior) or SimpleNamespace(),
+    )
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(f"/v/{venue['slug']}/admin/staff/{membership_id}/leave")
+    assert resp.status_code == 302
+
+    # 6 -> 5 drops out of band 2 (6-10) into band 1 (1-5).
+    assert captured["items"] == [{"id": "si_live1", "price": "price_band1", "quantity": 1}]
+    assert captured["proration_behavior"] == "always_invoice"
+    with app.app_context():
+        conn = db_module.get_db()
+        sub = conn.execute(
+            "SELECT current_tier FROM rota_subscription WHERE venue_id = ?", (venue["id"],)
+        ).fetchone()
+    assert sub["current_tier"] == 1
+
+
+def test_staff_change_within_the_same_band_touches_nothing(app, client, venue, monkeypatch):
+    """The no-op guarantee that survives auto-downgrade: a staff change that
+    doesn't cross a boundary must make no Stripe call at all. Without this,
+    every hire and leaver would churn the subscription (and its invoices)."""
+    import stripe
+
+    _set_band_prices(monkeypatch)
+    _give_venue_a_live_stripe_subscription(app, venue["id"], band=2)
+    _person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Leaver")
+    for i in range(6):  # 7 total -> band 2; after the leaver, 6 -> still band 2
         create_active_staff(app, venue["id"], name=f"Remaining {i}")
 
     called = {"modify": False}
@@ -394,7 +429,6 @@ def test_marking_staff_left_does_not_downgrade_band(app, client, venue, monkeypa
     resp = client.post(f"/v/{venue['slug']}/admin/staff/{membership_id}/leave")
     assert resp.status_code == 302
 
-    # 6 -> 5 is still within band 2: no downgrade, no Stripe call.
     assert called["modify"] is False
     with app.app_context():
         conn = db_module.get_db()
