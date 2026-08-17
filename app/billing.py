@@ -204,6 +204,32 @@ def _notify_band_change(db, venue_id: int, new_band: int, grew: bool = True) -> 
             pass
 
 
+def _forget_deleted_customer(db, venue_id: int, exc) -> bool:
+    """Recover from a Stripe Customer that was deleted in the Dashboard.
+
+    The stored stripe_customer_id then points at nothing, and BOTH paths that
+    use it fail forever: the billing portal 500s, and Checkout 500s too
+    because upgrade() passes the dead id — so the venue can neither manage nor
+    re-subscribe. Stripe reports this as an InvalidRequestError naming the
+    customer, which is definitive rather than transient (unlike an outage or a
+    bad key), so it's safe to clear the id and let the next Checkout mint a
+    fresh Customer. Returns True if that's what happened.
+
+    Deliberately does NOT touch `plan` — losing the Stripe customer record
+    isn't evidence the venue shouldn't have access, and the webhook remains
+    the single writer of plan state."""
+    if not isinstance(exc, stripe.error.InvalidRequestError):
+        return False
+    if "no such customer" not in str(exc).lower():
+        return False
+    db.execute(
+        "UPDATE rota_subscription SET stripe_customer_id = NULL WHERE venue_id = ?",
+        (venue_id,),
+    )
+    db.commit()
+    return True
+
+
 @billing_bp.route("/upgrade", methods=["POST"])
 @require_permission("app_admin")
 def upgrade():
@@ -268,7 +294,14 @@ def upgrade():
         if landlord_email:
             session_kwargs["customer_email"] = landlord_email
 
-    checkout_session = stripe.checkout.Session.create(**session_kwargs)
+    try:
+        checkout_session = stripe.checkout.Session.create(**session_kwargs)
+    except stripe.error.StripeError as exc:
+        if _forget_deleted_customer(db, venue["id"], exc):
+            flash("We've refreshed your billing record — please try subscribing again.", "error")
+        else:
+            flash("Sorry — we couldn't start checkout just now. Please try again shortly.", "error")
+        return redirect(url_for("billing.subscription"))
     return redirect(checkout_session.url, code=303)
 
 
@@ -342,14 +375,22 @@ def subscription():
 @require_permission("app_admin")
 def manage():
     venue = g.venue
-    sub = get_rota_subscription(get_db(), venue["id"])
+    db = get_db()
+    sub = get_rota_subscription(db, venue["id"])
     if not sub or not sub["stripe_customer_id"]:
         flash("There's no subscription to manage yet — subscribe below first.", "error")
         return redirect(url_for("billing.subscription"))
-    portal_session = stripe.billing_portal.Session.create(
-        customer=sub["stripe_customer_id"],
-        return_url=url_for("billing.subscription", _external=True),
-    )
+    try:
+        portal_session = stripe.billing_portal.Session.create(
+            customer=sub["stripe_customer_id"],
+            return_url=url_for("billing.subscription", _external=True),
+        )
+    except stripe.error.StripeError as exc:
+        if _forget_deleted_customer(db, venue["id"], exc):
+            flash("That billing record no longer exists at Stripe — please subscribe again.", "error")
+        else:
+            flash("Sorry — we couldn't open the billing portal just now. Please try again shortly.", "error")
+        return redirect(url_for("billing.subscription"))
     return redirect(portal_session.url, code=303)
 
 
