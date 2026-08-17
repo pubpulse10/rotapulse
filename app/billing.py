@@ -133,6 +133,52 @@ def current_venue_plan(venue_id: int) -> str:
     return "active" if row["plan"] == "active" else "inactive"
 
 
+# Friendly labels for the raw Stripe/DB status values. NEVER render the raw
+# value to a landlord: this page used to print "Plan status: active" straight
+# from the database. Kept identical across all four apps so the wording can't
+# drift.
+SUBSCRIPTION_STATUS_LABELS = {
+    "trialing": "Free trial",
+    "active": "Active",
+    "past_due": "Payment overdue",
+    "unpaid": "Unpaid",
+    "canceled": "Cancelled",
+    "incomplete": "Awaiting payment confirmation",
+    "incomplete_expired": "Not completed",
+    "comp": "Complimentary — no charge",
+}
+
+
+def subscription_summary(status, subscription_id, period_end):
+    """The single shape every app's Subscription page renders, so the four
+    pages can't drift apart again. Returns status_label / next_date /
+    next_amount_pence / is_free.
+
+    next_amount_pence comes from a LIVE Stripe preview rather than the band
+    price, because it's the only way a discount shows honestly — a 100%-off
+    internal venue would otherwise read identically to a paying one. It also
+    picks up a mid-month band change, which the band price alone can't.
+    Best-effort by design: a Stripe outage degrades the page to
+    status-and-date instead of breaking it, so this must never raise."""
+    summary = {
+        "status_label": SUBSCRIPTION_STATUS_LABELS.get(status) if status else None,
+        "next_date": period_end,
+        "next_amount_pence": None,
+        "is_free": False,
+    }
+    if not subscription_id or not config.STRIPE_SECRET_KEY:
+        return summary
+    try:
+        preview = stripe.Invoice.create_preview(subscription=subscription_id)
+        amount = getattr(preview, "amount_due", None)
+    except Exception:
+        return summary  # Stripe unreachable / subscription gone — show what we have
+    if amount is not None:
+        summary["next_amount_pence"] = amount
+        summary["is_free"] = amount == 0
+    return summary
+
+
 def _band_price(band: int) -> str | None:
     """The flat monthly Stripe price id for a band (1-4), or None if unset."""
     if 1 <= band <= len(config.STRIPE_PRICE_ROTA_BANDS):
@@ -374,6 +420,11 @@ def subscription():
         venue=venue,
         sub=sub,
         plan=current_venue_plan(venue["id"]),
+        summary=subscription_summary(
+            sub["subscription_status"] if sub else None,
+            sub["stripe_subscription_id"] if sub else None,
+            sub["current_period_end"] if sub else None,
+        ),
         staff_count=staff_count,
         required_band=tier_for_count(staff_count),
         current_band=(sub["current_tier"] if sub else None),

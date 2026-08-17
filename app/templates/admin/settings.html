@@ -71,4 +71,10 @@
   <p class="hint">Choose which events you want to be told about — missed clock-ins, swap requests, leave requests, and open shifts claimed — and who should hear about them.</p>
   <a class="btn-secondary" href="{{ url_for('admin_config.notification_settings') }}">Manage notifications</a>
 </div>
+
+<div class="panel">
+  <h2>Subscription</h2>
+  <p class="hint">Your plan, band, next payment and invoices — and where to update your card or cancel.</p>
+  <a class="btn-secondary" href="{{ url_for('billing.subscription') }}">View subscription</a>
+</div>
 {% endblock %}

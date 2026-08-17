@@ -1,15 +1,62 @@
 {% extends "base.html" %}
 {% block title %}Subscription — RotaPulse{% endblock %}
 {% block content %}
+{#
+  The family-standard Subscription page. Location (Settings -> Subscription),
+  heading, row order, wording and button label are deliberately identical in
+  PricePulse, RotaPulse, TaskPulse and DiaryPulse — keep them in step. Never
+  render a raw status value here; use summary.status_label. The band chooser
+  below is RotaPulse's own addition, after the standard block.
+#}
 <div class="panel narrow">
+  <p class="hint"><a href="{{ url_for('admin_config.settings') }}">‹ Settings</a></p>
   <h1>Subscription</h1>
-  <p>Plan status: <strong>{{ plan }}</strong>{% if current_band and bands %}
-     · Band {{ current_band }} (£{{ '%.2f'|format(bands[current_band-1].price) }}/month + VAT){% endif %}</p>
-  {% if sub and sub['trial_ends_at'] and plan == 'active' and not sub['stripe_subscription_id'] %}
-    <p class="hint">Free trial ends {{ sub['trial_ends_at']|uk_date }}.</p>
+
+  <div class="list-block">
+    <div class="row">
+      <div class="row-main">
+        <p class="row-title">Plan</p>
+        <p class="row-sub">RotaPulse{% if current_band and bands %} — Band {{ current_band }},
+          up to {{ bands[current_band-1].max }} staff{% endif %}</p>
+      </div>
+    </div>
+    <div class="row">
+      <div class="row-main">
+        <p class="row-title">Status</p>
+        <p class="row-sub">{{ summary.status_label or ('Active' if plan == 'active' else 'Not subscribed') }}</p>
+      </div>
+    </div>
+    <div class="row">
+      <div class="row-main">
+        <p class="row-title">Next payment</p>
+        <p class="row-sub">
+          {% if summary.is_free %}
+            No payment due
+          {% elif summary.next_amount_pence is not none %}
+            £{{ '%.2f'|format(summary.next_amount_pence / 100) }} including VAT{% if summary.next_date %}
+            on {{ summary.next_date | uk_date }}{% endif %}
+          {% elif summary.next_date %}
+            {{ summary.next_date | uk_date }}
+          {% else %}
+            No payment scheduled
+          {% endif %}
+        </p>
+      </div>
+    </div>
+    <div class="row">
+      <div class="row-main">
+        <p class="row-title">Billable staff</p>
+        <p class="row-sub">{{ staff_count }} — needs at least Band {{ required_band }}</p>
+      </div>
+    </div>
+  </div>
+
+  {% if active %}
+  <form method="post" action="{{ url_for('billing.manage') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn-primary">Manage billing, invoices &amp; card</button>
+  </form>
   {% endif %}
-  <p>Billable staff right now: <strong>{{ staff_count }}</strong> — that needs at least
-     <strong>Band {{ required_band }}</strong>.</p>
 
   {% if not stripe_configured %}
     <p class="hint">Billing isn't configured yet in this environment.</p>
@@ -44,12 +91,8 @@
       <button type="submit" class="btn-primary">{{ 'Change band' if active else 'Subscribe now' }}</button>
     </form>
 
-    {% if active %}
-    <form method="post" action="{{ url_for('billing.manage') }}" style="margin-top:1rem;">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn-primary">Manage / cancel (card &amp; invoices)</button>
-    </form>
-    {% endif %}
   {% endif %}
+
+  <p class="hint">All prices exclude VAT, charged at the prevailing rate.</p>
 </div>
 {% endblock %}

@@ -93,8 +93,9 @@
           <a class="{{ 'active' if active_section == 'dashboard' else '' }}" href="{{ url_for('dashboard.week') }}">Dashboard</a>
         {% endif %}
         {% if 'app_admin' in g.permission_levels or is_support_session %}
-          <a class="{{ 'active' if active_section == 'settings' else '' }}" href="{{ url_for('admin_config.settings') }}">Settings</a>
-          <a class="{{ 'active' if active_section == 'subscription' else '' }}" href="{{ url_for('billing.subscription') }}">Subscription</a>
+          {# Subscription lives UNDER Settings, not beside it — the same place
+             it sits in the other three apps. Link is on the Settings page. #}
+          <a class="{{ 'active' if active_section in ['settings', 'subscription'] else '' }}" href="{{ url_for('admin_config.settings') }}">Settings</a>
         {% endif %}
         {% if not is_support_session %}
           <a class="{{ 'active' if active_section == 'my_shifts' else '' }}" href="{{ url_for('staff_portal.home') }}">My shifts</a>
