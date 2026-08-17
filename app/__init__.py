@@ -131,6 +131,22 @@ def create_app():
             "User-agent: *\nDisallow: /\n", mimetype="text/plain"
         )
 
+    @app.route("/health")
+    def health():
+        """Deploy verification: reports the commit this instance is actually
+        running, so a deploy can be confirmed rather than assumed. Render sets
+        RENDER_GIT_COMMIT automatically; it's absent locally, hence 'unknown'.
+
+        Unauthenticated on purpose (same reasoning as /robots.txt — it has to
+        answer without a session to be useful), so it is deliberately minimal:
+        an app name and a commit, and nothing about configuration, environment
+        or data. Keep it that way. Identical in all five family apps."""
+        return {
+            "app": "rotapulse",
+            "commit": os.environ.get("RENDER_GIT_COMMIT", "unknown")[:12],
+            "status": "ok",
+        }
+
     # Server-to-server only (bearer-secret authed, no session/CSRF token) —
     # exempted the same way the Stripe webhook is below.
     csrf.exempt(internal_bp)
