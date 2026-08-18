@@ -60,8 +60,22 @@ def shift_detail(shift_id):
     if shift_row is None:
         flask.abort(404)
     attendance = db.execute("SELECT * FROM attendance WHERE shift_id = ?", (shift_id,)).fetchone()
+    # Swap-target dropdown (spec §5.5): every other active staff member at
+    # this venue, so nobody has to know/ask for a colleague's person ID.
+    colleagues = db.execute(
+        """SELECT person.id, person.name FROM venue_membership
+           JOIN person ON person.id = venue_membership.person_id
+           WHERE venue_membership.venue_id = ? AND venue_membership.status = 'active'
+           AND venue_membership.person_id != ?
+           ORDER BY person.name""",
+        (flask.g.venue["id"], flask.g.person["id"]),
+    ).fetchall()
     return flask.render_template(
-        "staff/shift_detail.html", shift=shift_row, attendance=attendance, today=date.today().isoformat()
+        "staff/shift_detail.html",
+        shift=shift_row,
+        attendance=attendance,
+        today=date.today().isoformat(),
+        colleagues=colleagues,
     )
 
 
