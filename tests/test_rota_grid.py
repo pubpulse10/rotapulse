@@ -18,6 +18,35 @@ def test_week_grid_shows_shift_cell(app, client, venue):
     assert b"09:00" in resp.data
 
 
+def test_avatar_is_pinned_to_the_staff_name_not_each_shift_chip(app, client, venue):
+    """Real request, 2026-08-18: the photo used to render inside every
+    individual shift chip. Now it should appear once, next to the staff
+    member's name in the leftmost column, regardless of how many shifts
+    they have that week."""
+    login_as_pub(client, venue["pub_id"])
+    person_id, _membership_id, _email = create_active_staff(app, venue["id"], name="Alex")
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute("UPDATE person SET avatar_url = 'alex.png' WHERE id = ?", (person_id,))
+        conn.commit()
+
+    today = date.today().isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    for d in (today, tomorrow):
+        client.post(
+            f"/v/{venue['slug']}/rota/shift/create",
+            data={"person_id": person_id, "shift_date": d, "start_time": "09:00", "end_time": "17:00"},
+        )
+
+    resp = client.get(f"/v/{venue['slug']}/rota/")
+    body = resp.data.decode()
+    assert body.count('class="avatar"') == 1  # one photo total, not one per shift
+    assert 'rota-name-cell' in body
+    name_cell = body.split('class="rota-name-cell"')[1].split("</td>")[0]
+    assert "avatar" in name_cell
+    assert "media/avatar/alex.png" in name_cell
+
+
 def test_event_tag_can_be_added_and_removed_from_the_grid(app, client, venue):
     login_as_pub(client, venue["pub_id"])
     today = date.today().isoformat()

@@ -62,7 +62,12 @@
       </tr>
       {% for row in grid %}
         <tr>
-          <td>{{ row['member']['name'] }}</td>
+          <td class="rota-name-cell">
+            {% if row['member']['avatar_url'] %}
+              <img class="avatar" src="{{ url_for('media.avatar', stored_filename=row['member']['avatar_url']) }}" alt="">
+            {% endif %}
+            {{ row['member']['name'] }}
+          </td>
           {% for cell in row['cells'] %}
             {% set d_str = date_strs[loop.index0] %}
             <td class="rota-cell cell-{{ 'shift' if cell['state']=='shift' else ('dayoff' if cell['state']=='day_off' else ('leave' if cell['state']=='leave' else 'empty')) }}"
@@ -83,9 +88,6 @@
                     <span class="shift-chip" data-shift-id="{{ s['id'] }}"
                           data-href="{{ url_for('rota_grid.cell', person_id=row['member']['person_id'], on_date=d_str) }}"
                           tabindex="0" role="link">
-                      {% if row['member']['avatar_url'] %}
-                        <img class="avatar" src="{{ url_for('media.avatar', stored_filename=row['member']['avatar_url']) }}" alt="" draggable="false">
-                      {% endif %}
                       {{ s['start_time'] }}-{{ s['end_time'] }}
                     </span>
                   {% endfor %}
