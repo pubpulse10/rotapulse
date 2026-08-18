@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Shift — {{ shift['shift_date']|uk_date }}{% endblock %}
 {% block content %}
+<p><a class="btn-secondary" href="{{ url_for('staff_portal.home') }}">&laquo; My shifts</a></p>
 <div class="panel">
   <h1>{{ shift['shift_date']|uk_date }} — {{ shift['start_time'] }} to {{ shift['end_time'] }}</h1>
 

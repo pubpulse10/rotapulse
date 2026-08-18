@@ -453,6 +453,22 @@ def move_shift(shift_id):
     if shift_row is None:
         return flask.jsonify({"error": "That shift no longer exists."}), 404
 
+    # Real bug this guards against: attendance is keyed by shift_id, not by
+    # date, so moving a shift that's already been clocked in/out for used to
+    # silently carry that clock-in/out data along to the new person/date —
+    # confirmed live, a shift moved to a new day kept showing "clocked in"
+    # from several days earlier, which also made the missed-clock-in/staff
+    # reminder checks wrongly think the (new) shift was already covered.
+    # Attendance is a real historical + payroll-relevant record, so it's
+    # blocked outright rather than silently discarded — moving is only ever
+    # meant for a not-yet-worked shift.
+    has_attendance = db.execute("SELECT 1 FROM attendance WHERE shift_id = ?", (shift_id,)).fetchone()
+    if has_attendance is not None:
+        return flask.jsonify({
+            "error": "That shift already has clock-in/out recorded and can't be moved — "
+                     "delete it and create a new shift instead if it needs to change.",
+        }), 409
+
     is_billable_staff = db.execute(
         """SELECT 1 FROM venue_membership
            JOIN rota_staff_detail ON rota_staff_detail.venue_membership_id = venue_membership.id

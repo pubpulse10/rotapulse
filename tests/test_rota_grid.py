@@ -139,6 +139,40 @@ def test_move_shift_to_different_person_and_date(app, client, venue):
         assert row["shift_date"] == "2026-08-04"
 
 
+def test_move_shift_blocked_once_it_has_attendance_recorded(app, client, venue):
+    """Real bug, confirmed live: attendance is keyed by shift_id, not by
+    date, so moving a shift that had already been clocked in/out for used
+    to silently carry that stale clock-in/out data to the new person/date
+    -- a shift moved to today kept showing "clocked in" from several days
+    earlier, which also made the missed-clock-in/staff-reminder checks
+    wrongly think the (new) occurrence was already covered."""
+    login_as_pub(client, venue["pub_id"])
+    from_person, _m1, _e1 = create_active_staff(app, venue["id"], name="AlreadyWorked")
+    to_person, _m2, _e2 = create_active_staff(app, venue["id"], name="MoveTarget")
+    shift_id = _create_shift(app, venue["id"], from_person, "2026-08-03")
+
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at, clock_out_at) VALUES (?, '2026-08-03T09:00:00', '2026-08-03T17:00:00')",
+            (shift_id,),
+        )
+        conn.commit()
+
+    resp = client.post(
+        f"/v/{venue['slug']}/rota/shift/{shift_id}/move",
+        json={"person_id": to_person, "shift_date": "2026-08-10"},
+    )
+    assert resp.status_code == 409
+    assert "already has clock-in" in resp.get_json()["error"].lower()
+
+    with app.app_context():
+        conn = db_module.get_db()
+        row = conn.execute("SELECT person_id, shift_date FROM shift WHERE id = ?", (shift_id,)).fetchone()
+        assert row["person_id"] == from_person  # unchanged
+        assert row["shift_date"] == "2026-08-03"  # unchanged
+
+
 def test_move_shift_blocked_by_approved_leave(app, client, venue):
     login_as_pub(client, venue["pub_id"])
     from_person, _m1, _e1 = create_active_staff(app, venue["id"], name="Mover")
