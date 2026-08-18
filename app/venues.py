@@ -85,6 +85,19 @@ def entry():
         if membership:
             return flask.redirect(flask.url_for("staff_portal.home", slug=membership["slug"]))
 
+    # Genuinely logged out (session expired/cleared, not just this specific
+    # page) — real report, 2026-08-18: still fell through to the owner-only
+    # PricePulse login even after the check above, because there was no
+    # session at all left to read a slug from. rotapulse_slug (set on
+    # successful local login, app/rota_login.py) is a plain cookie, not tied
+    # to session validity, so it survives exactly this case — send her back
+    # to her OWN venue's local login instead of PricePulse's.
+    remembered_slug = flask.request.cookies.get("rotapulse_slug")
+    if remembered_slug:
+        venue = get_db().execute("SELECT 1 FROM venue WHERE slug = ?", (remembered_slug,)).fetchone()
+        if venue:
+            return flask.redirect(flask.url_for("rota_login.login", slug=remembered_slug))
+
     return _login_redirect()
 
 

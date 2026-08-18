@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 import flask
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from app import config
 from app.db import get_db
 from app.extensions import limiter
 from app.notifications import send_email
@@ -76,7 +77,20 @@ def login():
             flask.session["rotapulse_person_id"] = person["id"]
             next_param = flask.request.args.get("next")
             dest = next_param if _safe_next(next_param) else flask.url_for("staff_portal.home", slug=venue["slug"])
-            return flask.redirect(dest)
+            resp = flask.redirect(dest)
+            # Remembers which venue's LOCAL login to send this device back to
+            # from the bare "/" entry point (the PWA's start_url) if the
+            # session itself is ever gone by then — a plain cookie, not tied
+            # to session validity, so it survives a session expiring/being
+            # cleared even though the login itself would need to happen
+            # again. Without this, a fully logged-out visit to "/" has no
+            # slug to work with and falls back to the owner-only PricePulse
+            # login, which is wrong for staff (see app/venues.py::entry).
+            resp.set_cookie(
+                "rotapulse_slug", venue["slug"], max_age=60 * 60 * 24 * 365,
+                httponly=True, secure=config.SESSION_COOKIE_SECURE, samesite="Lax",
+            )
+            return resp
         flask.flash("Invalid email/mobile or password.", "error")
     return flask.render_template("login/login.html", venue=venue)
 
