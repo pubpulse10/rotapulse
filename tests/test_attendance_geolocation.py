@@ -1,18 +1,60 @@
-from datetime import date
+from datetime import date, timedelta
 
 from app import db as db_module
 from tests.conftest import create_active_staff, login_as_person
 
 
-def _create_shift_for(app, venue_id, person_id):
+def _create_shift_for(app, venue_id, person_id, shift_date=None):
     with app.app_context():
         conn = db_module.get_db()
         cur = conn.execute(
             "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, ?, ?, ?, 'scheduled')",
-            (venue_id, person_id, date.today().isoformat(), "09:00", "17:00"),
+            (venue_id, person_id, shift_date or date.today().isoformat(), "09:00", "17:00"),
         )
         conn.commit()
         return cur.lastrowid
+
+
+def test_clock_in_rejected_for_a_future_shift(app, client, venue):
+    """Real report, 2026-08-18: nothing stopped clocking in for a shift
+    days ahead straight from "My shifts" (which lists up to 3 weeks out)."""
+    person_id, _m, _e = create_active_staff(app, venue["id"])
+    future_date = (date.today() + timedelta(days=5)).isoformat()
+    shift_id = _create_shift_for(app, venue["id"], person_id, future_date)
+    login_as_person(client, person_id)
+
+    resp = client.post(
+        f"/v/{venue['slug']}/staff/shift/{shift_id}/clock-in",
+        data={"lat": "52.6", "lng": "1.3"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert b"only clock in on the day" in resp.data
+
+    with app.app_context():
+        conn = db_module.get_db()
+        att = conn.execute("SELECT * FROM attendance WHERE shift_id = ?", (shift_id,)).fetchone()
+        assert att is None  # nothing recorded
+
+
+def test_clock_in_rejected_for_a_past_shift(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"])
+    past_date = (date.today() - timedelta(days=3)).isoformat()
+    shift_id = _create_shift_for(app, venue["id"], person_id, past_date)
+    login_as_person(client, person_id)
+
+    resp = client.post(
+        f"/v/{venue['slug']}/staff/shift/{shift_id}/clock-in",
+        data={"lat": "52.6", "lng": "1.3"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert b"only clock in on the day" in resp.data
+
+    with app.app_context():
+        conn = db_module.get_db()
+        att = conn.execute("SELECT * FROM attendance WHERE shift_id = ?", (shift_id,)).fetchone()
+        assert att is None
 
 
 def test_clock_in_within_radius_confirms_location(app, client, venue):

@@ -6,14 +6,24 @@
   <h1>{{ shift['shift_date']|uk_date }} — {{ shift['start_time'] }} to {{ shift['end_time'] }}</h1>
 
   {% if not attendance or not attendance['clock_in_at'] %}
-    <form id="clock-in-form" method="post" action="{{ url_for('staff_portal.clock_in', shift_id=shift['id']) }}" enctype="multipart/form-data">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="lat" id="clock-in-lat">
-      <input type="hidden" name="lng" id="clock-in-lng">
-      <label for="clock-in-photo">Photo (optional)</label>
-      <input type="file" id="clock-in-photo" name="photo" accept="image/*" capture="user">
-      <button type="submit" class="btn-primary btn-large" onclick="return captureLocation('clock-in-form')">Clock in</button>
-    </form>
+    {% if shift['shift_date'] != today %}
+      <p class="hint">
+        {% if shift['shift_date'] > today %}
+          This shift hasn't started yet — come back on {{ shift['shift_date']|uk_date }} to clock in.
+        {% else %}
+          This shift's date has passed without a clock-in recorded — ask your admin to sort this out.
+        {% endif %}
+      </p>
+    {% else %}
+      <form id="clock-in-form" method="post" action="{{ url_for('staff_portal.clock_in', shift_id=shift['id']) }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="lat" id="clock-in-lat">
+        <input type="hidden" name="lng" id="clock-in-lng">
+        <label for="clock-in-photo">Photo (optional)</label>
+        <input type="file" id="clock-in-photo" name="photo" accept="image/*" capture="user">
+        <button type="submit" class="btn-primary btn-large" onclick="return captureLocation('clock-in-form')">Clock in</button>
+      </form>
+    {% endif %}
   {% elif not attendance['clock_out_at'] %}
     <p class="hint">Clocked in at {{ attendance['clock_in_at'] | uk_datetime }}.</p>
     <form id="clock-out-form" method="post" action="{{ url_for('staff_portal.clock_out', shift_id=shift['id']) }}">

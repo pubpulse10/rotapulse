@@ -60,7 +60,9 @@ def shift_detail(shift_id):
     if shift_row is None:
         flask.abort(404)
     attendance = db.execute("SELECT * FROM attendance WHERE shift_id = ?", (shift_id,)).fetchone()
-    return flask.render_template("staff/shift_detail.html", shift=shift_row, attendance=attendance)
+    return flask.render_template(
+        "staff/shift_detail.html", shift=shift_row, attendance=attendance, today=date.today().isoformat()
+    )
 
 
 @staff_bp.route("/shift/<int:shift_id>/clock-in", methods=["POST"])
@@ -74,6 +76,13 @@ def clock_in(shift_id):
     ).fetchone()
     if shift_row is None:
         flask.abort(404)
+    # Real report, 2026-08-18: nothing stopped clocking in for a shift days
+    # in the future straight from "My shifts" (which lists up to 3 weeks
+    # ahead) -- restricted to the shift's own calendar day, matching how
+    # attendance is meant to represent when someone actually was in.
+    if shift_row["shift_date"] != date.today().isoformat():
+        flask.flash("You can only clock in on the day of the shift itself.", "error")
+        return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=shift_id))
 
     form = flask.request.form
     lat = form.get("lat", type=float)
