@@ -54,3 +54,28 @@ def format_uk_time(value) -> str:
         except ValueError:
             return value
     return value.strftime("%H:%M")
+
+
+def variance_label(actual_at, planned_hhmm, threshold_minutes=15) -> str | None:
+    """"Early" or "Late" relative to a planned HH:MM, or None if either
+    value is missing or the difference is within threshold_minutes (kept
+    in sync with staff_portal.VARIANCE_THRESHOLD_MINUTES — same "not worth
+    flagging" cutoff as the flag this replaces). Added 2026-08-18 alongside
+    ad-hoc/early-start approval: attendance.variance_flag is just a
+    boolean (set if either the clock-in or clock-out was >15 min off
+    plan), with no sign — so an early arrival was showing under the same
+    "Late" badge as a genuinely late one. Direction and magnitude are both
+    derived here from the two real timestamps rather than stored, since
+    nothing before this needed to distinguish them."""
+    if not actual_at or not planned_hhmm:
+        return None
+    if isinstance(actual_at, str):
+        try:
+            actual_at = datetime.fromisoformat(actual_at)
+        except ValueError:
+            return None
+    planned = actual_at.replace(hour=int(planned_hhmm[:2]), minute=int(planned_hhmm[3:5]), second=0, microsecond=0)
+    diff_minutes = (actual_at - planned).total_seconds() / 60
+    if abs(diff_minutes) <= threshold_minutes:
+        return None
+    return "Early" if diff_minutes < 0 else "Late"

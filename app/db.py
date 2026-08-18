@@ -392,6 +392,17 @@ def init_schema(conn=None):
         # rota_staff_detail row (not person, since a start date is specific
         # to working at THIS venue, unlike date_of_birth).
         _add_column_if_missing(conn, "rota_staff_detail", "start_date", "TEXT")
+        # Ad-hoc/unplanned clock-in with admin approval (2026-08-18): 'origin'
+        # marks a shift that was created BY a clock-in rather than rostered in
+        # advance, purely for display (badge on the grid). The approval fields
+        # live on attendance, not shift, because the same approval mechanism
+        # also applies to a REAL rostered shift started more than 30 minutes
+        # early — no new shift row in that case, just a flag on its existing
+        # attendance row. NULL approval_status = never needed approval.
+        _add_column_if_missing(conn, "shift", "origin", "TEXT NOT NULL DEFAULT 'planned'")
+        _add_column_if_missing(conn, "attendance", "approval_status", "TEXT")
+        _add_column_if_missing(conn, "attendance", "approval_decided_at", "TEXT")
+        _add_column_if_missing(conn, "attendance", "approval_decided_by_person_id", "INTEGER")
         conn.commit()
     finally:
         if owns_conn:

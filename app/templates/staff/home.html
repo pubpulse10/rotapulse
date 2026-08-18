@@ -14,9 +14,53 @@
   <a href="{{ url_for('staff_portal.shift_detail', shift_id=s['id']) }}" style="text-decoration:none; color:inherit;">
     <div class="day-list-item">
       <strong>{{ s['shift_date']|uk_date }}</strong> — {{ s['start_time'] }} to {{ s['end_time'] }}
+      {% if s['origin'] == 'ad_hoc' %}<span class="badge">Unplanned</span>{% endif %}
+      {% if s['approval_status'] == 'pending' %}<span class="badge badge-unnotified">Awaiting approval</span>{% endif %}
       {% if s['clock_in_at'] and not s['clock_out_at'] %}<span class="badge badge-on-track">Clocked in</span>{% endif %}
       {% if s['clock_out_at'] %}<span class="badge">Completed</span>{% endif %}
     </div>
   </a>
 {% endfor %}
+
+{% if not has_open_shift_today %}
+  <div class="panel">
+    <h2>Not on the rota today?</h2>
+    <p class="hint">If you've come in to cover or help out without a rostered shift, you can start one now — your admin will need to approve it afterwards.</p>
+    <form id="ad-hoc-form" method="post" action="{{ url_for('staff_portal.start_ad_hoc_shift') }}" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="lat" id="ad-hoc-lat">
+      <input type="hidden" name="lng" id="ad-hoc-lng">
+      <label for="ad-hoc-photo">Photo (optional)</label>
+      <input type="file" id="ad-hoc-photo" name="photo" accept="image/*" capture="user">
+      <button type="submit" class="btn-secondary" onclick="return captureLocation('ad-hoc-form', this)">Start an unplanned shift</button>
+    </form>
+  </div>
+{% endif %}
+
+<script>
+{# Same generous-timeout geolocation approach as staff/shift_detail.html — see the comment there for why 20s + high accuracy. #}
+function captureLocation(formId, button) {
+  const form = document.getElementById(formId);
+  if (!navigator.geolocation) {
+    return true;
+  }
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Getting your location…';
+  const finish = () => {
+    button.disabled = false;
+    button.textContent = originalLabel;
+  };
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      form.querySelector('input[name=lat]').value = pos.coords.latitude;
+      form.querySelector('input[name=lng]').value = pos.coords.longitude;
+      form.submit();
+    },
+    () => { finish(); form.submit(); },
+    { timeout: 20000, enableHighAccuracy: true }
+  );
+  return false;
+}
+</script>
 {% endblock %}

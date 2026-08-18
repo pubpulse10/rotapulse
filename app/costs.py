@@ -47,7 +47,8 @@ def actual_cost(venue_id: int, start_date: str, end_date: str) -> float:
                AND venue_membership.venue_id = shift.venue_id
            JOIN rota_staff_detail ON rota_staff_detail.venue_membership_id = venue_membership.id
            WHERE shift.venue_id = ? AND shift.shift_date BETWEEN ? AND ?
-           AND attendance.clock_out_at IS NOT NULL""",
+           AND attendance.clock_out_at IS NOT NULL
+           AND (attendance.approval_status IS NULL OR attendance.approval_status != 'rejected')""",
         (venue_id, start_date, end_date),
     ).fetchall()
     total = 0.0

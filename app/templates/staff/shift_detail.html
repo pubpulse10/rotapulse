@@ -4,6 +4,12 @@
 <p><a class="btn-secondary" href="{{ url_for('staff_portal.home') }}">&laquo; My shifts</a></p>
 <div class="panel">
   <h1>{{ shift['shift_date']|uk_date }} — {{ shift['start_time'] }} to {{ shift['end_time'] }}</h1>
+  {% if shift['origin'] == 'ad_hoc' %}<span class="badge">Unplanned</span>{% endif %}
+  {% if attendance and attendance['approval_status'] == 'pending' %}
+    <p class="hint">Waiting for your admin to approve this shift.</p>
+  {% elif attendance and attendance['approval_status'] == 'rejected' %}
+    <p class="hint">Your admin didn't approve this shift — speak to them if you think that's wrong.</p>
+  {% endif %}
 
   {% if not attendance or not attendance['clock_in_at'] %}
     {% if shift['shift_date'] != today %}

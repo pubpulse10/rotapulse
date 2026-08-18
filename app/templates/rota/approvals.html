@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Approvals — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Attendance awaiting approval</h1>
+  <p class="hint">Unplanned shifts, and shifts started more than 30 minutes ahead of their rostered time. Already counted in payroll — reject to exclude one.</p>
+  {% if not rows %}<p class="hint">Nothing to approve.</p>{% endif %}
+  {% for s in rows %}
+    <div class="day-list-item">
+      <strong>{{ s['name'] }}</strong> — {{ s['shift_date']|uk_date }}
+      {% if s['origin'] == 'ad_hoc' %}<span class="badge">Unplanned</span>{% else %}<span class="badge">Early start</span>{% endif %}
+      <p class="hint">
+        Rostered {{ s['start_time'] }}-{{ s['end_time'] }} —
+        clocked in {{ s['clock_in_at']|uk_time }}{% if s['clock_out_at'] %}, clocked out {{ s['clock_out_at']|uk_time }}{% else %}, still clocked in{% endif %}
+      </p>
+      <form method="post" action="{{ url_for('rota_grid.approve_attendance', shift_id=s['id']) }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn-primary">Approve</button>
+      </form>
+      <form method="post" action="{{ url_for('rota_grid.reject_attendance', shift_id=s['id']) }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="link-button">Reject</button>
+      </form>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

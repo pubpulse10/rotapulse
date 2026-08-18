@@ -116,9 +116,16 @@ def week():
 
     staff = _billable_staff(db, venue["id"])
     shift_rows = db.execute(
-        """SELECT * FROM shift WHERE venue_id = ? AND shift_date BETWEEN ? AND ? AND status = 'scheduled'""",
+        """SELECT shift.*, attendance.approval_status FROM shift
+           LEFT JOIN attendance ON attendance.shift_id = shift.id
+           WHERE shift.venue_id = ? AND shift.shift_date BETWEEN ? AND ? AND shift.status = 'scheduled'""",
         (venue["id"], date_strs[0], date_strs[-1]),
     ).fetchall()
+    pending_approval_count = db.execute(
+        """SELECT COUNT(*) AS n FROM attendance JOIN shift ON shift.id = attendance.shift_id
+           WHERE shift.venue_id = ? AND attendance.approval_status = 'pending'""",
+        (venue["id"],),
+    ).fetchone()["n"]
     shifts_by_person_date = {}
     for s in shift_rows:
         shifts_by_person_date.setdefault((s["person_id"], s["shift_date"]), []).append(s)
@@ -188,6 +195,7 @@ def week():
         monday_options=_monday_options(db, venue["id"], week_start),
         week_cost=week_cost,
         week_notification=week_notification,
+        pending_approval_count=pending_approval_count,
         prev_week=(week_start - timedelta(days=7)).isoformat(),
         next_week=(week_start + timedelta(days=7)).isoformat(),
     )
@@ -365,7 +373,7 @@ def cell(person_id, on_date):
     shifts = db.execute(
         """SELECT shift.*, attendance.clock_in_at, attendance.clock_out_at,
                   attendance.variance_flag, attendance.clock_in_location_confirmed,
-                  attendance.clock_out_location_confirmed
+                  attendance.clock_out_location_confirmed, attendance.approval_status
            FROM shift
            LEFT JOIN attendance ON attendance.shift_id = shift.id
            WHERE shift.venue_id = ? AND shift.person_id = ? AND shift.shift_date = ?""",
@@ -691,6 +699,79 @@ def swaps():
         (flask.g.venue["id"],),
     ).fetchall()
     return flask.render_template("rota/swaps.html", swaps=rows)
+
+
+# ---------- Ad-hoc/early-start attendance approval (spec extension, 2026-08-18) ----------
+# Two clock-in paths land here needing sign-off: a fully ad-hoc shift
+# (app/staff_portal.py::start_ad_hoc_shift, shift.origin='ad_hoc') and an
+# early start against a REAL rostered shift, more than
+# staff_portal.EARLY_CLOCK_IN_GRACE_MINUTES before its planned start. Both
+# just set attendance.approval_status='pending' — this doesn't care which
+# case it is, it only acts on that column. Approval doesn't have to happen
+# in real time (explicitly not urgent, per the request that shaped this) —
+# it's the record of a decision that matters, not the timing of it.
+
+
+@rota_bp.route("/approvals")
+@require_permission("app_admin", "rota_admin")
+def approvals_queue():
+    db = get_db()
+    rows = db.execute(
+        """SELECT shift.*, attendance.clock_in_at, attendance.clock_out_at, person.name
+           FROM attendance
+           JOIN shift ON shift.id = attendance.shift_id
+           JOIN person ON person.id = shift.person_id
+           WHERE shift.venue_id = ? AND attendance.approval_status = 'pending'
+           ORDER BY attendance.clock_in_at""",
+        (flask.g.venue["id"],),
+    ).fetchall()
+    return flask.render_template("rota/approvals.html", rows=rows)
+
+
+@rota_bp.route("/shift/<int:shift_id>/attendance/approve", methods=["POST"])
+@require_permission("app_admin", "rota_admin")
+def approve_attendance(shift_id):
+    db = get_db()
+    # Scope to this venue via the shift join, same IDOR guard as approve_swap.
+    row = db.execute(
+        """SELECT attendance.id FROM attendance JOIN shift ON shift.id = attendance.shift_id
+           WHERE attendance.shift_id = ? AND shift.venue_id = ? AND attendance.approval_status = 'pending'""",
+        (shift_id, flask.g.venue["id"]),
+    ).fetchone()
+    if row is None:
+        flask.abort(404)
+    db.execute(
+        """UPDATE attendance SET approval_status = 'approved', approval_decided_at = datetime('now'),
+           approval_decided_by_person_id = ? WHERE shift_id = ?""",
+        (flask.g.person["id"] if flask.g.person else None, shift_id),
+    )
+    db.commit()
+    flask.flash("Approved.")
+    return flask.redirect(flask.request.referrer or flask.url_for("rota_grid.approvals_queue"))
+
+
+@rota_bp.route("/shift/<int:shift_id>/attendance/reject", methods=["POST"])
+@require_permission("app_admin", "rota_admin")
+def reject_attendance(shift_id):
+    db = get_db()
+    row = db.execute(
+        """SELECT attendance.id FROM attendance JOIN shift ON shift.id = attendance.shift_id
+           WHERE attendance.shift_id = ? AND shift.venue_id = ? AND attendance.approval_status = 'pending'""",
+        (shift_id, flask.g.venue["id"]),
+    ).fetchone()
+    if row is None:
+        flask.abort(404)
+    # The attendance record itself is kept, not deleted — an audit trail of
+    # what was actually claimed, even once rejected (see payroll.py, which
+    # excludes rejected rows from the pay totals but doesn't erase them).
+    db.execute(
+        """UPDATE attendance SET approval_status = 'rejected', approval_decided_at = datetime('now'),
+           approval_decided_by_person_id = ? WHERE shift_id = ?""",
+        (flask.g.person["id"] if flask.g.person else None, shift_id),
+    )
+    db.commit()
+    flask.flash("Rejected — excluded from payroll. The record is kept for reference.")
+    return flask.redirect(flask.request.referrer or flask.url_for("rota_grid.approvals_queue"))
 
 
 # ---------- Leave approval ----------

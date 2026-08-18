@@ -24,9 +24,16 @@ register_identity(payroll_bp)
 
 
 def _report_rows(db, venue_id, start_date, end_date):
+    # Rejected attendance (see app/rota_grid.py::reject_attendance) is
+    # excluded from pay outright — an admin rejecting it is asserting it
+    # shouldn't be paid as claimed. Pending rows are NOT excluded: per a
+    # direct 2026-08-18 decision, hours count as soon as they're clocked so
+    # a slow admin can't accidentally short someone honest — pending_hours
+    # below just surfaces which figures are still provisional.
     rows = db.execute(
         """SELECT person.id AS person_id, person.name, shift.shift_date,
-                  attendance.clock_in_at, attendance.clock_out_at, rota_staff_detail.hourly_pay_rate
+                  attendance.clock_in_at, attendance.clock_out_at, attendance.approval_status,
+                  rota_staff_detail.hourly_pay_rate
            FROM attendance
            JOIN shift ON shift.id = attendance.shift_id
            JOIN person ON person.id = shift.person_id
@@ -34,6 +41,7 @@ def _report_rows(db, venue_id, start_date, end_date):
            JOIN rota_staff_detail ON rota_staff_detail.venue_membership_id = venue_membership.id
            WHERE shift.venue_id = ? AND shift.shift_date BETWEEN ? AND ?
            AND attendance.clock_out_at IS NOT NULL
+           AND (attendance.approval_status IS NULL OR attendance.approval_status != 'rejected')
            ORDER BY person.name, shift.shift_date""",
         (venue_id, start_date, end_date),
     ).fetchall()
@@ -41,6 +49,7 @@ def _report_rows(db, venue_id, start_date, end_date):
     from datetime import datetime as dt
 
     by_person = {}
+    pending_hours = 0.0
     for row in rows:
         clock_in = dt.fromisoformat(row["clock_in_at"])
         clock_out = dt.fromisoformat(row["clock_out_at"])
@@ -52,10 +61,13 @@ def _report_rows(db, venue_id, start_date, end_date):
         entry["days"].append({
             "date": row["shift_date"], "hours": hours, "pay": round(hours * rate, 2),
             "clock_in_at": row["clock_in_at"], "clock_out_at": row["clock_out_at"],
+            "approval_status": row["approval_status"],
         })
         entry["total_hours"] = round(entry["total_hours"] + hours, 2)
         entry["total_pay"] = round(entry["total_pay"] + hours * rate, 2)
-    return by_person
+        if row["approval_status"] == "pending":
+            pending_hours = round(pending_hours + hours, 2)
+    return by_person, pending_hours
 
 
 @payroll_bp.route("/")
@@ -73,9 +85,10 @@ def report():
         period_start, period_end = period_containing(settings, date.today())
         start_date, end_date = period_start.isoformat(), period_end.isoformat()
 
-    by_person = _report_rows(db, venue["id"], start_date, end_date)
+    by_person, pending_hours = _report_rows(db, venue["id"], start_date, end_date)
     return flask.render_template(
-        "payroll/report.html", by_person=by_person, start_date=start_date, end_date=end_date
+        "payroll/report.html", by_person=by_person, pending_hours=pending_hours,
+        start_date=start_date, end_date=end_date,
     )
 
 
@@ -86,11 +99,11 @@ def export_csv():
     venue = flask.g.venue
     start_date = flask.request.args["start"]
     end_date = flask.request.args["end"]
-    by_person = _report_rows(db, venue["id"], start_date, end_date)
+    by_person, pending_hours = _report_rows(db, venue["id"], start_date, end_date)
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["Name", "Date", "Clocked in", "Clocked out", "Hours", "Pay"])
+    writer.writerow(["Name", "Date", "Clocked in", "Clocked out", "Hours", "Pay", "Approval"])
     if not by_person:
         # Same reasoning as export_pdf's empty-state message — payroll is
         # attendance-based, so a fully-rostered week can still be empty
@@ -101,9 +114,11 @@ def export_csv():
             writer.writerow([
                 entry["name"], format_uk_date(day["date"]),
                 format_uk_time(day["clock_in_at"]), format_uk_time(day["clock_out_at"]),
-                day["hours"], day["pay"],
+                day["hours"], day["pay"], day["approval_status"] or "",
             ])
-        writer.writerow([entry["name"], "TOTAL", "", "", entry["total_hours"], entry["total_pay"]])
+        writer.writerow([entry["name"], "TOTAL", "", "", entry["total_hours"], entry["total_pay"], ""])
+    if pending_hours:
+        writer.writerow([f"{pending_hours} of the hours above are still awaiting admin approval."])
 
     resp = flask.Response(buffer.getvalue(), mimetype="text/csv")
     resp.headers["Content-Disposition"] = f"attachment; filename=payroll_{start_date}_to_{end_date}.csv"
@@ -122,7 +137,7 @@ def export_pdf():
     venue = flask.g.venue
     start_date = flask.request.args["start"]
     end_date = flask.request.args["end"]
-    by_person = _report_rows(db, venue["id"], start_date, end_date)
+    by_person, pending_hours = _report_rows(db, venue["id"], start_date, end_date)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4)
@@ -144,23 +159,28 @@ def export_pdf():
             styles["Normal"],
         ))
     else:
-        data = [["Name", "Date", "Clocked in", "Clocked out", "Hours", "Pay"]]
+        data = [["Name", "Date", "Clocked in", "Clocked out", "Hours", "Pay", "Approval"]]
         for entry in by_person.values():
             for day in entry["days"]:
                 data.append([
                     entry["name"], format_uk_date(day["date"]),
                     format_uk_time(day["clock_in_at"]) or "", format_uk_time(day["clock_out_at"]) or "",
-                    day["hours"], f"£{day['pay']:.2f}",
+                    day["hours"], f"£{day['pay']:.2f}", day["approval_status"] or "",
                 ])
-            data.append([entry["name"], "TOTAL", "", "", entry["total_hours"], f"£{entry['total_pay']:.2f}"])
+            data.append([entry["name"], "TOTAL", "", "", entry["total_hours"], f"£{entry['total_pay']:.2f}", ""])
 
-        table = Table(data, colWidths=[110, 90, 65, 65, 60, 70])
+        table = Table(data, colWidths=[95, 75, 60, 60, 50, 65, 65])
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#06223b")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ]))
         elements.append(table)
+        if pending_hours:
+            elements.append(Paragraph(
+                f"{pending_hours} of the hours above are still awaiting admin approval — figures may change.",
+                styles["Normal"],
+            ))
     doc.build(elements)
 
     resp = flask.Response(buffer.getvalue(), mimetype="application/pdf")

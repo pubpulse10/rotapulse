@@ -18,15 +18,15 @@ def test_cell_panel_shows_actual_clock_in_and_out_times(app, client, venue):
         ).lastrowid
         conn.execute(
             "INSERT INTO attendance (shift_id, clock_in_at, clock_out_at, variance_flag) VALUES (?, ?, ?, 1)",
-            (shift_id, f"{today}T09:14:00", f"{today}T17:02:00"),
+            (shift_id, f"{today}T09:25:00", f"{today}T17:20:00"),
         )
         conn.commit()
 
     login_as_pub(client, venue["pub_id"])
     resp = client.get(f"/v/{venue['slug']}/rota/cell/{person_id}/{today}")
     assert resp.status_code == 200
-    assert b"09:14" in resp.data
-    assert b"17:02" in resp.data
+    assert b"09:25" in resp.data
+    assert b"17:20" in resp.data
     assert b"Late" in resp.data
 
 

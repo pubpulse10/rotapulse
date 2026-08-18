@@ -6,7 +6,7 @@ import flask
 from flask_wtf import CSRFProtect
 
 from app import config, db
-from app.date_format import format_uk_date, format_uk_datetime, format_uk_time
+from app.date_format import format_uk_date, format_uk_datetime, format_uk_time, variance_label
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -41,6 +41,7 @@ def create_app():
     app.jinja_env.filters["uk_date"] = format_uk_date
     app.jinja_env.filters["uk_datetime"] = format_uk_datetime
     app.jinja_env.filters["uk_time"] = format_uk_time
+    app.jinja_env.filters["variance_label"] = variance_label
 
     @app.context_processor
     def inject_hub_url():

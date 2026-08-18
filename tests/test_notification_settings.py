@@ -105,11 +105,14 @@ def test_notify_admins_sends_both_when_method_is_both(app, venue, monkeypatch):
 # ---------- Settings page ----------
 
 
-def test_notification_settings_page_lists_all_five_types(app, client, venue):
+def test_notification_settings_page_lists_all_six_types(app, client, venue):
     login_as_pub(client, venue["pub_id"])
     resp = client.get(f"/v/{venue['slug']}/admin/notifications")
     assert resp.status_code == 200
-    for label_fragment in ("Missed clock-in", "Missed clock-out", "Swap request", "Leave request", "Open shift claimed"):
+    for label_fragment in (
+        "Missed clock-in", "Missed clock-out", "Swap request", "Leave request",
+        "Open shift claimed", "Unplanned shift",
+    ):
         assert label_fragment.encode() in resp.data
 
 

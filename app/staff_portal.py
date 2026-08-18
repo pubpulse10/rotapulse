@@ -39,14 +39,20 @@ def home():
     today = date.today()
     horizon = today + timedelta(days=21)
     shifts = db.execute(
-        """SELECT shift.*, attendance.clock_in_at, attendance.clock_out_at
+        """SELECT shift.*, attendance.clock_in_at, attendance.clock_out_at, attendance.approval_status
            FROM shift LEFT JOIN attendance ON attendance.shift_id = shift.id
            WHERE shift.venue_id = ? AND shift.person_id = ? AND shift.status = 'scheduled'
            AND shift.shift_date BETWEEN ? AND ?
            ORDER BY shift.shift_date, shift.start_time""",
         (venue["id"], person["id"], today.isoformat(), horizon.isoformat()),
     ).fetchall()
-    return flask.render_template("staff/home.html", shifts=shifts, today=today.isoformat())
+    # Governs whether "Start an unplanned shift" is offered (see
+    # start_ad_hoc_shift) — already clocked into something today means
+    # that's the shift to use instead.
+    has_open_shift_today = any(s["shift_date"] == today.isoformat() and not s["clock_out_at"] for s in shifts)
+    return flask.render_template(
+        "staff/home.html", shifts=shifts, today=today.isoformat(), has_open_shift_today=has_open_shift_today
+    )
 
 
 @staff_bp.route("/shift/<int:shift_id>")
@@ -112,21 +118,115 @@ def clock_in(shift_id):
     if photo_file and photo_file.filename:
         photo_url = save_attendance_photo(photo_file)
 
-    variance_flag = 1 if _minutes_late(shift_row["start_time"]) > VARIANCE_THRESHOLD_MINUTES else 0
+    variance = _variance_minutes(shift_row["start_time"])
+    variance_flag = 1 if abs(variance) > VARIANCE_THRESHOLD_MINUTES else 0
+    # Real request, 2026-08-18: a genuinely rostered shift needs no sign-off
+    # to start a little early (someone dragged in because it's already
+    # busy) — but starting well ahead of plan is effectively extra,
+    # unplanned hours and should go through the same approval as a fully
+    # ad-hoc shift (see start_ad_hoc_shift below). Only early starts count;
+    # a late start is covered by the existing Late badge, not approval.
+    approval_status = "pending" if variance < -EARLY_CLOCK_IN_GRACE_MINUTES else None
 
     db.execute(
         """INSERT INTO attendance
-           (shift_id, clock_in_at, clock_in_lat, clock_in_lng, clock_in_location_confirmed, photo_url, variance_flag)
-           VALUES (?, datetime('now'), ?, ?, ?, ?, ?)
+           (shift_id, clock_in_at, clock_in_lat, clock_in_lng, clock_in_location_confirmed, photo_url,
+            variance_flag, approval_status)
+           VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?)
            ON CONFLICT(shift_id) DO UPDATE SET clock_in_at = excluded.clock_in_at,
            clock_in_lat = excluded.clock_in_lat, clock_in_lng = excluded.clock_in_lng,
            clock_in_location_confirmed = excluded.clock_in_location_confirmed,
            photo_url = COALESCE(excluded.photo_url, attendance.photo_url),
-           variance_flag = excluded.variance_flag""",
-        (shift_id, lat, lng, location_confirmed, photo_url, variance_flag),
+           variance_flag = excluded.variance_flag, approval_status = excluded.approval_status""",
+        (shift_id, lat, lng, location_confirmed, photo_url, variance_flag, approval_status),
     )
     db.commit()
-    flask.flash("Clocked in." if location_confirmed != 0 else "Clocked in — location not confirmed.")
+    if approval_status == "pending":
+        notify_admins(
+            db, venue, "ad_hoc_shift",
+            f"Early clock-in needs approval — {venue['name']}",
+            f"{flask.g.person['name']} clocked in {-variance:.0f} minutes early for their "
+            f"{shift_row['shift_date']} {shift_row['start_time']} shift at {venue['name']} — needs approval.",
+        )
+        flask.flash("Clocked in — you're more than 30 minutes early, so this needs admin approval.")
+    else:
+        flask.flash("Clocked in." if location_confirmed != 0 else "Clocked in — location not confirmed.")
+    return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=shift_id))
+
+
+EARLY_CLOCK_IN_GRACE_MINUTES = 30
+
+
+@staff_bp.route("/shift/ad-hoc/clock-in", methods=["POST"])
+@require_permission("staff", "rota_admin", "app_admin")
+def start_ad_hoc_shift():
+    """Real request, 2026-08-18: staff previously had no way to clock in at
+    all without a pre-existing shift — the only options were "admin adds a
+    shift first" or "don't work". This lets any registered staff member
+    start working on the spot; it always needs admin approval afterwards
+    (unlike an early start against a REAL rostered shift, see clock_in()
+    above), since there was no plan at all to measure against. Deliberately
+    reuses the shift/attendance tables rather than a separate model — a
+    shift row is required anyway (attendance is keyed to one), and doing it
+    this way means the rota grid, payroll report and cell-detail panel all
+    just work with zero extra plumbing; shift.origin is purely a display
+    marker to tell admins it wasn't rostered."""
+    db = get_db()
+    venue = flask.g.venue
+    person = flask.g.person
+    today = date.today().isoformat()
+
+    # If they already have an open (not-yet-clocked-out) shift today, that's
+    # the one to clock into — sends them there instead of creating a second,
+    # overlapping ad-hoc record.
+    open_shift = db.execute(
+        """SELECT shift.id FROM shift LEFT JOIN attendance ON attendance.shift_id = shift.id
+           WHERE shift.venue_id = ? AND shift.person_id = ? AND shift.shift_date = ?
+           AND attendance.clock_out_at IS NULL
+           ORDER BY shift.start_time LIMIT 1""",
+        (venue["id"], person["id"], today),
+    ).fetchone()
+    if open_shift:
+        flask.flash("You already have a shift today — clock in from that instead.", "error")
+        return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=open_shift["id"]))
+
+    form = flask.request.form
+    lat = form.get("lat", type=float)
+    lng = form.get("lng", type=float)
+    location_confirmed = None
+    if lat is not None and lng is not None and venue["latitude"] is not None and venue["longitude"] is not None:
+        location_confirmed = 1 if distance_metres(lat, lng, venue["latitude"], venue["longitude"]) <= _radius() else 0
+
+    photo_url = None
+    photo_file = flask.request.files.get("photo")
+    if photo_file and photo_file.filename:
+        photo_url = save_attendance_photo(photo_file)
+
+    # start_time/end_time both placeholder to "now" via SQLite's own
+    # datetime('now') (UTC) rather than Python's datetime.now() — kept
+    # consistent with attendance.clock_in_at below, stamped the same way,
+    # so the two can never disagree by the server process's local UTC
+    # offset (see the matching note in clock_out() for an ad-hoc shift).
+    cur = db.execute(
+        """INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status, origin)
+           VALUES (?, ?, ?, strftime('%H:%M','now'), strftime('%H:%M','now'), 'scheduled', 'ad_hoc')""",
+        (venue["id"], person["id"], today),
+    )
+    shift_id = cur.lastrowid
+    db.execute(
+        """INSERT INTO attendance
+           (shift_id, clock_in_at, clock_in_lat, clock_in_lng, clock_in_location_confirmed, photo_url,
+            variance_flag, approval_status)
+           VALUES (?, datetime('now'), ?, ?, ?, ?, 0, 'pending')""",
+        (shift_id, lat, lng, location_confirmed, photo_url),
+    )
+    db.commit()
+    notify_admins(
+        db, venue, "ad_hoc_shift",
+        f"Unplanned shift started — {venue['name']}",
+        f"{person['name']} started an unplanned shift at {venue['name']} — needs approval.",
+    )
+    flask.flash("Shift started — this wasn't rostered, so it'll need admin approval.")
     return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=shift_id))
 
 
@@ -149,12 +249,26 @@ def clock_out(shift_id):
     if lat is not None and lng is not None and venue["latitude"] is not None and venue["longitude"] is not None:
         location_confirmed = 1 if distance_metres(lat, lng, venue["latitude"], venue["longitude"]) <= _radius() else 0
 
-    end_variance = 1 if _minutes_late(shift_row["end_time"]) > VARIANCE_THRESHOLD_MINUTES else 0
+    end_variance = 1 if abs(_variance_minutes(shift_row["end_time"])) > VARIANCE_THRESHOLD_MINUTES else 0
     db.execute(
         """UPDATE attendance SET clock_out_at = datetime('now'), clock_out_lat = ?, clock_out_lng = ?,
            clock_out_location_confirmed = ?, variance_flag = MAX(variance_flag, ?) WHERE shift_id = ?""",
         (lat, lng, location_confirmed, end_variance, shift_id),
     )
+    if shift_row["origin"] == "ad_hoc":
+        # An ad-hoc shift's end_time was only ever a same-instant placeholder
+        # set at clock-in (see start_ad_hoc_shift) — there was no real plan
+        # to preserve, so update it to the actual clock-out time rather than
+        # leaving the grid showing a zero-length shift forever. Derived from
+        # attendance.clock_out_at itself (just written, above) rather than a
+        # fresh datetime.now() call — that column is stamped via SQLite's
+        # own datetime('now') (UTC), so a second, separately-computed local
+        # "now" could disagree with it by the server's UTC offset.
+        db.execute(
+            """UPDATE shift SET end_time =
+               (SELECT strftime('%H:%M', clock_out_at) FROM attendance WHERE shift_id = ?) WHERE id = ?""",
+            (shift_id, shift_id),
+        )
     db.commit()
     flask.flash("Clocked out." if location_confirmed != 0 else "Clocked out — location not confirmed.")
     return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=shift_id))
@@ -169,13 +283,18 @@ def _radius():
     return config.CLOCK_IN_RADIUS_METRES
 
 
-def _minutes_late(planned_hhmm: str) -> float:
+def _variance_minutes(planned_hhmm: str) -> float:
     """Minutes between now and the planned HH:MM, on today's date — a
     simple, adequate proxy for "materially different from plan" (spec §6.2)
-    without needing to track a running clock client-side."""
+    without needing to track a running clock client-side. Signed: positive
+    means now is AFTER the planned time (late), negative means BEFORE it
+    (early) — callers that only care about "how far off, either direction"
+    should abs() the result themselves (see VARIANCE_THRESHOLD_MINUTES
+    checks); clock_in()'s approval check needs the sign, so this can't just
+    return the absolute value like the old _minutes_late did."""
     planned_h, planned_m = map(int, planned_hhmm.split(":"))
     planned = datetime.now().replace(hour=planned_h, minute=planned_m, second=0, microsecond=0)
-    return abs((datetime.now() - planned).total_seconds() / 60)
+    return (datetime.now() - planned).total_seconds() / 60
 
 
 # ---------- Leave (own) ----------

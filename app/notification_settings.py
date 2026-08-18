@@ -33,6 +33,7 @@ NOTIFICATION_TYPES = [
     ("swap_request", "Swap request submitted"),
     ("leave_request", "Leave request submitted"),
     ("open_shift_claimed", "Open shift claimed"),
+    ("ad_hoc_shift", "Unplanned shift or early start needs approval"),
 ]
 NOTIFICATION_TYPE_KEYS = {key for key, _label in NOTIFICATION_TYPES}
 NOTIFICATION_TYPE_LABELS = dict(NOTIFICATION_TYPES)

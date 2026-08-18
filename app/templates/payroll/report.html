@@ -14,6 +14,9 @@
     <a class="btn-secondary" href="{{ url_for('payroll.export_csv', start=start_date, end=end_date) }}">Export CSV</a>
     <a class="btn-secondary" href="{{ url_for('payroll.export_pdf', start=start_date, end=end_date) }}">Export PDF</a>
   </p>
+  {% if pending_hours %}
+    <p class="hint">{{ pending_hours }} of the hours below are still awaiting admin approval (unplanned shifts or early starts) — figures may change. <a href="{{ url_for('rota_grid.approvals_queue') }}">Review approvals</a>.</p>
+  {% endif %}
 
   {% for person_id, entry in by_person.items() %}
     <h2>{{ entry['name'] }}</h2>
@@ -25,7 +28,10 @@
           <td>{{ day['clock_in_at']|uk_time }}</td>
           <td>{{ day['clock_out_at']|uk_time }}</td>
           <td>{{ day['hours'] }}</td>
-          <td>£{{ '%.2f'|format(day['pay']) }}</td>
+          <td>
+            £{{ '%.2f'|format(day['pay']) }}
+            {% if day['approval_status'] == 'pending' %}<span class="badge badge-unnotified">Pending</span>{% endif %}
+          </td>
         </tr>
       {% endfor %}
       <tr><td><strong>Total</strong></td><td></td><td></td><td><strong>{{ entry['total_hours'] }}</strong></td><td><strong>£{{ '%.2f'|format(entry['total_pay']) }}</strong></td></tr>

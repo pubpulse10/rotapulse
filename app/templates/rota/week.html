@@ -13,6 +13,7 @@
   <a class="btn-secondary" href="{{ url_for('rota_grid.week', week=prev_week) }}">&laquo; Prev week</a>
   <a class="btn-secondary" href="{{ url_for('rota_grid.week', week=next_week) }}">Next week &raquo;</a>
   <a class="btn-secondary" href="{{ url_for('rota_grid.swaps') }}">Swap requests</a>
+  <a class="btn-secondary" href="{{ url_for('rota_grid.approvals_queue') }}">Approvals{% if pending_approval_count %} ({{ pending_approval_count }}){% endif %}</a>
 </p>
 
 <div class="panel">
@@ -89,6 +90,7 @@
                           data-href="{{ url_for('rota_grid.cell', person_id=row['member']['person_id'], on_date=d_str) }}"
                           tabindex="0" role="link">
                       {{ s['start_time'] }}-{{ s['end_time'] }}
+                      {% if s['approval_status'] == 'pending' %}<span class="badge badge-unnotified" title="Needs approval">!</span>{% endif %}
                     </span>
                   {% endfor %}
                 </div>
