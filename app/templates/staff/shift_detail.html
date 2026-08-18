@@ -21,7 +21,7 @@
         <input type="hidden" name="lng" id="clock-in-lng">
         <label for="clock-in-photo">Photo (optional)</label>
         <input type="file" id="clock-in-photo" name="photo" accept="image/*" capture="user">
-        <button type="submit" class="btn-primary btn-large" onclick="return captureLocation('clock-in-form')">Clock in</button>
+        <button type="submit" class="btn-primary btn-large" onclick="return captureLocation('clock-in-form', this)">Clock in</button>
       </form>
     {% endif %}
   {% elif not attendance['clock_out_at'] %}
@@ -30,7 +30,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="lat" id="clock-out-lat">
       <input type="hidden" name="lng" id="clock-out-lng">
-      <button type="submit" class="btn-primary btn-large" onclick="return captureLocation('clock-out-form')">Clock out</button>
+      <button type="submit" class="btn-primary btn-large" onclick="return captureLocation('clock-out-form', this)">Clock out</button>
     </form>
   {% else %}
     <p class="hint">Clocked in {{ attendance['clock_in_at'] | uk_datetime }}, clocked out {{ attendance['clock_out_at'] | uk_datetime }}.</p>
@@ -49,19 +49,35 @@
 </div>
 
 <script>
-function captureLocation(formId) {
+// A real clock-in was confirmed live to come back "location not confirmed"
+// despite the venue's coordinates being set up correctly — the venue-side
+// radius check was fine, this was the 5-second timeout expiring before a
+// GPS fix came back, which is common indoors (a pub building) where GPS
+// signal is weak and the browser falls back to a slower network-based
+// fix. Bumped to a much more generous 20s and asked for high accuracy —
+// worth the wait against a tight 30m radius (app/config.py's
+// CLOCK_IN_RADIUS_METRES) where a fast-but-approximate network fix could
+// easily read as "not confirmed" even when standing right at the venue.
+function captureLocation(formId, button) {
   const form = document.getElementById(formId);
   if (!navigator.geolocation) {
     return true; // no geolocation support — submit without coordinates, server flags "not confirmed"
   }
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Getting your location…';
+  const finish = () => {
+    button.disabled = false;
+    button.textContent = originalLabel;
+  };
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       form.querySelector('input[name=lat]').value = pos.coords.latitude;
       form.querySelector('input[name=lng]').value = pos.coords.longitude;
       form.submit();
     },
-    () => { form.submit(); }, // permission declined — still submit, server flags "not confirmed"
-    { timeout: 5000 }
+    () => { finish(); form.submit(); }, // permission declined, or no fix in time — still submit, server flags "not confirmed"
+    { timeout: 20000, enableHighAccuracy: true }
   );
   return false; // wait for the async geolocation callback to submit
 }
