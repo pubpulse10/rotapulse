@@ -439,24 +439,38 @@ def update_shift(shift_id):
 @require_permission("app_admin", "rota_admin")
 def move_shift(shift_id):
     """Drag-and-drop target (app/static/rota_dragdrop.js): reassigns a
-    scheduled shift to a different person and/or date in one step — the
-    same thing dropping it onto a different grid cell means. JSON in/out
-    (not a form redirect like the other shift routes) since it's called
-    from JS, not a page navigation."""
+    shift to a different person and/or date in one step — the same thing
+    dropping it onto a different grid cell means. JSON in/out (not a form
+    redirect like the other shift routes) since it's called from JS, not a
+    page navigation.
+
+    2026-08-19: also handles the Open row as a genuine drag target/source,
+    not just person cells — dropping a scheduled shift there un-assigns it
+    (status='open', same as the "Mark as open" button); dragging an open
+    shift onto a person claims it for them (status='scheduled'), same as
+    claim_open_shift but admin-initiated. The target cell's data-person-id
+    is simply absent for the Open row (see week.html), so an absent
+    person_id in the JSON body is what means "make it open" here — not a
+    separate endpoint, since every other rule (attendance guard, leave
+    conflict, one-shift-per-day) applies identically regardless of which
+    direction the shift is moving."""
     db = get_db()
     venue_id = flask.g.venue["id"]
     data = flask.request.get_json(silent=True) or {}
-    new_person_id = data.get("person_id")
+    raw_person_id = data.get("person_id")
     new_date = data.get("shift_date")
-    try:
-        new_person_id = int(new_person_id)
-    except (TypeError, ValueError):
-        return flask.jsonify({"error": "Invalid target."}), 400
     if not new_date:
         return flask.jsonify({"error": "Invalid target."}), 400
 
+    new_person_id = None
+    if raw_person_id not in (None, "", "null"):
+        try:
+            new_person_id = int(raw_person_id)
+        except (TypeError, ValueError):
+            return flask.jsonify({"error": "Invalid target."}), 400
+
     shift_row = db.execute(
-        "SELECT * FROM shift WHERE id = ? AND venue_id = ? AND status = 'scheduled'", (shift_id, venue_id)
+        "SELECT * FROM shift WHERE id = ? AND venue_id = ? AND status IN ('scheduled', 'open')", (shift_id, venue_id)
     ).fetchone()
     if shift_row is None:
         return flask.jsonify({"error": "That shift no longer exists."}), 404
@@ -469,13 +483,27 @@ def move_shift(shift_id):
     # reminder checks wrongly think the (new) shift was already covered.
     # Attendance is a real historical + payroll-relevant record, so it's
     # blocked outright rather than silently discarded — moving is only ever
-    # meant for a not-yet-worked shift.
+    # meant for a not-yet-worked shift. (An 'open' shift can never actually
+    # have attendance — clock_in() requires a matching person_id, and an
+    # open shift's is NULL — so this only ever bites the scheduled->open
+    # direction in practice, but the check applies uniformly either way.)
     has_attendance = db.execute("SELECT 1 FROM attendance WHERE shift_id = ?", (shift_id,)).fetchone()
     if has_attendance is not None:
         return flask.jsonify({
             "error": "That shift already has clock-in/out recorded and can't be moved — "
                      "delete it and create a new shift instead if it needs to change.",
         }), 409
+
+    if new_person_id is None:
+        # Dropped onto the Open row — becomes (or stays) unassigned. Keeps
+        # its venue_role_id untouched, which is what notify_open_shift's
+        # role-targeted alert relies on.
+        db.execute(
+            "UPDATE shift SET person_id = NULL, status = 'open', shift_date = ? WHERE id = ? AND venue_id = ?",
+            (new_date, shift_id, venue_id),
+        )
+        db.commit()
+        return flask.jsonify({"ok": True})
 
     is_billable_staff = db.execute(
         """SELECT 1 FROM venue_membership
@@ -503,7 +531,7 @@ def move_shift(shift_id):
         return flask.jsonify({"error": "That person already has a shift that day."}), 409
 
     db.execute(
-        "UPDATE shift SET person_id = ?, shift_date = ? WHERE id = ? AND venue_id = ?",
+        "UPDATE shift SET person_id = ?, shift_date = ?, status = 'scheduled' WHERE id = ? AND venue_id = ?",
         (new_person_id, new_date, shift_id, venue_id),
     )
     db.commit()
@@ -574,6 +602,29 @@ def open_shift_panel(shift_id):
     if shift_row is None:
         flask.abort(404)
     return flask.render_template("rota/open_shift_panel.html", shift=shift_row)
+
+
+@rota_bp.route("/open-shift/day/<on_date>")
+@require_permission("app_admin", "rota_admin")
+def open_shift_day(on_date):
+    """The tap target for the Open row's cell on a given date — whether it
+    already has open shifts or not — mirroring cell()'s role for a person's
+    row: list what's there for this date, inline actions per shift, and an
+    "add another" form pre-filled with the date. 2026-08-19, alongside
+    making the Open row draggable like a real row, so a date with no open
+    shifts yet is reachable directly from the grid instead of only via the
+    separate form at the bottom of the page."""
+    db = get_db()
+    venue = flask.g.venue
+    shifts = db.execute(
+        """SELECT shift.*, venue_role.name AS role_name FROM shift
+           LEFT JOIN venue_role ON venue_role.id = shift.venue_role_id
+           WHERE shift.venue_id = ? AND shift.shift_date = ? AND shift.status = 'open'
+           ORDER BY shift.start_time""",
+        (venue["id"], on_date),
+    ).fetchall()
+    roles = db.execute("SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name", (venue["id"],)).fetchall()
+    return flask.render_template("rota/open_shift_day.html", on_date=on_date, shifts=shifts, roles=roles)
 
 
 @rota_bp.route("/shift/<int:shift_id>/open", methods=["POST"])

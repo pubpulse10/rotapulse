@@ -277,6 +277,130 @@ def test_move_shift_rejects_non_staff_target(app, client, venue):
     assert resp.status_code == 400
 
 
+def test_dragging_a_scheduled_shift_onto_the_open_row_unassigns_it(app, client, venue):
+    """The Open row is now a real drag target (2026-08-19): dropping a
+    person's shift there is the drag equivalent of the existing "Mark as
+    open" button — no person_id in the JSON body is what signals this
+    (see week.html's Open-row cells, which have no data-person-id)."""
+    login_as_pub(client, venue["pub_id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Unavailable")
+    role_id = venue["role_id"]
+    with app.app_context():
+        conn = db_module.get_db()
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, venue_role_id, shift_date, start_time, end_time, status) "
+            "VALUES (?, ?, ?, '2026-08-03', '09:00', '17:00', 'scheduled')",
+            (venue["id"], person_id, role_id),
+        ).lastrowid
+        conn.commit()
+
+    resp = client.post(
+        f"/v/{venue['slug']}/rota/shift/{shift_id}/move",
+        json={"shift_date": "2026-08-04"},
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is True
+
+    with app.app_context():
+        conn = db_module.get_db()
+        row = conn.execute("SELECT * FROM shift WHERE id = ?", (shift_id,)).fetchone()
+        assert row["status"] == "open"
+        assert row["person_id"] is None
+        assert row["shift_date"] == "2026-08-04"
+        # Role kept — this is what notify_open_shift's role-targeted alert relies on.
+        assert row["venue_role_id"] == role_id
+
+
+def test_dragging_an_open_shift_onto_a_person_claims_it(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Claimant")
+    with app.app_context():
+        conn = db_module.get_db()
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) "
+            "VALUES (?, NULL, '2026-08-03', '09:00', '17:00', 'open')",
+            (venue["id"],),
+        ).lastrowid
+        conn.commit()
+
+    resp = client.post(
+        f"/v/{venue['slug']}/rota/shift/{shift_id}/move",
+        json={"person_id": person_id, "shift_date": "2026-08-03"},
+    )
+    assert resp.status_code == 200
+
+    with app.app_context():
+        conn = db_module.get_db()
+        row = conn.execute("SELECT * FROM shift WHERE id = ?", (shift_id,)).fetchone()
+        assert row["status"] == "scheduled"
+        assert row["person_id"] == person_id
+
+
+def test_dragging_an_open_shift_onto_a_person_still_blocked_by_conflicts(app, client, venue):
+    """Claiming via drag goes through the exact same guards as any other
+    move — approved leave here, but leave/already-has-a-shift/not-billable
+    all apply identically regardless of which direction the shift moves."""
+    login_as_pub(client, venue["pub_id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="OnLeaveClaimant")
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "INSERT INTO leave_request (person_id, venue_id, start_date, end_date, status) VALUES (?, ?, '2026-08-03', '2026-08-03', 'approved')",
+            (person_id, venue["id"]),
+        )
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) "
+            "VALUES (?, NULL, '2026-08-03', '09:00', '17:00', 'open')",
+            (venue["id"],),
+        ).lastrowid
+        conn.commit()
+
+    resp = client.post(
+        f"/v/{venue['slug']}/rota/shift/{shift_id}/move",
+        json={"person_id": person_id, "shift_date": "2026-08-03"},
+    )
+    assert resp.status_code == 409
+    assert "leave" in resp.get_json()["error"].lower()
+
+    with app.app_context():
+        conn = db_module.get_db()
+        row = conn.execute("SELECT status, person_id FROM shift WHERE id = ?", (shift_id,)).fetchone()
+        assert row["status"] == "open"  # unchanged
+        assert row["person_id"] is None
+
+
+def test_open_shift_day_lists_shifts_and_offers_add_form(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "INSERT INTO shift (venue_id, person_id, venue_role_id, shift_date, start_time, end_time, status) "
+            "VALUES (?, NULL, ?, '2026-08-03', '09:00', '17:00', 'open')",
+            (venue["id"], venue["role_id"]),
+        )
+        conn.commit()
+
+    resp = client.get(f"/v/{venue['slug']}/rota/open-shift/day/2026-08-03")
+    assert resp.status_code == 200
+    assert b"09:00-17:00" in resp.data
+    assert b"Bar staff" in resp.data
+    assert b"Add an open shift" in resp.data
+
+
+def test_open_shift_day_works_for_a_date_with_no_open_shifts_yet(app, client, venue):
+    """The new empty-cell tap target on the grid — the whole point is
+    reaching the add form even when nothing exists there yet."""
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/rota/open-shift/day/2026-08-03")
+    assert resp.status_code == 200
+    assert b"Add an open shift" in resp.data
+
+
+def test_open_shift_day_requires_admin_permission(client, venue):
+    resp = client.get(f"/v/{venue['slug']}/rota/open-shift/day/2026-08-03")
+    assert resp.status_code == 302
+
+
 def test_move_shift_requires_admin_permission(client, venue):
     resp = client.post(
         f"/v/{venue['slug']}/rota/shift/1/move",

@@ -50,14 +50,26 @@
         {% for d in dates %}
           {% set d_str = date_strs[loop.index0] %}
           {% set day_open_shifts = open_shifts_by_date.get(d_str, []) %}
-          <td class="rota-cell {{ 'cell-openshift' if day_open_shifts else 'cell-empty-plain' }}">
-            {% for s in day_open_shifts %}
-              <a href="{{ url_for('rota_grid.open_shift_panel', shift_id=s['id']) }}" draggable="false">
-                <span class="open-shift-chip">
-                  {{ s['start_time'] }}-{{ s['end_time'] }}{% if s['role_name'] %} ({{ s['role_name'] }}){% endif %}
-                </span>
-              </a>
-            {% endfor %}
+          {# Deliberately no data-person-id here (see move_shift in
+             app/rota_grid.py) — its absence is what tells the drop handler
+             "unassign this", the same way dropping a shift chip onto a
+             person's cell means "assign it to them". No <a> wrapper for the
+             same reason a person-row shift-chip has none — see the long
+             comment on the person-row cells below for why. #}
+          <td class="rota-cell {{ 'cell-openshift' if day_open_shifts else 'cell-empty' }}" data-date="{{ d_str }}">
+            {% if day_open_shifts %}
+              <div class="rota-cell-fill">
+                {% for s in day_open_shifts %}
+                  <span class="shift-chip open-shift-chip" data-shift-id="{{ s['id'] }}"
+                        data-href="{{ url_for('rota_grid.open_shift_day', on_date=d_str) }}"
+                        tabindex="0" role="link">
+                    {{ s['start_time'] }}-{{ s['end_time'] }}{% if s['role_name'] %} ({{ s['role_name'] }}){% endif %}
+                  </span>
+                {% endfor %}
+              </div>
+            {% else %}
+              <a href="{{ url_for('rota_grid.open_shift_day', on_date=d_str) }}" draggable="false"></a>
+            {% endif %}
           </td>
         {% endfor %}
       </tr>

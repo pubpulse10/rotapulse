@@ -214,20 +214,12 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 }
 .cell-empty { border: 2px dashed var(--color-border); color: var(--color-muted); }
 .cell-empty a::before { content: "+"; font-size: 1.4rem; }
-.cell-empty-plain { cursor: default; } /* the Open row's empty cells — nothing to tap, unlike a staff row's */
 .open-row td:first-child { font-style: italic; color: var(--color-muted); }
 .cell-openshift { background: #fffbf0; }
-.cell-openshift a { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px; }
-.open-shift-chip {
-  display: flex;
-  align-items: center;
-  padding: 3px 6px;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  background: #fff3cd;
-  border: 1px solid #f0ad4e;
-  color: #856404;
-}
+/* Compound selector so this wins over the plain .shift-chip background/
+   border/color it's combined with in the markup (open shift chips are now
+   real draggable .shift-chips — see week.html — styled amber on top). */
+.shift-chip.open-shift-chip { background: #fff3cd; border-color: #f0ad4e; color: #856404; }
 .cell-shift { background: #e7f0f6; }
 .cell-shift a { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px; }
 /* Pinned to the staff member's name (leftmost column), not to each shift

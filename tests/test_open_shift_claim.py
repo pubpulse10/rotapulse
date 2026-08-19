@@ -122,7 +122,13 @@ def test_open_shift_appears_on_its_own_grid_row(app, client, venue):
     assert resp.status_code == 200
     assert b'class="open-row"' in resp.data
     assert b"cell-openshift" in resp.data
-    assert f'/rota/open-shift/{shift_id}'.encode() in resp.data
+    # The chip is a draggable .shift-chip now (2026-08-19), tagged with its
+    # own shift id for the drag JS, and its tap target is the day-level
+    # panel (not the single-shift one, which is no longer linked from the
+    # grid but still reachable directly — see test_open_shift_panel_* below).
+    assert f'data-shift-id="{shift_id}"'.encode() in resp.data
+    assert b'class="shift-chip open-shift-chip"' in resp.data
+    assert b"/rota/open-shift/day/" in resp.data
 
 
 def test_open_shift_panel_shows_notify_and_delete(app, client, venue):
