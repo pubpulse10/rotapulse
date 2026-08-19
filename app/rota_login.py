@@ -28,7 +28,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from app import config
 from app.db import get_db
 from app.extensions import limiter
-from app.notifications import send_email
+from app.notifications import send_email, send_sms
 from app.venue_scope import register_venue_gate, register_venue_scope
 
 login_bp = flask.Blueprint("rota_login", __name__, url_prefix="/v/<slug>")
@@ -109,7 +109,7 @@ def forgot_password():
         identifier = flask.request.form.get("identifier", "").strip().lower()
         db = get_db()
         person = _find_person_by_identifier(db, venue["id"], identifier)
-        if person and person["email"]:
+        if person and (person["email"] or person["mobile"]):
             raw_token = secrets.token_urlsafe(32)
             expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
             db.execute(
@@ -118,12 +118,25 @@ def forgot_password():
             )
             db.commit()
             reset_url = flask.url_for("rota_login.reset_password", slug=venue["slug"], token=raw_token, _external=True)
-            send_email(
-                person["email"],
-                "Reset your RotaPulse password",
-                "Click the link below to set a new password. This link expires in "
-                f"1 hour and can only be used once.\n\n{reset_url}",
-            )
+            # Real report, 2026-08-19: someone invited by SMS with no email
+            # ever captured had no self-service reset path at all -- this
+            # was email-only, so the flash message below said "we've sent a
+            # reset link" while silently sending nothing. SMS fallback only
+            # (not both) when there's no email, mirroring how login already
+            # accepts either identifier -- whichever contact detail actually
+            # exists is the one that gets used.
+            if person["email"]:
+                send_email(
+                    person["email"],
+                    "Reset your RotaPulse password",
+                    "Click the link below to set a new password. This link expires in "
+                    f"1 hour and can only be used once.\n\n{reset_url}",
+                )
+            else:
+                send_sms(
+                    person["mobile"],
+                    f"RotaPulse password reset: {reset_url} (expires in 1 hour, one-time use).",
+                )
         flask.flash("If an account exists for that email or mobile, we've sent a reset link.")
         return flask.redirect(flask.url_for("rota_login.login", slug=venue["slug"]))
     return flask.render_template("login/forgot_password.html", venue=venue)
