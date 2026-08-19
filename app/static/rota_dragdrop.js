@@ -34,6 +34,10 @@
   const DRAG_THRESHOLD_PX = 8;
   const LONG_PRESS_MS = 350;
   const LONG_PRESS_CANCEL_PX = 10;
+  // How close to a viewport edge (px) auto-scroll kicks in, and the fastest
+  // it'll scroll right at the very edge — see edgeScrollTick below.
+  const EDGE_SCROLL_MARGIN = 70;
+  const EDGE_SCROLL_MAX_SPEED = 16;
 
   function csrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
@@ -41,11 +45,75 @@
   }
 
   let drag = null;
+  let edgeScrollRAF = null;
+
+  // Auto-scrolls the page (and the grid's own horizontal scroller) while an
+  // armed drag's pointer sits near a viewport edge — real report,
+  // 2026-08-19: on a grid taller than the screen, a shift couldn't be
+  // dragged past the top of the viewport at all; you had to drop it,
+  // scroll, and pick it up again. A plain pointermove-driven scroll only
+  // fires on actual movement, so holding the pointer still right at the
+  // edge (the natural thing to do — you're waiting for the page to catch
+  // up to you) wouldn't scroll at all; a requestAnimationFrame loop keeps
+  // scrolling every frame for as long as the pointer stays in the margin,
+  // moving or not, and re-checks the drop target each frame too so the
+  // highlighted cell stays correct as the page moves under a still pointer.
+  function edgeScrollTick() {
+    if (!drag || !drag.moved) { edgeScrollRAF = null; return; }
+    const x = drag.lastX, y = drag.lastY;
+    const vh = window.innerHeight, vw = window.innerWidth;
+    let scrolled = false;
+
+    const scroller = document.scrollingElement || document.documentElement;
+    if (y < EDGE_SCROLL_MARGIN) {
+      scroller.scrollTop -= EDGE_SCROLL_MAX_SPEED * (1 - y / EDGE_SCROLL_MARGIN);
+      scrolled = true;
+    } else if (y > vh - EDGE_SCROLL_MARGIN) {
+      scroller.scrollTop += EDGE_SCROLL_MAX_SPEED * (1 - (vh - y) / EDGE_SCROLL_MARGIN);
+      scrolled = true;
+    }
+
+    if (drag.scrollContainer) {
+      if (x < EDGE_SCROLL_MARGIN) {
+        drag.scrollContainer.scrollLeft -= EDGE_SCROLL_MAX_SPEED * (1 - x / EDGE_SCROLL_MARGIN);
+        scrolled = true;
+      } else if (x > vw - EDGE_SCROLL_MARGIN) {
+        drag.scrollContainer.scrollLeft += EDGE_SCROLL_MAX_SPEED * (1 - (vw - x) / EDGE_SCROLL_MARGIN);
+        scrolled = true;
+      }
+    }
+
+    if (scrolled) updateDragVisuals(x, y);
+    edgeScrollRAF = requestAnimationFrame(edgeScrollTick);
+  }
+
+  // Moves the ghost to the pointer and (re)highlights whatever .rota-cell
+  // is under it — shared by onPointerMove and the edge-scroll loop above,
+  // since the loop needs to redo this on every frame even without a fresh
+  // pointermove event.
+  function updateDragVisuals(x, y) {
+    drag.ghost.style.left = x + "px";
+    drag.ghost.style.top = y + "px";
+
+    document.querySelectorAll(".rota-cell.drop-target").forEach((el) => el.classList.remove("drop-target"));
+    drag.ghost.style.display = "none";
+    const under = document.elementFromPoint(x, y);
+    drag.ghost.style.display = "";
+    const targetCell = under && under.closest(".rota-cell");
+    if (targetCell) targetCell.classList.add("drop-target");
+  }
 
   function armDrag() {
     if (!drag || drag.moved) return;
     drag.moved = true;
-    drag.chip.setPointerCapture(drag.pointerId);
+    // Guarded the same way teardownDrag's releasePointerCapture already is
+    // — setPointerCapture can throw (e.g. no genuinely active pointer
+    // session for this id, which is also why this whole function can't be
+    // exercised by a synthetic/dispatched PointerEvent in a test). A
+    // real gesture that hits this is rare, but letting it throw here would
+    // abort the rest of armDrag() unhandled — no ghost, no edge-scroll,
+    // stuck with moved=true and nothing to show for it.
+    try { drag.chip.setPointerCapture(drag.pointerId); } catch (err) {}
     drag.chip.classList.add("dragging-source");
 
     const ghost = drag.chip.cloneNode(true);
@@ -54,6 +122,8 @@
     ghost.style.top = drag.lastY + "px";
     document.body.appendChild(ghost);
     drag.ghost = ghost;
+
+    if (edgeScrollRAF === null) edgeScrollRAF = requestAnimationFrame(edgeScrollTick);
   }
 
   // Tears down whatever state a drag left behind, including releasing
@@ -76,6 +146,7 @@
     if (drag.ghost) drag.ghost.remove();
     drag.chip.classList.remove("dragging-source");
     document.querySelectorAll(".rota-cell.drop-target").forEach((el) => el.classList.remove("drop-target"));
+    if (edgeScrollRAF !== null) { cancelAnimationFrame(edgeScrollRAF); edgeScrollRAF = null; }
     drag = null;
   }
 
@@ -149,15 +220,7 @@
 
     if (drag.moved) {
       e.preventDefault();
-      drag.ghost.style.left = e.clientX + "px";
-      drag.ghost.style.top = e.clientY + "px";
-
-      document.querySelectorAll(".rota-cell.drop-target").forEach((el) => el.classList.remove("drop-target"));
-      drag.ghost.style.display = "none";
-      const under = document.elementFromPoint(e.clientX, e.clientY);
-      drag.ghost.style.display = "";
-      const targetCell = under && under.closest(".rota-cell");
-      if (targetCell) targetCell.classList.add("drop-target");
+      updateDragVisuals(e.clientX, e.clientY);
     }
   }
 
@@ -242,18 +305,29 @@
   document.addEventListener("pointerup", onPointerUp);
   document.addEventListener("pointercancel", onPointerUp);
 
+  // Real report, 2026-08-19: tapping an open shift to view its details and
+  // going back left the shift stuck "grabbed" — no amount of clicking would
+  // release it. teardownDrag() only ran from pointerup/pointercancel, both
+  // of which assume the gesture ends cleanly on THIS page; a tap that's
+  // fractionally longer than it feels (very easy on a real touchscreen) can
+  // arm a drag before the finger lifts, and if the resulting navigation
+  // (or the browser swallowing the gesture some other way — see the
+  // teardownDrag comment above) happens before pointerup is ever delivered,
+  // nothing before this point could have known to clean up. visibilitychange
+  // and pagehide both fire reliably as a page is being left, regardless of
+  // whether the pointer gesture itself ever completes, so tearing down here
+  // closes that gap at the source rather than only mopping up after it.
+  document.addEventListener("visibilitychange", () => { if (document.hidden) teardownDrag(); });
+  window.addEventListener("pagehide", () => teardownDrag());
+
   // Belt-and-suspenders against a stuck ghost surviving into a view of this
-  // page it doesn't belong to — real report, 2026-08-19: a duplicated,
-  // blurred shift chip left visible after tapping an open shift's detail
-  // page and going back. teardownDrag() removes a ghost synchronously on
-  // every normal pointerup/pointercancel already, so this is only a
-  // backstop for a gesture that never got one (e.g. the browser's
-  // back/forward cache restoring this exact page from a moment mid-drag,
-  // on a browser where that's eligible — this harness's own back
-  // navigation doesn't reproduce it, but a real device's might). Sweeping
-  // once at script load handles a fresh page load; pageshow with
-  // event.persisted is the standard signal for a bfcache restore, which
-  // doesn't re-run this script at all, so needs its own sweep.
+  // page it doesn't belong to. The listeners above should mean nothing is
+  // left behind in the first place, but this is a backstop for whatever
+  // they don't catch (e.g. the back/forward cache restoring a page from a
+  // moment mid-drag on a browser where that's eligible). Sweeping once at
+  // script load handles a fresh page load; pageshow with event.persisted is
+  // the standard signal for a bfcache restore, which doesn't re-run this
+  // script at all, so needs its own sweep.
   function sweepStaleGhosts() {
     document.querySelectorAll(".shift-chip-ghost").forEach((el) => el.remove());
     document.querySelectorAll(".shift-chip.dragging-source").forEach((el) => el.classList.remove("dragging-source"));
