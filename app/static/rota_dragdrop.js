@@ -185,12 +185,17 @@
 
   // Chips are focusable (tabindex="0" in the template) but aren't real
   // links, so Enter/Space needs to trigger navigation explicitly to keep
-  // keyboard access working.
+  // keyboard access working. teardownDrag() first: a pointer drag can be
+  // mid-flight on this same chip (armed, ghost visible, pointer captured)
+  // without ever having received its pointerup/pointercancel — navigating
+  // away via location.href here would otherwise leave that ghost element
+  // (and the "dragging-source" faded style) stuck in the DOM.
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" && e.key !== " ") return;
     const chip = e.target.closest(".shift-chip");
     if (!chip || !chip.dataset.href) return;
     e.preventDefault();
+    teardownDrag();
     location.href = chip.dataset.href;
   });
 
@@ -236,4 +241,23 @@
   document.addEventListener("pointermove", onPointerMove);
   document.addEventListener("pointerup", onPointerUp);
   document.addEventListener("pointercancel", onPointerUp);
+
+  // Belt-and-suspenders against a stuck ghost surviving into a view of this
+  // page it doesn't belong to — real report, 2026-08-19: a duplicated,
+  // blurred shift chip left visible after tapping an open shift's detail
+  // page and going back. teardownDrag() removes a ghost synchronously on
+  // every normal pointerup/pointercancel already, so this is only a
+  // backstop for a gesture that never got one (e.g. the browser's
+  // back/forward cache restoring this exact page from a moment mid-drag,
+  // on a browser where that's eligible — this harness's own back
+  // navigation doesn't reproduce it, but a real device's might). Sweeping
+  // once at script load handles a fresh page load; pageshow with
+  // event.persisted is the standard signal for a bfcache restore, which
+  // doesn't re-run this script at all, so needs its own sweep.
+  function sweepStaleGhosts() {
+    document.querySelectorAll(".shift-chip-ghost").forEach((el) => el.remove());
+    document.querySelectorAll(".shift-chip.dragging-source").forEach((el) => el.classList.remove("dragging-source"));
+  }
+  sweepStaleGhosts();
+  window.addEventListener("pageshow", (e) => { if (e.persisted) sweepStaleGhosts(); });
 })();
