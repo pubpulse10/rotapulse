@@ -615,7 +615,7 @@ def test_week_grid_offers_a_copy_week_form_directly_on_the_page(app, client, ven
     login_as_pub(client, venue["pub_id"])
     resp = client.get(f"/v/{venue['slug']}/rota/?week=2026-08-03")
     assert resp.status_code == 200
-    assert b"Copy this week" in resp.data
+    assert b"Copy week" in resp.data
     assert f'action="/v/{venue["slug"]}/rota/copy-week"'.encode() in resp.data
     assert b'id="page_target_week"' in resp.data
     assert b'name="source_week" value="2026-08-03"' in resp.data

@@ -136,40 +136,61 @@ h2 { font-size: 1.2rem; }
 }
 .card.narrow { max-width: 420px; }
 
-/* Two panels side by side on anything wider than phone-width (matches the
-   640px breakpoint used everywhere else in this file) — e.g. "Copy this
-   week" and "Clear this week" on the rota page, which don't need a full
-   row each. min-width: 0 lets a wide table inside still get its own
-   horizontal scrollbar (see .panel's overflow-x above) instead of forcing
-   the flex item wider than its share. */
-.panel-pair { display: flex; gap: 16px; align-items: flex-start; }
-.panel-pair > .panel { flex: 1; min-width: 0; }
+/* Visually hidden but still readable by screen readers — a <select> needs
+   a real associated <label> even where the visible UI conveys its purpose
+   another way (here, its own placeholder option text). */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
-/* Explanatory copy collapsed behind an (i) icon by default — real report:
-   the always-visible paragraph on things like "Copy this week"/"Clear this
-   week" ate too much screen space next to the actual controls someone
-   needs to use. <details>/<summary> needs no JS and works identically on
-   tap and click, so it's used instead of a custom show/hide toggle. The
-   heading stays a real <h2> inside <summary> (valid HTML, screen readers
-   still see it as a heading) so opening the explanation doesn't change the
-   page's structure, only reveals a paragraph already sitting right there. */
+/* Real report, 2026-08-19: "Copy this week"/"Clear this week" as full
+   boxed panels with their own heading and always-visible explanation
+   paragraph took up too much space for what's really just two more
+   buttons. Folded directly into the same button row as Prev/Next/Notify
+   (.week-actions), with the explanation collapsed behind a single shared
+   (i) icon rather than one per action — covers both in one place since
+   they sit right next to each other anyway. */
+.week-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px 0; }
+.week-actions form { display: flex; align-items: center; gap: 6px; margin: 0; }
+.week-actions select { width: auto; margin: 0; }
+.week-actions .btn-primary, .week-actions .btn-secondary, .week-actions .btn-danger { margin-top: 0; }
+
+/* <details>/<summary> needs no JS and works identically on tap and click,
+   so it's used instead of a custom show/hide toggle for the (i) icon. */
+.week-action-info { position: relative; }
 .week-action-info summary { cursor: pointer; list-style: none; }
 .week-action-info summary::-webkit-details-marker { display: none; }
-.week-action-info summary h2 { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
 .week-action-info .info-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   border: 1px solid var(--color-border);
   color: var(--color-muted);
-  font-size: 0.8rem;
-  font-weight: 400;
+  font-size: 0.85rem;
 }
 .week-action-info[open] .info-icon { background: var(--color-border); color: var(--color-text); }
-.week-action-info .hint { margin: 8px 0 0; }
+.week-action-info .hint {
+  position: absolute;
+  z-index: 10;
+  right: 0;
+  margin-top: 4px;
+  width: 280px;
+  padding: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.week-action-info .hint p:first-child { margin-top: 0; }
 
 label { display: block; font-weight: 600; margin: 12px 0 4px; }
 input[type=text], input[type=password], input[type=number], input[type=date],
@@ -410,7 +431,12 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
   .topbar { padding: 6px 12px; }
   .content, .flash-container { padding: 12px; }
   .panel, .card { padding: 12px; }
-  .panel-pair { flex-direction: column; }
+
+  /* The floating 280px popover (see .week-action-info .hint above) risks
+     overflowing off the edge of a narrow phone depending on where the icon
+     lands in the wrapped button row — simplest fix is to not float it at
+     all here: full width, sitting inline in the flow instead. */
+  .week-action-info .hint { position: static; width: auto; margin-top: 8px; box-shadow: none; }
 
   /* Taken clean out of the flex flow and pinned by absolute position
      instead of relying on flex spacing (margin-left: auto / space-between)
