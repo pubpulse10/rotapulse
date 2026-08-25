@@ -594,6 +594,23 @@ def test_week_starts_unnotified(app, client, venue):
     assert b"Notify staff of this week" in resp.data
 
 
+def test_week_grid_offers_a_notify_button_when_unnotified(app, client, venue):
+    """Real report, 2026-08-19: the backend route and "Unnotified"/"Notified"
+    badge both existed from the app's very first commit, but no version of
+    this template ever actually had a button wired to notify_week — so the
+    feature was never reachable at all despite looking finished. The other
+    notify_week tests below only ever assert the button's text is ABSENT
+    (after sending), which is trivially true whether or not it was ever
+    present in the first place — this is the one asserting it's actually
+    there, and posts to the exact URL it renders."""
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/rota/?week=2026-08-03")
+    assert resp.status_code == 200
+    assert b"Notify staff of this week" in resp.data
+    assert f'action="/v/{venue["slug"]}/rota/notify-week"'.encode() in resp.data
+    assert b'name="week" value="2026-08-03"' in resp.data
+
+
 def test_notify_week_sends_and_marks_notified(app, client, venue):
     login_as_pub(client, venue["pub_id"])
     person_id, _m, _e = create_active_staff(app, venue["id"], name="ToNotify")
