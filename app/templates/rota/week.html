@@ -26,8 +26,10 @@
 
 <div class="panel-pair">
   <div class="panel">
-    <h2>Copy this week</h2>
-    <p class="hint">Copies every shift (and any open shifts) from this week onto another week, keeping the same day-of-week, person, role and time. Won't overwrite anything — a copied shift that would clash with an existing shift or approved leave is skipped rather than double-booked.</p>
+    <details class="week-action-info">
+      <summary><h2>Copy this week <span class="info-icon" aria-hidden="true">&#9432;</span></h2></summary>
+      <p class="hint">Copies every shift (and any open shifts) from this week onto another week, keeping the same day-of-week, person, role and time. Won't overwrite anything — a copied shift that would clash with an existing shift or approved leave is skipped rather than double-booked.</p>
+    </details>
     <form method="post" action="{{ url_for('rota_grid.copy_week') }}" onsubmit="return rotaConfirmPasteWeek(this);">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="source_week" value="{{ week_start.isoformat() }}">
@@ -43,8 +45,10 @@
   </div>
 
   <div class="panel">
-    <h2>Clear this week</h2>
-    <p class="hint">Deletes every shift (scheduled and open) from this week. Leave requests, day-off overrides and event tags are untouched. This cannot be undone.</p>
+    <details class="week-action-info">
+      <summary><h2>Clear this week <span class="info-icon" aria-hidden="true">&#9432;</span></h2></summary>
+      <p class="hint">Deletes every shift (scheduled and open) from this week. Leave requests, day-off overrides and event tags are untouched. This cannot be undone.</p>
+    </details>
     <form method="post" action="{{ url_for('rota_grid.clear_week') }}"
           onsubmit="return confirm('Clear all shifts from the week of {{ week_start.day }} {{ week_start.strftime('%B %Y') }}? This cannot be undone.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

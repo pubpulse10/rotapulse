@@ -145,6 +145,32 @@ h2 { font-size: 1.2rem; }
 .panel-pair { display: flex; gap: 16px; align-items: flex-start; }
 .panel-pair > .panel { flex: 1; min-width: 0; }
 
+/* Explanatory copy collapsed behind an (i) icon by default — real report:
+   the always-visible paragraph on things like "Copy this week"/"Clear this
+   week" ate too much screen space next to the actual controls someone
+   needs to use. <details>/<summary> needs no JS and works identically on
+   tap and click, so it's used instead of a custom show/hide toggle. The
+   heading stays a real <h2> inside <summary> (valid HTML, screen readers
+   still see it as a heading) so opening the explanation doesn't change the
+   page's structure, only reveals a paragraph already sitting right there. */
+.week-action-info summary { cursor: pointer; list-style: none; }
+.week-action-info summary::-webkit-details-marker { display: none; }
+.week-action-info summary h2 { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.week-action-info .info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+.week-action-info[open] .info-icon { background: var(--color-border); color: var(--color-text); }
+.week-action-info .hint { margin: 8px 0 0; }
+
 label { display: block; font-weight: 600; margin: 12px 0 4px; }
 input[type=text], input[type=password], input[type=number], input[type=date],
 input[type=time], input[type=email], input[type=month], textarea, select {
@@ -188,7 +214,20 @@ textarea { min-height: 70px; resize: vertical; }
   text-decoration: none;
   margin-top: 10px;
 }
-.btn-danger { background: var(--color-error); }
+.btn-danger {
+  display: inline-block;
+  background: var(--color-error);
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  margin-top: 10px;
+}
+.btn-danger:hover { background: #96291b; }
 .link-button { background: none; border: none; color: var(--color-primary); text-decoration: underline; cursor: pointer; padding: 0; }
 
 table { width: 100%; border-collapse: collapse; }
