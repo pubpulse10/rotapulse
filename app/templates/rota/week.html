@@ -42,6 +42,17 @@
 </div>
 
 <div class="panel">
+  <h2>Clear this week</h2>
+  <p class="hint">Deletes every shift (scheduled and open) from this week. Leave requests, day-off overrides and event tags are untouched. This cannot be undone.</p>
+  <form method="post" action="{{ url_for('rota_grid.clear_week') }}"
+        onsubmit="return confirm('Clear all shifts from the week of {{ week_start.day }} {{ week_start.strftime('%B %Y') }}? This cannot be undone.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="week" value="{{ week_start.isoformat() }}">
+    <button type="submit" class="btn-danger">Clear this week</button>
+  </form>
+</div>
+
+<div class="panel">
   <table class="rota-table">
     <thead>
       <tr>

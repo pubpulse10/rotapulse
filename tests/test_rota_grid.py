@@ -594,6 +594,17 @@ def test_week_starts_unnotified(app, client, venue):
     assert b"Notify staff of this week" in resp.data
 
 
+def test_week_grid_offers_a_clear_week_form_directly_on_the_page(app, client, venue):
+    """Same fix as notify/copy above, requested alongside them — "Clear
+    this week" also only ever lived in the buried nav dropdown."""
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/rota/?week=2026-08-03")
+    assert resp.status_code == 200
+    assert b"Clear this week" in resp.data
+    assert f'action="/v/{venue["slug"]}/rota/clear-week"'.encode() in resp.data
+    assert b'name="week" value="2026-08-03"' in resp.data
+
+
 def test_week_grid_offers_a_copy_week_form_directly_on_the_page(app, client, venue):
     """Real report, 2026-08-19: an admin who'd used "copy week" before
     couldn't find it any more. It hadn't actually broken — it's always
