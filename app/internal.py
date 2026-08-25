@@ -12,7 +12,6 @@ bearer-secret way as the sibling apps' existing /internal/* calls.
 """
 
 import hmac
-from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 
@@ -21,6 +20,7 @@ from app.billing import enforce_band
 from app.db import get_db, get_app_id, delete_venue_by_pub_id
 from app.extensions import limiter
 from app.notification_settings import check_missed_clock_ins, check_missed_clock_outs, remind_staff_to_clock_in
+from app.uk_time import uk_now
 
 internal_bp = Blueprint("internal", __name__, url_prefix="/internal")
 
@@ -76,7 +76,7 @@ def run_shift_notifications():
         return jsonify({"error": "unauthorized"}), 401
 
     db = get_db()
-    now = datetime.now()
+    now = uk_now()
     missed_in = check_missed_clock_ins(db, now)
     missed_out = check_missed_clock_outs(db, now)
     staff_reminders = remind_staff_to_clock_in(db, now)

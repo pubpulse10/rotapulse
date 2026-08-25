@@ -22,6 +22,7 @@ from app.date_format import format_uk_date
 from app.db import get_db
 from app.notifications import send_email, send_sms
 from app.rota_auth import register_identity, require_permission
+from app.uk_time import uk_today
 from app.venue_scope import register_venue_gate, register_venue_scope
 from app.weather import get_week_forecast
 
@@ -105,7 +106,7 @@ def week():
     db = get_db()
     venue = flask.g.venue
     week_param = flask.request.args.get("week")
-    week_start = _monday_of(date.fromisoformat(week_param)) if week_param else _monday_of(date.today())
+    week_start = _monday_of(date.fromisoformat(week_param)) if week_param else _monday_of(uk_today())
     dates = _week_dates(week_start)
     date_strs = [d.isoformat() for d in dates]
 

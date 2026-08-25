@@ -25,6 +25,7 @@ import flask
 from app.costs import actual_cost, predicted_cost
 from app.db import get_db
 from app.rota_auth import register_identity, require_permission
+from app.uk_time import uk_today
 from app.venue_scope import register_venue_gate, register_venue_scope
 
 dashboard_bp = flask.Blueprint("dashboard", __name__, url_prefix="/v/<slug>/dashboard")
@@ -77,7 +78,7 @@ def week():
     db = get_db()
     venue = flask.g.venue
     week_param = flask.request.args.get("week")
-    week_start = _monday_of(date.fromisoformat(week_param)) if week_param else _monday_of(date.today())
+    week_start = _monday_of(date.fromisoformat(week_param)) if week_param else _monday_of(uk_today())
 
     settings = db.execute("SELECT * FROM venue_settings WHERE venue_id = ?", (venue["id"],)).fetchone()
     target_pct = settings["target_staff_cost_percent"] if settings else None
@@ -127,7 +128,7 @@ def month():
     if month_param:
         year, mon = map(int, month_param.split("-"))
     else:
-        today = date.today()
+        today = uk_today()
         year, mon = today.year, today.month
 
     first_day = date(year, mon, 1)
@@ -183,7 +184,7 @@ def birthdays():
         (flask.g.venue["id"],),
     ).fetchall()
 
-    today = date.today()
+    today = uk_today()
 
     def _valid_date(year, month, day):
         try:

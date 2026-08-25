@@ -6,7 +6,7 @@ permission tiers (an app_admin/rota_admin who is also a working staff
 member uses this same view for their own shifts).
 """
 
-from datetime import date, datetime, timedelta
+from datetime import timedelta
 
 import flask
 
@@ -16,6 +16,7 @@ from app.leave import days_taken_count
 from app.media import save_attendance_photo
 from app.notification_settings import notify_admins
 from app.rota_auth import register_identity, require_permission
+from app.uk_time import uk_now, uk_now_iso, uk_today
 from app.venue_scope import register_venue_gate, register_venue_scope
 
 staff_bp = flask.Blueprint("staff_portal", __name__, url_prefix="/v/<slug>/staff")
@@ -36,7 +37,7 @@ def home():
     db = get_db()
     person = flask.g.person
     venue = flask.g.venue
-    today = date.today()
+    today = uk_today()
     horizon = today + timedelta(days=21)
     shifts = db.execute(
         """SELECT shift.*, attendance.clock_in_at, attendance.clock_out_at, attendance.approval_status
@@ -80,7 +81,7 @@ def shift_detail(shift_id):
         "staff/shift_detail.html",
         shift=shift_row,
         attendance=attendance,
-        today=date.today().isoformat(),
+        today=uk_today().isoformat(),
         colleagues=colleagues,
     )
 
@@ -100,7 +101,7 @@ def clock_in(shift_id):
     # in the future straight from "My shifts" (which lists up to 3 weeks
     # ahead) -- restricted to the shift's own calendar day, matching how
     # attendance is meant to represent when someone actually was in.
-    if shift_row["shift_date"] != date.today().isoformat():
+    if shift_row["shift_date"] != uk_today().isoformat():
         flask.flash("You can only clock in on the day of the shift itself.", "error")
         return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=shift_id))
 
@@ -132,13 +133,13 @@ def clock_in(shift_id):
         """INSERT INTO attendance
            (shift_id, clock_in_at, clock_in_lat, clock_in_lng, clock_in_location_confirmed, photo_url,
             variance_flag, approval_status)
-           VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(shift_id) DO UPDATE SET clock_in_at = excluded.clock_in_at,
            clock_in_lat = excluded.clock_in_lat, clock_in_lng = excluded.clock_in_lng,
            clock_in_location_confirmed = excluded.clock_in_location_confirmed,
            photo_url = COALESCE(excluded.photo_url, attendance.photo_url),
            variance_flag = excluded.variance_flag, approval_status = excluded.approval_status""",
-        (shift_id, lat, lng, location_confirmed, photo_url, variance_flag, approval_status),
+        (shift_id, uk_now_iso(), lat, lng, location_confirmed, photo_url, variance_flag, approval_status),
     )
     db.commit()
     if approval_status == "pending":
@@ -174,7 +175,7 @@ def start_ad_hoc_shift():
     db = get_db()
     venue = flask.g.venue
     person = flask.g.person
-    today = date.today().isoformat()
+    today = uk_today().isoformat()
 
     # If they already have an open (not-yet-clocked-out) shift today, that's
     # the one to clock into — sends them there instead of creating a second,
@@ -202,23 +203,26 @@ def start_ad_hoc_shift():
     if photo_file and photo_file.filename:
         photo_url = save_attendance_photo(photo_file)
 
-    # start_time/end_time both placeholder to "now" via SQLite's own
-    # datetime('now') (UTC) rather than Python's datetime.now() — kept
-    # consistent with attendance.clock_in_at below, stamped the same way,
-    # so the two can never disagree by the server process's local UTC
-    # offset (see the matching note in clock_out() for an ad-hoc shift).
+    # start_time/end_time both placeholder to "now" — real report,
+    # 2026-08-19: this used to be SQLite's own strftime('%H:%M','now'),
+    # which (like datetime('now') below) is always UTC, not UK local time.
+    # Both now come from the same uk_now() call so they can never disagree
+    # with each other (see the matching note in clock_out() for an ad-hoc
+    # shift's end_time) or, more importantly, with the UK wall clock.
+    now = uk_now()
+    now_hhmm = now.strftime("%H:%M")
     cur = db.execute(
         """INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status, origin)
-           VALUES (?, ?, ?, strftime('%H:%M','now'), strftime('%H:%M','now'), 'scheduled', 'ad_hoc')""",
-        (venue["id"], person["id"], today),
+           VALUES (?, ?, ?, ?, ?, 'scheduled', 'ad_hoc')""",
+        (venue["id"], person["id"], today, now_hhmm, now_hhmm),
     )
     shift_id = cur.lastrowid
     db.execute(
         """INSERT INTO attendance
            (shift_id, clock_in_at, clock_in_lat, clock_in_lng, clock_in_location_confirmed, photo_url,
             variance_flag, approval_status)
-           VALUES (?, datetime('now'), ?, ?, ?, ?, 0, 'pending')""",
-        (shift_id, lat, lng, location_confirmed, photo_url),
+           VALUES (?, ?, ?, ?, ?, ?, 0, 'pending')""",
+        (shift_id, now.strftime("%Y-%m-%d %H:%M:%S"), lat, lng, location_confirmed, photo_url),
     )
     db.commit()
     notify_admins(
@@ -250,25 +254,20 @@ def clock_out(shift_id):
         location_confirmed = 1 if distance_metres(lat, lng, venue["latitude"], venue["longitude"]) <= _radius() else 0
 
     end_variance = 1 if abs(_variance_minutes(shift_row["end_time"])) > VARIANCE_THRESHOLD_MINUTES else 0
+    now = uk_now()
     db.execute(
-        """UPDATE attendance SET clock_out_at = datetime('now'), clock_out_lat = ?, clock_out_lng = ?,
+        """UPDATE attendance SET clock_out_at = ?, clock_out_lat = ?, clock_out_lng = ?,
            clock_out_location_confirmed = ?, variance_flag = MAX(variance_flag, ?) WHERE shift_id = ?""",
-        (lat, lng, location_confirmed, end_variance, shift_id),
+        (now.strftime("%Y-%m-%d %H:%M:%S"), lat, lng, location_confirmed, end_variance, shift_id),
     )
     if shift_row["origin"] == "ad_hoc":
         # An ad-hoc shift's end_time was only ever a same-instant placeholder
         # set at clock-in (see start_ad_hoc_shift) — there was no real plan
         # to preserve, so update it to the actual clock-out time rather than
-        # leaving the grid showing a zero-length shift forever. Derived from
-        # attendance.clock_out_at itself (just written, above) rather than a
-        # fresh datetime.now() call — that column is stamped via SQLite's
-        # own datetime('now') (UTC), so a second, separately-computed local
-        # "now" could disagree with it by the server's UTC offset.
-        db.execute(
-            """UPDATE shift SET end_time =
-               (SELECT strftime('%H:%M', clock_out_at) FROM attendance WHERE shift_id = ?) WHERE id = ?""",
-            (shift_id, shift_id),
-        )
+        # leaving the grid showing a zero-length shift forever. Uses the SAME
+        # `now` just written to attendance.clock_out_at above, not a second
+        # separately-computed one, so the two can never disagree.
+        db.execute("UPDATE shift SET end_time = ? WHERE id = ?", (now.strftime("%H:%M"), shift_id))
     db.commit()
     flask.flash("Clocked out." if location_confirmed != 0 else "Clocked out — location not confirmed.")
     return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=shift_id))
@@ -293,8 +292,9 @@ def _variance_minutes(planned_hhmm: str) -> float:
     checks); clock_in()'s approval check needs the sign, so this can't just
     return the absolute value like the old _minutes_late did."""
     planned_h, planned_m = map(int, planned_hhmm.split(":"))
-    planned = datetime.now().replace(hour=planned_h, minute=planned_m, second=0, microsecond=0)
-    return (datetime.now() - planned).total_seconds() / 60
+    now = uk_now()
+    planned = now.replace(hour=planned_h, minute=planned_m, second=0, microsecond=0)
+    return (now - planned).total_seconds() / 60
 
 
 # ---------- Leave (own) ----------
@@ -354,7 +354,7 @@ def open_shifts():
            LEFT JOIN venue_role ON venue_role.id = shift.venue_role_id
            WHERE shift.venue_id = ? AND shift.status = 'open' AND shift.shift_date >= ?
            ORDER BY shift.shift_date, shift.start_time""",
-        (flask.g.venue["id"], date.today().isoformat()),
+        (flask.g.venue["id"], uk_today().isoformat()),
     ).fetchall()
     return flask.render_template("staff/open_shifts.html", shifts=rows)
 

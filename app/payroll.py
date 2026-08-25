@@ -7,7 +7,6 @@ whoever actually runs payroll.
 
 import csv
 import io
-from datetime import date
 
 import flask
 
@@ -15,6 +14,7 @@ from app.date_format import format_uk_date, format_uk_time
 from app.db import get_db
 from app.pay_periods import period_containing
 from app.rota_auth import register_identity, require_permission
+from app.uk_time import uk_today
 from app.venue_scope import register_venue_gate, register_venue_scope
 
 payroll_bp = flask.Blueprint("payroll", __name__, url_prefix="/v/<slug>/payroll")
@@ -82,7 +82,7 @@ def report():
     if start_param and end_param:
         start_date, end_date = start_param, end_param
     else:
-        period_start, period_end = period_containing(settings, date.today())
+        period_start, period_end = period_containing(settings, uk_today())
         start_date, end_date = period_start.isoformat(), period_end.isoformat()
 
     by_person, pending_hours = _report_rows(db, venue["id"], start_date, end_date)

@@ -11,6 +11,8 @@ fixed calendar year) — mirrors the pay-period settings' own pattern.
 import json
 from datetime import date, timedelta
 
+from app.uk_time import uk_today
+
 WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
@@ -34,7 +36,7 @@ def _current_holiday_year_start(year_start_mmdd: str, today: date) -> date:
 
 
 def days_taken_count(db, person_id: int, availability_json: str, year_start_mmdd: str, today=None) -> int:
-    today = today or date.today()
+    today = today or uk_today()
     year_start = _current_holiday_year_start(year_start_mmdd, today)
     availability = json.loads(availability_json) if availability_json else {}
 

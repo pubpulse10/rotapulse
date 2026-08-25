@@ -11,6 +11,7 @@ from datetime import date, timedelta
 from app.costs import actual_cost, predicted_cost
 from app.date_format import format_uk_date
 from app.notifications import send_email
+from app.uk_time import uk_today
 
 
 def _monday_of(on_date: date) -> date:
@@ -20,7 +21,7 @@ def _monday_of(on_date: date) -> date:
 def send_digest_for_venue(db, venue) -> bool:
     """Returns True if a digest was sent, False if already sent this week
     or there's no one to send it to."""
-    last_week_start = _monday_of(date.today()) - timedelta(days=7)
+    last_week_start = _monday_of(uk_today()) - timedelta(days=7)
     last_week_end = last_week_start + timedelta(days=6)
 
     already_sent = db.execute(
