@@ -136,6 +136,15 @@ h2 { font-size: 1.2rem; }
 }
 .card.narrow { max-width: 420px; }
 
+/* Two panels side by side on anything wider than phone-width (matches the
+   640px breakpoint used everywhere else in this file) — e.g. "Copy this
+   week" and "Clear this week" on the rota page, which don't need a full
+   row each. min-width: 0 lets a wide table inside still get its own
+   horizontal scrollbar (see .panel's overflow-x above) instead of forcing
+   the flex item wider than its share. */
+.panel-pair { display: flex; gap: 16px; align-items: flex-start; }
+.panel-pair > .panel { flex: 1; min-width: 0; }
+
 label { display: block; font-weight: 600; margin: 12px 0 4px; }
 input[type=text], input[type=password], input[type=number], input[type=date],
 input[type=time], input[type=email], input[type=month], textarea, select {
@@ -362,6 +371,7 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
   .topbar { padding: 6px 12px; }
   .content, .flash-container { padding: 12px; }
   .panel, .card { padding: 12px; }
+  .panel-pair { flex-direction: column; }
 
   /* Taken clean out of the flex flow and pinned by absolute position
      instead of relying on flex spacing (margin-left: auto / space-between)
