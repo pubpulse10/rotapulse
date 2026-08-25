@@ -594,6 +594,22 @@ def test_week_starts_unnotified(app, client, venue):
     assert b"Notify staff of this week" in resp.data
 
 
+def test_week_grid_offers_a_copy_week_form_directly_on_the_page(app, client, venue):
+    """Real report, 2026-08-19: an admin who'd used "copy week" before
+    couldn't find it any more. It hadn't actually broken — it's always
+    lived inside the "Rota" nav dropdown (base.html, two menus deep on
+    mobile: hamburger -> Rota -> scroll to "Paste this week into") - easy
+    to lose track of. Added a second, directly-visible copy of the same
+    form right on the week page itself, same as the notify button above."""
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/rota/?week=2026-08-03")
+    assert resp.status_code == 200
+    assert b"Copy this week" in resp.data
+    assert f'action="/v/{venue["slug"]}/rota/copy-week"'.encode() in resp.data
+    assert b'id="page_target_week"' in resp.data
+    assert b'name="source_week" value="2026-08-03"' in resp.data
+
+
 def test_week_grid_offers_a_notify_button_when_unnotified(app, client, venue):
     """Real report, 2026-08-19: the backend route and "Unnotified"/"Notified"
     badge both existed from the app's very first commit, but no version of

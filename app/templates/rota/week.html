@@ -25,6 +25,23 @@
 </p>
 
 <div class="panel">
+  <h2>Copy this week</h2>
+  <p class="hint">Copies every shift (and any open shifts) from this week onto another week, keeping the same day-of-week, person, role and time. Won't overwrite anything — a copied shift that would clash with an existing shift or approved leave is skipped rather than double-booked.</p>
+  <form method="post" action="{{ url_for('rota_grid.copy_week') }}" onsubmit="return rotaConfirmPasteWeek(this);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="source_week" value="{{ week_start.isoformat() }}">
+    <label for="page_target_week">Copy into</label>
+    <select id="page_target_week" name="target_week" required>
+      <option value="" disabled selected>Choose a week</option>
+      {% for option in monday_options %}
+        <option value="{{ option['value'] }}" data-has-shifts="{{ 'true' if option['has_shifts'] else 'false' }}">{{ option['label'] }}{% if option['has_shifts'] %} (has shifts){% endif %}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn-primary">Copy week</button>
+  </form>
+</div>
+
+<div class="panel">
   <table class="rota-table">
     <thead>
       <tr>
