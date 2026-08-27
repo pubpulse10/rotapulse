@@ -54,9 +54,9 @@
                   {% endfor %}
                 </div>
               {% elif cell['state'] == 'leave' %}
-                <span title="On leave">🌴</span>
+                <span class="day-pill day-pill-leave">Hol</span>
               {% elif cell['state'] == 'day_off' %}
-                <span class="hint">Day off</span>
+                <span class="day-pill day-pill-off">Off</span>
               {% endif %}
             </td>
           {% endfor %}

@@ -270,31 +270,29 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
    week. 33px = the old 22px shift-chip avatar, 50% bigger. */
 .rota-name-cell { display: flex; align-items: center; gap: 8px; }
 .rota-name-cell .avatar { width: 33px; height: 33px; border-radius: 50%; flex-shrink: 0; }
-.cell-dayoff { background: transparent; }
-/* "Off" = a rostered non-working day (distinct from 🌴 leave/holiday). A quiet
-   grey pill rather than an emoji — reads as professional, not "asleep". */
-.cell-dayoff a::before {
-  content: "Off";
+.cell-dayoff, .cell-leave { background: transparent; }
+/* "Off" = a rostered non-working day, "Hol" = approved leave. Identical
+   box model (see .day-pill) so the two read as the same *kind* of thing
+   at a glance, just a different colour — reads as professional, not
+   "asleep". Leave was a 🌴 emoji until 2026-08-27: real report, an
+   all-leave row rendered visibly shorter than every other row (fixed
+   separately, see the .rota-cell height comment above), and on top of
+   that emoji glyphs carry much taller/less predictable line-height
+   metrics across platforms than plain text — rather than keep fighting
+   font-rendering variance, replaced it outright with a pill matching
+   "Off"'s own proven, simple box model. */
+.day-pill, .cell-dayoff a::before, .cell-leave a::before {
   display: inline-block;
   padding: 2px 10px;
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: #6b7280;
-  background: #e5e7eb;
   border-radius: 999px;
 }
-.cell-leave { background: transparent; color: var(--color-leave); }
-/* line-height: 1 is load-bearing here, not decorative — emoji glyphs carry
-   much taller internal line-height metrics than regular text in most
-   fonts (confirmed live: this cell's inner content box measured ~36px
-   without it, vs ~29px with it pinned). Combined with the .rota-cell
-   height fix above (the two together are what actually fixed the
-   reported misaligned-grid-lines bug — see its comment for the row-height
-   half of the story), this keeps a leave cell's own content from being
-   the odd one out sizing-wise against the other cell types (shift chips,
-   the "+" glyph, the "Off" pill). */
-.cell-leave a::before { content: "🌴"; font-size: 1.3rem; line-height: 1; }
+.day-pill-off, .cell-dayoff a::before { color: #6b7280; background: #e5e7eb; }
+.day-pill-leave, .cell-leave a::before { color: var(--color-leave); background: #efe6fb; }
+.cell-dayoff a::before { content: "Off"; }
+.cell-leave a::before { content: "Hol"; }
 
 /* Draggable shift chips (app/static/rota_dragdrop.js). touch-action: none —
    confirmed live that touch-action: pan-x pan-y does NOT reliably hand
