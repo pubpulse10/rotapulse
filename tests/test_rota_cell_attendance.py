@@ -30,6 +30,69 @@ def test_cell_panel_shows_actual_clock_in_and_out_times(app, client, venue):
     assert b"Late" in resp.data
 
 
+def test_cell_panel_distinguishes_too_far_from_never_checked(app, client, venue):
+    """Real report, 2026-08-27: a staff member clocked in from 6 miles away
+    and it looked completely normal to the admin. Root cause: the panel
+    only ever flagged clock_in_location_confirmed == 0 (confirmed too far
+    away) — a None (GPS declined/failed, or the venue's own coordinates
+    were never successfully geocoded) rendered no note at all, identical
+    to a genuinely-confirmed clock-in. The two unconfirmed cases must now
+    read as clearly different problems, not vanish into each other."""
+    too_far_id, _m1, _e1 = create_active_staff(app, venue["id"], name="TooFarAway")
+    never_checked_id, _m2, _e2 = create_active_staff(app, venue["id"], name="NeverChecked")
+    today = date.today().isoformat()
+    with app.app_context():
+        conn = db_module.get_db()
+        too_far_shift = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, ?, '09:00', '17:00', 'scheduled')",
+            (venue["id"], too_far_id, today),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at, clock_in_location_confirmed) VALUES (?, ?, 0)",
+            (too_far_shift, f"{today} 09:00:00"),
+        )
+        never_checked_shift = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, ?, '09:00', '17:00', 'scheduled')",
+            (venue["id"], never_checked_id, today),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at, clock_in_location_confirmed) VALUES (?, ?, NULL)",
+            (never_checked_shift, f"{today} 09:00:00"),
+        )
+        conn.commit()
+
+    login_as_pub(client, venue["pub_id"])
+
+    too_far_resp = client.get(f"/v/{venue['slug']}/rota/cell/{too_far_id}/{today}")
+    assert b"too far from the venue" in too_far_resp.data
+    assert b"location not checked" not in too_far_resp.data
+
+    never_checked_resp = client.get(f"/v/{venue['slug']}/rota/cell/{never_checked_id}/{today}")
+    assert b"location not checked" in never_checked_resp.data
+    assert b"too far from the venue" not in never_checked_resp.data
+
+
+def test_cell_panel_shows_no_location_note_when_confirmed(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="ConfirmedOnSite")
+    today = date.today().isoformat()
+    with app.app_context():
+        conn = db_module.get_db()
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, ?, '09:00', '17:00', 'scheduled')",
+            (venue["id"], person_id, today),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at, clock_in_location_confirmed) VALUES (?, ?, 1)",
+            (shift_id, f"{today} 09:00:00"),
+        )
+        conn.commit()
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/rota/cell/{person_id}/{today}")
+    assert b"too far from the venue" not in resp.data
+    assert b"location not checked" not in resp.data
+
+
 def test_cell_panel_shows_not_clocked_in_yet_when_no_attendance_row(app, client, venue):
     person_id, _m, _e = create_active_staff(app, venue["id"], name="NoAttendanceTest")
     today = date.today().isoformat()

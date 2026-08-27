@@ -137,6 +137,51 @@ def test_declining_geolocation_still_clocks_in(app, client, venue):
         assert att["clock_in_at"] is not None
 
 
+def test_declining_geolocation_flashes_not_confirmed(app, client, venue):
+    """Real report, 2026-08-27: a clock-in from 6 miles away read as a
+    plain, unflagged "Clocked in." on the staff member's own screen — the
+    flash message only checked for location_confirmed == 0 (confirmed too
+    far away), so a None (no location data at all, e.g. GPS declined or
+    the venue's own coordinates never got geocoded) looked exactly like a
+    genuinely-confirmed clock-in with no way to tell the difference."""
+    person_id, _m, _e = create_active_staff(app, venue["id"])
+    shift_id = _create_shift_for(app, venue["id"], person_id)
+    login_as_person(client, person_id)
+
+    resp = client.post(f"/v/{venue['slug']}/staff/shift/{shift_id}/clock-in", data={}, follow_redirects=True)
+    assert b"location not confirmed" in resp.data
+
+
+def test_clock_in_far_away_flashes_not_confirmed(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"])
+    shift_id = _create_shift_for(app, venue["id"], person_id)
+    login_as_person(client, person_id)
+
+    resp = client.post(
+        f"/v/{venue['slug']}/staff/shift/{shift_id}/clock-in",
+        data={"lat": "51.5", "lng": "-0.1"},
+        follow_redirects=True,
+    )
+    assert b"location not confirmed" in resp.data
+
+
+def test_clock_in_within_radius_flashes_plain_confirmation(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"])
+    shift_id = _create_shift_for(app, venue["id"], person_id)
+    login_as_person(client, person_id)
+
+    resp = client.post(
+        f"/v/{venue['slug']}/staff/shift/{shift_id}/clock-in",
+        data={"lat": "52.6", "lng": "1.3"},
+        follow_redirects=True,
+    )
+    assert b"Clocked in." in resp.data
+    # Not just "location not confirmed" not-in-page -- a JS comment on this
+    # very page contains that exact phrase (see shift_detail.html) -- the
+    # flash message itself is the thing under test.
+    assert b"Clocked in \xe2\x80\x94 location not confirmed." not in resp.data
+
+
 def test_clock_out_records_timestamp(app, client, venue):
     person_id, _m, _e = create_active_staff(app, venue["id"])
     shift_id = _create_shift_for(app, venue["id"], person_id)
@@ -149,3 +194,13 @@ def test_clock_out_records_timestamp(app, client, venue):
         conn = db_module.get_db()
         att = conn.execute("SELECT * FROM attendance WHERE shift_id = ?", (shift_id,)).fetchone()
         assert att["clock_out_at"] is not None
+
+
+def test_clock_out_with_no_location_data_flashes_not_confirmed(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"])
+    shift_id = _create_shift_for(app, venue["id"], person_id)
+    login_as_person(client, person_id)
+
+    client.post(f"/v/{venue['slug']}/staff/shift/{shift_id}/clock-in", data={"lat": "52.6", "lng": "1.3"})
+    resp = client.post(f"/v/{venue['slug']}/staff/shift/{shift_id}/clock-out", data={}, follow_redirects=True)
+    assert b"location not confirmed" in resp.data

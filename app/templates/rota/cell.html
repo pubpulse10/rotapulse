@@ -43,7 +43,7 @@
           <p class="hint">
             Actual:
             {% if s['clock_in_at'] %}
-              clocked in {{ s['clock_in_at']|uk_time }}{% if s['clock_in_location_confirmed'] == 0 %} (location not confirmed){% endif %}
+              clocked in {{ s['clock_in_at']|uk_time }}{% if s['clock_in_location_confirmed'] == 0 %} (too far from the venue){% elif s['clock_in_location_confirmed'] is none %} (location not checked){% endif %}
               {% set in_label = s['clock_in_at']|variance_label(s['start_time']) %}
               {% if in_label %}<span class="badge badge-over-target">{{ in_label }}</span>{% endif %}
             {% else %}
@@ -51,7 +51,7 @@
             {% endif %}
             —
             {% if s['clock_out_at'] %}
-              clocked out {{ s['clock_out_at']|uk_time }}{% if s['clock_out_location_confirmed'] == 0 %} (location not confirmed){% endif %}
+              clocked out {{ s['clock_out_at']|uk_time }}{% if s['clock_out_location_confirmed'] == 0 %} (too far from the venue){% elif s['clock_out_location_confirmed'] is none %} (location not checked){% endif %}
               {% set out_label = s['clock_out_at']|variance_label(s['end_time']) %}
               {% if out_label %}<span class="badge badge-over-target">{{ out_label }}</span>{% endif %}
             {% else %}

@@ -228,7 +228,13 @@ def clock_in(shift_id):
         )
         flask.flash("Clocked in — you're more than 30 minutes early, so this needs admin approval.")
     else:
-        flask.flash("Clocked in." if location_confirmed != 0 else "Clocked in — location not confirmed.")
+        # Real report, 2026-08-27: a clock-in from 6 miles away read as a
+        # plain, unflagged "Clocked in." — this was comparing against 0
+        # only, so location_confirmed being None (GPS declined/timed out,
+        # or the venue's own coordinates were never successfully geocoded)
+        # silently looked identical to a genuinely-confirmed 1. Both
+        # non-confirmed cases now get the same heads-up.
+        flask.flash("Clocked in." if location_confirmed == 1 else "Clocked in — location not confirmed.")
     return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=shift_id))
 
 
@@ -346,7 +352,7 @@ def clock_out(shift_id):
         # separately-computed one, so the two can never disagree.
         db.execute("UPDATE shift SET end_time = ? WHERE id = ?", (now.strftime("%H:%M"), shift_id))
     db.commit()
-    flask.flash("Clocked out." if location_confirmed != 0 else "Clocked out — location not confirmed.")
+    flask.flash("Clocked out." if location_confirmed == 1 else "Clocked out — location not confirmed.")
     return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=shift_id))
 
 
