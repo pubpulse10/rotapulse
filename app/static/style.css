@@ -278,7 +278,11 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 .rota-name-cell { vertical-align: middle; }
 .rota-name-fill { display: flex; align-items: center; gap: 8px; }
 .rota-name-cell .avatar { width: 33px; height: 33px; border-radius: 50%; flex-shrink: 0; }
-.cell-dayoff, .cell-leave { background: transparent; }
+/* Same dashed frame as .cell-empty above: Off/Hol are both "nobody is
+   working this slot" states, so they belong to the same visual family as
+   an empty cell rather than the solid-filled .cell-shift one. Without the
+   border they read as holes punched out of the grid — reported live. */
+.cell-dayoff, .cell-leave { background: transparent; border: 2px dashed var(--color-border); }
 /* "Off" = a rostered non-working day, "Hol" = approved leave. Identical
    box model (see .day-pill) so the two read as the same *kind* of thing
    at a glance, just a different colour — reads as professional, not
