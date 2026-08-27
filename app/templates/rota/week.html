@@ -199,5 +199,25 @@
   document.getElementById("copy-week-dialog").addEventListener("click", function (e) {
     if (e.target === this) this.close();
   });
+
+  // TEMPORARY, 2026-08-27 (round 2): on-page diagnostic for the live
+  // grid-row-height report -- this time dumping each ROW's height plus
+  // each CELL's own class/height/text within it, so a screenshot doesn't
+  // need to be re-interpreted by eye. Read-only, only runs when
+  // ?debug_grid=1 is in the URL. Remove this block once the report is
+  // resolved.
+  if (new URLSearchParams(window.location.search).has("debug_grid")) {
+    var rows = Array.from(document.querySelectorAll(".rota-table tbody tr")).map(function (r) {
+      var nameCell = r.querySelector("td:first-child");
+      var cells = Array.from(r.querySelectorAll("td")).map(function (td) {
+        return { cls: td.className, h: Math.round(td.getBoundingClientRect().height), text: td.textContent.trim() };
+      });
+      return { name: nameCell ? nameCell.textContent.trim() : null, rowH: Math.round(r.getBoundingClientRect().height), cells: cells };
+    });
+    var box = document.createElement("pre");
+    box.style.cssText = "background:#fff3cd;border:2px solid #f0ad4e;padding:12px;white-space:pre-wrap;word-break:break-all;font-size:0.85rem;";
+    box.textContent = JSON.stringify(rows, null, 1);
+    (document.querySelector("main") || document.body).prepend(box);
+  }
 </script>
 {% endblock %}
