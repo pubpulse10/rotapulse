@@ -118,10 +118,12 @@
       {% for row in grid %}
         <tr>
           <td class="rota-name-cell">
-            {% if row['member']['avatar_url'] %}
-              <img class="avatar" src="{{ url_for('media.avatar', stored_filename=row['member']['avatar_url']) }}" alt="">
-            {% endif %}
-            {{ row['member']['name'] }}
+            <span class="rota-name-fill">
+              {% if row['member']['avatar_url'] %}
+                <img class="avatar" src="{{ url_for('media.avatar', stored_filename=row['member']['avatar_url']) }}" alt="">
+              {% endif %}
+              {{ row['member']['name'] }}
+            </span>
           </td>
           {% for cell in row['cells'] %}
             {% set d_str = date_strs[loop.index0] %}

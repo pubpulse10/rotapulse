@@ -40,10 +40,12 @@
       {% for row in grid %}
         <tr>
           <td class="rota-name-cell">
-            {% if row['member']['avatar_url'] %}
-              <img class="avatar" src="{{ url_for('media.avatar', stored_filename=row['member']['avatar_url']) }}" alt="">
-            {% endif %}
-            {{ row['member']['name'] }}
+            <span class="rota-name-fill">
+              {% if row['member']['avatar_url'] %}
+                <img class="avatar" src="{{ url_for('media.avatar', stored_filename=row['member']['avatar_url']) }}" alt="">
+              {% endif %}
+              {{ row['member']['name'] }}
+            </span>
           </td>
           {% for cell in row['cells'] %}
             <td class="rota-cell cell-{{ 'shift' if cell['state']=='shift' else ('dayoff' if cell['state']=='day_off' else ('leave' if cell['state']=='leave' else 'empty')) }}">
