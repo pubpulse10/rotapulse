@@ -108,10 +108,14 @@ def full_rota():
         availability = json.loads(member["availability"]) if member["availability"] else {}
         row_cells = []
         for d, d_str in zip(dates, date_strs):
-            if _is_on_approved_leave(db, member["person_id"], d_str):
-                cell = {"state": "leave"}
-            elif shifts_by_person_date.get((member["person_id"], d_str)):
+            # Same fix as rota_grid.py::week() (see its comment) -- a real
+            # shift always wins the display over a leave record, since
+            # claim_open_shift has no leave check and would otherwise leave
+            # a genuine shift invisible behind a stale leave state.
+            if shifts_by_person_date.get((member["person_id"], d_str)):
                 cell = {"state": "shift", "shifts": shifts_by_person_date[(member["person_id"], d_str)]}
+            elif _is_on_approved_leave(db, member["person_id"], d_str):
+                cell = {"state": "leave"}
             elif (member["person_id"], d_str) in override_set:
                 cell = {"state": "day_off"}
             elif not availability.get(WEEKDAY_KEYS[d.weekday()], True):

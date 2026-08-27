@@ -167,10 +167,21 @@ def week():
         availability = json.loads(member["availability"]) if member["availability"] else {}
         row_cells = []
         for d, d_str in zip(dates, date_strs):
-            if _is_on_approved_leave(db, member["person_id"], d_str):
-                cell = {"state": "leave"}
-            elif shifts_by_person_date.get((member["person_id"], d_str)):
+            # Real report, 2026-08-27: a shift check ranked below the leave
+            # check meant a genuine, real shift became invisible on the grid
+            # the moment someone claimed an open shift while still marked as
+            # on approved leave that day (claim_open_shift has no leave
+            # check at all -- same as create_shift, deliberately, so an
+            # admin/staff member can always cover regardless) -- the cell
+            # kept showing the stale leave state and hid the actual shift
+            # entirely. A real shift is the more concrete, actionable fact
+            # (someone IS working), so it now always wins the display,
+            # leave record notwithstanding -- the leave itself is untouched
+            # and still cancellable from the leave queue/cell panel.
+            if shifts_by_person_date.get((member["person_id"], d_str)):
                 cell = {"state": "shift", "shifts": shifts_by_person_date[(member["person_id"], d_str)]}
+            elif _is_on_approved_leave(db, member["person_id"], d_str):
+                cell = {"state": "leave"}
             elif (member["person_id"], d_str) in override_set:
                 cell = {"state": "day_off", "override": True}
             elif not availability.get(WEEKDAY_KEYS[d.weekday()], True):

@@ -30,6 +30,40 @@ def test_first_claim_wins(app, client, venue):
         assert shift_row["person_id"] == person_id
 
 
+def test_claiming_an_open_shift_while_on_approved_leave_shows_the_shift_not_leave(app, client, venue):
+    """Real report, 2026-08-27: 'Donna' claimed an open shift for a day she
+    was down for approved leave -- the grid cell kept showing the leave
+    state, hiding the shift she'd actually just picked up. claim_open_shift
+    has no leave check at all (deliberately, matching create_shift -- covering
+    an open shift is never blocked by a leave record), so the fix is on the
+    display side: a real shift now always wins over a leave record in the
+    grid's per-cell state."""
+    today = date.today().isoformat()
+    shift_id = _create_open_shift(app, venue["id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Donna")
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "INSERT INTO leave_request (person_id, venue_id, start_date, end_date, status) VALUES (?, ?, ?, ?, 'approved')",
+            (person_id, venue["id"], today, today),
+        )
+        conn.commit()
+
+    login_as_person(client, person_id)
+    resp = client.post(f"/v/{venue['slug']}/staff/open-shifts/{shift_id}/claim", follow_redirects=True)
+    assert b"claimed" in resp.data.lower()
+
+    login_as_pub(client, venue["pub_id"])
+    grid_resp = client.get(f"/v/{venue['slug']}/rota/")
+    assert b"cell-shift" in grid_resp.data
+    assert b"18:00-23:00" in grid_resp.data
+    assert b"cell-leave" not in grid_resp.data
+
+    staff_resp = client.get(f"/v/{venue['slug']}/staff/rota")
+    assert b"18:00-23:00" in staff_resp.data
+    assert b"Hol" not in staff_resp.data
+
+
 def test_second_claim_is_rejected(app, client, venue):
     shift_id = _create_open_shift(app, venue["id"])
     first_id, _m1, _e1 = create_active_staff(app, venue["id"], name="First")

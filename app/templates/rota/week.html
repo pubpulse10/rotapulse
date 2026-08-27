@@ -199,20 +199,5 @@
   document.getElementById("copy-week-dialog").addEventListener("click", function (e) {
     if (e.target === this) this.close();
   });
-
-  // TEMPORARY, 2026-08-27: on-page diagnostic for a live grid-row-height
-  // report, so the landlord can copy/paste a result without needing
-  // DevTools. Read-only, only runs when ?debug_grid=1 is in the URL.
-  // Remove this block once the report is resolved.
-  if (new URLSearchParams(window.location.search).has("debug_grid")) {
-    var rows = Array.from(document.querySelectorAll(".rota-table tbody tr")).map(function (r) {
-      var nameCell = r.querySelector("td:first-child");
-      return { name: nameCell ? nameCell.textContent.trim() : null, height: r.getBoundingClientRect().height };
-    });
-    var box = document.createElement("pre");
-    box.style.cssText = "background:#fff3cd;border:2px solid #f0ad4e;padding:12px;white-space:pre-wrap;word-break:break-all;font-size:0.85rem;";
-    box.textContent = JSON.stringify(rows);
-    (document.querySelector("main") || document.body).prepend(box);
-  }
 </script>
 {% endblock %}
