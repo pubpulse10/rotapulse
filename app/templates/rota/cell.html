@@ -59,6 +59,12 @@
             {% endif %}
           </p>
         {% endif %}
+        <form method="post" action="{{ url_for('rota_grid.edit_attendance', shift_id=s['id']) }}" style="display:flex; gap:8px; align-items:flex-end;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div><label>Clocked in</label><input type="time" name="clock_in_time" value="{{ s['clock_in_at']|uk_time }}"></div>
+          <div><label>Clocked out</label><input type="time" name="clock_out_time" value="{{ s['clock_out_at']|uk_time }}"></div>
+          <button type="submit" class="btn-secondary">Save clock times</button>
+        </form>
         <form method="post" action="{{ url_for('rota_grid.update_shift', shift_id=s['id']) }}" style="display:flex; gap:8px; align-items:flex-end;">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="shift_date" value="{{ on_date }}">

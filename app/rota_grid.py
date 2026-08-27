@@ -450,6 +450,50 @@ def update_shift(shift_id):
     return flask.redirect(flask.url_for("rota_grid.week", week=form.get("shift_date")))
 
 
+@rota_bp.route("/shift/<int:shift_id>/attendance", methods=["POST"])
+@require_permission("app_admin", "rota_admin")
+def edit_attendance(shift_id):
+    """Real report, 2026-08-19: no way for an admin to fix a clock time
+    when someone forgot to clock in or out — the only clock-in/out entry
+    point was the staff member's own device, at the moment it happened.
+    Time-only inputs (HH:MM) are combined with the shift's own date to
+    build the full datetime attendance.clock_in_at/clock_out_at expect;
+    an end time earlier than the start time is treated as crossing
+    midnight (shift_date + 1), matching how a real clock-out naturally
+    lands on the next calendar day for an overnight shift. Deliberately
+    leaves location/photo/approval columns alone — untouched on an
+    existing row, defaulted (all NULL/'') on a fresh one, since an
+    admin-entered time doesn't need any of that."""
+    db = get_db()
+    shift_row = db.execute(
+        "SELECT * FROM shift WHERE id = ? AND venue_id = ?", (shift_id, flask.g.venue["id"])
+    ).fetchone()
+    if shift_row is None:
+        flask.abort(404)
+
+    form = flask.request.form
+    clock_in_time = (form.get("clock_in_time") or "").strip()
+    clock_out_time = (form.get("clock_out_time") or "").strip()
+    clock_in_at = f"{shift_row['shift_date']} {clock_in_time}:00" if clock_in_time else None
+    clock_out_date = shift_row["shift_date"]
+    if clock_in_time and clock_out_time and clock_out_time < clock_in_time:
+        clock_out_date = (date.fromisoformat(shift_row["shift_date"]) + timedelta(days=1)).isoformat()
+    clock_out_at = f"{clock_out_date} {clock_out_time}:00" if clock_out_time else None
+
+    db.execute(
+        """INSERT INTO attendance (shift_id, clock_in_at, clock_out_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(shift_id) DO UPDATE SET clock_in_at = excluded.clock_in_at,
+           clock_out_at = excluded.clock_out_at""",
+        (shift_id, clock_in_at, clock_out_at),
+    )
+    db.commit()
+    flask.flash("Clock times updated.")
+    return flask.redirect(
+        flask.url_for("rota_grid.cell", person_id=shift_row["person_id"], on_date=shift_row["shift_date"])
+    )
+
+
 @rota_bp.route("/shift/<int:shift_id>/move", methods=["POST"])
 @require_permission("app_admin", "rota_admin")
 def move_shift(shift_id):
