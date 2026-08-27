@@ -384,9 +384,23 @@ def cell(person_id, on_date):
         "SELECT * FROM day_off_override WHERE venue_id = ? AND person_id = ? AND override_date = ?",
         (venue["id"], person_id, on_date),
     ).fetchone()
+    # Real report, 2026-08-19: no way to take someone off approved leave.
+    # decline_leave already works fine on an approved request (no status
+    # restriction in its own WHERE clause) — the actual gap was that
+    # leave_queue only ever lists PENDING requests, so once approved, a
+    # leave_request became invisible everywhere except the grid's own palm-
+    # tree icon for the date, with no way to reach the request that made
+    # it show up. Surfaced here, right where an admin actually lands after
+    # clicking that icon.
+    approved_leave = db.execute(
+        """SELECT * FROM leave_request WHERE person_id = ? AND venue_id = ? AND status = 'approved'
+           AND start_date <= ? AND end_date >= ?""",
+        (person_id, venue["id"], on_date, on_date),
+    ).fetchone()
     roles = db.execute("SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name", (venue["id"],)).fetchall()
     return flask.render_template(
-        "rota/cell.html", person=person, on_date=on_date, shifts=shifts, override=override, roles=roles
+        "rota/cell.html", person=person, on_date=on_date, shifts=shifts, override=override,
+        approved_leave=approved_leave, roles=roles,
     )
 
 
@@ -840,8 +854,22 @@ def leave_queue():
            ORDER BY leave_request.requested_at""",
         (flask.g.venue["id"],),
     ).fetchall()
+    # Real report, 2026-08-19: no way to take someone off approved leave —
+    # once approved, a request dropped out of the queue above and became
+    # invisible everywhere except the grid's own palm-tree icon for the
+    # date (see the matching note on decline_leave). current_or_upcoming
+    # only, so leave that's already finished doesn't pile up here forever.
+    current_or_upcoming_leave = db.execute(
+        """SELECT leave_request.*, person.name FROM leave_request
+           JOIN person ON person.id = leave_request.person_id
+           WHERE leave_request.venue_id = ? AND leave_request.status = 'approved' AND leave_request.end_date >= ?
+           ORDER BY leave_request.start_date""",
+        (flask.g.venue["id"], uk_today().isoformat()),
+    ).fetchall()
     staff = _billable_staff(db, flask.g.venue["id"])
-    return flask.render_template("rota/leave_queue.html", requests=rows, staff=staff)
+    return flask.render_template(
+        "rota/leave_queue.html", requests=rows, current_or_upcoming_leave=current_or_upcoming_leave, staff=staff
+    )
 
 
 @rota_bp.route("/leave/create", methods=["POST"])
@@ -892,13 +920,28 @@ def approve_leave(leave_id):
 @rota_bp.route("/leave/<int:leave_id>/decline", methods=["POST"])
 @require_permission("app_admin", "rota_admin")
 def decline_leave(leave_id):
+    """Also doubles as "take someone off approved leave" (spec extension,
+    2026-08-19) — nothing here restricts this to a still-pending request,
+    so flipping an already-approved one back to 'declined' works exactly
+    the same way and immediately frees them up to be rostered again (the
+    grid's palm-tree check only ever looks for status='approved'). Redirects
+    back to wherever the request came from — the cell panel when cancelling
+    approved leave in place, the leave queue when actually declining a
+    pending one — rather than always jumping to the queue."""
     db = get_db()
+    existing = db.execute(
+        "SELECT status FROM leave_request WHERE id = ? AND venue_id = ?", (leave_id, flask.g.venue["id"])
+    ).fetchone()
     db.execute(
         "UPDATE leave_request SET status = 'declined', decided_at = datetime('now'), decided_by_person_id = ? WHERE id = ? AND venue_id = ?",
         (flask.g.person["id"] if flask.g.person else None, leave_id, flask.g.venue["id"]),
     )
     db.commit()
-    return flask.redirect(flask.url_for("rota_grid.leave_queue"))
+    if existing and existing["status"] == "approved":
+        flask.flash("Leave cancelled.")
+    else:
+        flask.flash("Leave request declined.")
+    return flask.redirect(flask.request.referrer or flask.url_for("rota_grid.leave_queue"))
 
 
 # ---------- Event tags (spec §10) ----------

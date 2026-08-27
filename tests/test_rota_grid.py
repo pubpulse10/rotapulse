@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from app import db as db_module
+from app.uk_time import uk_today
 from tests.conftest import create_active_staff, login_as_pub
 
 
@@ -728,3 +729,113 @@ def test_copy_week_dropdown_flags_weeks_that_already_have_shifts(app, client, ve
     empty_option = text[empty_option_idx : empty_option_idx + 200]
     assert 'data-has-shifts="false"' in empty_option
     assert "(has shifts)" not in empty_option
+
+
+# ---------- Cancelling approved leave ----------
+
+
+def _approved_leave(app, venue_id, person_id, start_date, end_date):
+    with app.app_context():
+        conn = db_module.get_db()
+        cur = conn.execute(
+            """INSERT INTO leave_request (person_id, venue_id, start_date, end_date, status, decided_at)
+               VALUES (?, ?, ?, ?, 'approved', datetime('now'))""",
+            (person_id, venue_id, start_date, end_date),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def test_cell_panel_shows_approved_leave_with_a_cancel_button(app, client, venue):
+    """Real report, 2026-08-19: no way to take someone off approved leave.
+    It was never actually undoable through the UI — decline_leave itself
+    already worked fine on an approved request, but leave_queue only ever
+    listed pending ones, so an approved request became invisible (and
+    therefore unreachable) everywhere except the grid's own palm-tree icon,
+    which didn't link anywhere useful."""
+    login_as_pub(client, venue["pub_id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="OnLeave")
+    leave_id = _approved_leave(app, venue["id"], person_id, "2026-08-17", "2026-08-21")
+
+    resp = client.get(f"/v/{venue['slug']}/rota/cell/{person_id}/2026-08-18")
+    assert resp.status_code == 200
+    assert b"On approved leave" in resp.data
+    assert f'action="/v/{venue["slug"]}/rota/leave/{leave_id}/decline"'.encode() in resp.data
+
+
+def test_cell_panel_has_no_leave_section_when_not_on_leave(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="NotOnLeave")
+
+    resp = client.get(f"/v/{venue['slug']}/rota/cell/{person_id}/2026-08-18")
+    assert resp.status_code == 200
+    assert b"On approved leave" not in resp.data
+
+
+def test_declining_an_already_approved_leave_request_cancels_it(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="CancelMe")
+    leave_id = _approved_leave(app, venue["id"], person_id, "2026-08-17", "2026-08-21")
+
+    resp = client.post(f"/v/{venue['slug']}/rota/leave/{leave_id}/decline", follow_redirects=True)
+    assert resp.status_code == 200
+
+    with app.app_context():
+        conn = db_module.get_db()
+        row = conn.execute("SELECT status FROM leave_request WHERE id = ?", (leave_id,)).fetchone()
+        assert row["status"] == "declined"
+
+
+def test_leave_cancellation_unblocks_move_shift_onto_that_date(app, client, venue):
+    """move_shift is one of the places that actually enforces the approved-
+    leave block (unlike create_shift, which doesn't check it at all) —
+    proves cancelling leave has a real effect, not just a status flip."""
+    login_as_pub(client, venue["pub_id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="MoveOntoLeave")
+    other_id, _m2, _e2 = create_active_staff(app, venue["id"], name="MoveSource")
+    leave_id = _approved_leave(app, venue["id"], person_id, "2026-08-17", "2026-08-21")
+    shift_id = _create_shift(app, venue["id"], other_id, "2026-08-03")
+
+    resp = client.post(
+        f"/v/{venue['slug']}/rota/shift/{shift_id}/move",
+        json={"person_id": person_id, "shift_date": "2026-08-18"},
+    )
+    assert resp.status_code == 409
+    assert "leave" in resp.get_json()["error"].lower()
+
+    client.post(f"/v/{venue['slug']}/rota/leave/{leave_id}/decline")
+
+    resp = client.post(
+        f"/v/{venue['slug']}/rota/shift/{shift_id}/move",
+        json={"person_id": person_id, "shift_date": "2026-08-18"},
+    )
+    assert resp.status_code == 200
+
+
+def test_leave_queue_lists_current_and_upcoming_approved_leave(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="UpcomingLeave")
+    today = uk_today()
+    leave_id = _approved_leave(
+        app, venue["id"], person_id, today.isoformat(), (today + timedelta(days=4)).isoformat()
+    )
+
+    resp = client.get(f"/v/{venue['slug']}/rota/leave")
+    assert resp.status_code == 200
+    assert b"Current and upcoming approved leave" in resp.data
+    assert b"UpcomingLeave" in resp.data
+    assert f'action="/v/{venue["slug"]}/rota/leave/{leave_id}/decline"'.encode() in resp.data
+
+
+def test_leave_queue_omits_leave_that_has_already_finished(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="PastLeave")
+    leave_id = _approved_leave(app, venue["id"], person_id, "2020-01-01", "2020-01-05")
+
+    resp = client.get(f"/v/{venue['slug']}/rota/leave")
+    assert resp.status_code == 200
+    # "PastLeave" itself still shows up in the "Add leave" staff dropdown —
+    # only the decline form (unique to the leave-listing section) proves
+    # the finished leave was actually omitted from that section.
+    assert f'action="/v/{venue["slug"]}/rota/leave/{leave_id}/decline"'.encode() not in resp.data
+    assert b"Nobody's on approved leave right now" in resp.data

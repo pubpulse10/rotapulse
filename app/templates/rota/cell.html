@@ -3,6 +3,18 @@
 {% block content %}
 <h1>{{ person['name'] }} — {{ on_date|uk_date }}</h1>
 
+{% if approved_leave %}
+  <div class="panel">
+    <h2>On approved leave</h2>
+    <p class="hint">{{ approved_leave['start_date']|uk_date }} to {{ approved_leave['end_date']|uk_date }}.</p>
+    <form method="post" action="{{ url_for('rota_grid.decline_leave', leave_id=approved_leave['id']) }}"
+          onsubmit="return confirm('Cancel this approved leave? They will be available to roster again for this period.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn-secondary">Cancel leave</button>
+    </form>
+  </div>
+{% endif %}
+
 {% if shifts %}
   <div class="panel">
     <h2>Shift(s)</h2>
