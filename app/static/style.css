@@ -228,7 +228,19 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 }
 .rota-table th { background: var(--color-surface); position: sticky; top: 0; }
 .rota-cell {
-  min-height: 64px;
+  /* height, not min-height -- reported live: an all-leave row (every cell
+     .cell-leave) rendered visibly SHORTER than every other row, throwing
+     the grid lines out of alignment with the staff names beside them.
+     Root cause: min-height on a <td> isn't reliably enforced as a row-
+     height floor with this table's border-collapse:collapse +
+     table-layout:fixed combination -- confirmed live that a row where NO
+     cell's own content happens to reach 64px (an all-leave row is the
+     textbook case) simply renders shorter, min-height or not. height
+     behaves differently: browsers still grow a row past it for genuinely
+     taller content (confirmed live with a forced 150px-tall test node --
+     the cell grew to 214px, it didn't clip), so this is a strict
+     upgrade, not a trade-off against e.g. a split shift's stacked chips. */
+  height: 64px;
   vertical-align: top;
   cursor: pointer;
 }
@@ -273,7 +285,16 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
   border-radius: 999px;
 }
 .cell-leave { background: transparent; color: var(--color-leave); }
-.cell-leave a::before { content: "🌴"; font-size: 1.3rem; }
+/* line-height: 1 is load-bearing here, not decorative — emoji glyphs carry
+   much taller internal line-height metrics than regular text in most
+   fonts (confirmed live: this cell's inner content box measured ~36px
+   without it, vs ~29px with it pinned). Combined with the .rota-cell
+   height fix above (the two together are what actually fixed the
+   reported misaligned-grid-lines bug — see its comment for the row-height
+   half of the story), this keeps a leave cell's own content from being
+   the odd one out sizing-wise against the other cell types (shift chips,
+   the "+" glyph, the "Off" pill). */
+.cell-leave a::before { content: "🌴"; font-size: 1.3rem; line-height: 1; }
 
 /* Draggable shift chips (app/static/rota_dragdrop.js). touch-action: none —
    confirmed live that touch-action: pan-x pan-y does NOT reliably hand
