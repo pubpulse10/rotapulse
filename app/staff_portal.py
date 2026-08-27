@@ -6,7 +6,8 @@ permission tiers (an app_admin/rota_admin who is also a working staff
 member uses this same view for their own shifts).
 """
 
-from datetime import timedelta
+import json
+from datetime import date, timedelta
 
 import flask
 
@@ -16,6 +17,7 @@ from app.leave import days_taken_count
 from app.media import save_attendance_photo
 from app.notification_settings import notify_admins
 from app.rota_auth import register_identity, require_permission
+from app.rota_grid import WEEKDAY_KEYS, _billable_staff, _is_on_approved_leave, _monday_of, _week_dates
 from app.uk_time import uk_now, uk_now_iso, uk_today
 from app.venue_scope import register_venue_gate, register_venue_scope
 
@@ -53,6 +55,81 @@ def home():
     has_open_shift_today = any(s["shift_date"] == today.isoformat() and not s["clock_out_at"] for s in shifts)
     return flask.render_template(
         "staff/home.html", shifts=shifts, today=today.isoformat(), has_open_shift_today=has_open_shift_today
+    )
+
+
+@staff_bp.route("/rota")
+@require_permission("staff", "rota_admin", "app_admin")
+def full_rota():
+    """Real request, 2026-08-19: staff could only ever see their OWN
+    shifts, with no way to check who else is on with them or who's
+    covering a shift they're handing over. A read-only mirror of the admin
+    week grid (app/rota_grid.py::week) — same grid-building helpers, same
+    cell states — minus everything only an admin needs: costs, weather,
+    drag-and-drop, notify/copy/clear. Deliberately not wired into
+    rota_dragdrop.js at all (no data-shift-id/tabindex on the chips) since
+    nothing on this page is meant to be draggable or clickable."""
+    db = get_db()
+    venue = flask.g.venue
+    week_param = flask.request.args.get("week")
+    week_start = _monday_of(date.fromisoformat(week_param)) if week_param else _monday_of(uk_today())
+    dates = _week_dates(week_start)
+    date_strs = [d.isoformat() for d in dates]
+
+    staff = _billable_staff(db, venue["id"])
+    shift_rows = db.execute(
+        """SELECT * FROM shift WHERE venue_id = ? AND shift_date BETWEEN ? AND ? AND status = 'scheduled'""",
+        (venue["id"], date_strs[0], date_strs[-1]),
+    ).fetchall()
+    shifts_by_person_date = {}
+    for s in shift_rows:
+        shifts_by_person_date.setdefault((s["person_id"], s["shift_date"]), []).append(s)
+
+    overrides = db.execute(
+        "SELECT * FROM day_off_override WHERE venue_id = ? AND override_date BETWEEN ? AND ?",
+        (venue["id"], date_strs[0], date_strs[-1]),
+    ).fetchall()
+    override_set = {(o["person_id"], o["override_date"]) for o in overrides}
+
+    open_shifts = db.execute(
+        """SELECT shift.*, venue_role.name AS role_name FROM shift
+           LEFT JOIN venue_role ON venue_role.id = shift.venue_role_id
+           WHERE shift.venue_id = ? AND shift.status = 'open'
+           AND shift.shift_date BETWEEN ? AND ?
+           ORDER BY shift.shift_date, shift.start_time""",
+        (venue["id"], date_strs[0], date_strs[-1]),
+    ).fetchall()
+    open_shifts_by_date = {}
+    for s in open_shifts:
+        open_shifts_by_date.setdefault(s["shift_date"], []).append(s)
+
+    grid = []
+    for member in staff:
+        availability = json.loads(member["availability"]) if member["availability"] else {}
+        row_cells = []
+        for d, d_str in zip(dates, date_strs):
+            if _is_on_approved_leave(db, member["person_id"], d_str):
+                cell = {"state": "leave"}
+            elif shifts_by_person_date.get((member["person_id"], d_str)):
+                cell = {"state": "shift", "shifts": shifts_by_person_date[(member["person_id"], d_str)]}
+            elif (member["person_id"], d_str) in override_set:
+                cell = {"state": "day_off"}
+            elif not availability.get(WEEKDAY_KEYS[d.weekday()], True):
+                cell = {"state": "day_off"}
+            else:
+                cell = {"state": "empty"}
+            row_cells.append(cell)
+        grid.append({"member": member, "cells": row_cells})
+
+    return flask.render_template(
+        "staff/full_rota.html",
+        venue=venue,
+        week_start=week_start,
+        dates=dates,
+        grid=grid,
+        open_shifts_by_date=open_shifts_by_date,
+        prev_week=(week_start - timedelta(days=7)).isoformat(),
+        next_week=(week_start + timedelta(days=7)).isoformat(),
     )
 
 

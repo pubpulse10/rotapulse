@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Full rota — {{ venue['name'] }}{% endblock %}
+{% block content %}
+<h1>{{ venue['name'] }} — week of {{ week_start.day }} {{ week_start.strftime('%B %Y') }}</h1>
+<p class="hint">Everyone's shifts for the week, so you can see who you're working with.</p>
+<div class="week-actions">
+  <a class="btn-secondary" href="{{ url_for('staff_portal.full_rota', week=prev_week) }}">&laquo; Prev week</a>
+  <a class="btn-secondary" href="{{ url_for('staff_portal.full_rota', week=next_week) }}">Next week &raquo;</a>
+</div>
+
+<div class="panel">
+  <table class="rota-table">
+    <thead>
+      <tr>
+        <th>Staff</th>
+        {% for d in dates %}
+          <th>{{ d.strftime('%a') }} {{ d.day }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="open-row">
+        <td>Open</td>
+        {% for d in dates %}
+          {% set d_str = d.isoformat() %}
+          {% set day_open_shifts = open_shifts_by_date.get(d_str, []) %}
+          <td class="rota-cell {{ 'cell-openshift' if day_open_shifts else 'cell-empty' }}">
+            {% if day_open_shifts %}
+              <div class="rota-cell-fill">
+                {% for s in day_open_shifts %}
+                  <span class="shift-chip open-shift-chip">
+                    {{ s['start_time'] }}-{{ s['end_time'] }}{% if s['role_name'] %} ({{ s['role_name'] }}){% endif %}
+                  </span>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </td>
+        {% endfor %}
+      </tr>
+      {% for row in grid %}
+        <tr>
+          <td class="rota-name-cell">
+            {% if row['member']['avatar_url'] %}
+              <img class="avatar" src="{{ url_for('media.avatar', stored_filename=row['member']['avatar_url']) }}" alt="">
+            {% endif %}
+            {{ row['member']['name'] }}
+          </td>
+          {% for cell in row['cells'] %}
+            <td class="rota-cell cell-{{ 'shift' if cell['state']=='shift' else ('dayoff' if cell['state']=='day_off' else ('leave' if cell['state']=='leave' else 'empty')) }}">
+              {% if cell['state'] == 'shift' %}
+                <div class="rota-cell-fill">
+                  {% for s in cell['shifts'] %}
+                    <span class="shift-chip">{{ s['start_time'] }}-{{ s['end_time'] }}</span>
+                  {% endfor %}
+                </div>
+              {% elif cell['state'] == 'leave' %}
+                <span title="On leave">🌴</span>
+              {% elif cell['state'] == 'day_off' %}
+                <span class="hint">Day off</span>
+              {% endif %}
+            </td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

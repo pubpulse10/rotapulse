@@ -3,6 +3,7 @@
 {% block content %}
 <h1>My upcoming shifts</h1>
 <p>
+  <a class="btn-secondary" href="{{ url_for('staff_portal.full_rota') }}">Full rota</a>
   <a class="btn-secondary" href="{{ url_for('staff_portal.open_shifts') }}">Open shifts</a>
   <a class="btn-secondary" href="{{ url_for('staff_portal.leave') }}">Leave</a>
   <a class="btn-secondary" href="{{ url_for('staff_portal.my_swaps') }}">Swap requests</a>
