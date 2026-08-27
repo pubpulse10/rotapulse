@@ -9,45 +9,54 @@
     <span class="badge badge-unnotified">Unnotified</span>
   {% endif %}
 </h1>
+{% set is_support_session = 'support_readonly' in g.get('permission_levels', []) %}
 <div class="week-actions">
   <a class="btn-secondary" href="{{ url_for('rota_grid.week', week=prev_week) }}">&laquo; Prev week</a>
   <a class="btn-secondary" href="{{ url_for('rota_grid.week', week=next_week) }}">Next week &raquo;</a>
   <a class="btn-secondary" href="{{ url_for('rota_grid.swaps') }}">Swap requests</a>
   <a class="btn-secondary" href="{{ url_for('rota_grid.approvals_queue') }}">Approvals{% if pending_approval_count %} ({{ pending_approval_count }}){% endif %}</a>
-  {% if not week_notification %}
-    <form method="post" action="{{ url_for('rota_grid.notify_week') }}"
-          onsubmit="return confirm('Text and email every rostered staff member their shifts for this week? This can only be sent once.');">
+  {% if is_support_session %}
+    <span class="hint">Read-only support view — notify/copy/clear are disabled</span>
+  {% else %}
+    {% if not week_notification %}
+      <form method="post" action="{{ url_for('rota_grid.notify_week') }}"
+            onsubmit="return confirm('Text and email every rostered staff member their shifts for this week? This can only be sent once.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="week" value="{{ week_start.isoformat() }}">
+        <button type="submit" class="btn-primary">Notify staff of this week's rota</button>
+      </form>
+    {% endif %}
+    <button type="button" class="btn-secondary" onclick="document.getElementById('copy-week-dialog').showModal()">Copy Week</button>
+    <form method="post" action="{{ url_for('rota_grid.clear_week') }}"
+          onsubmit="return confirm('This will clear all shifts from this week. Are you sure?');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="week" value="{{ week_start.isoformat() }}">
-      <button type="submit" class="btn-primary">Notify staff of this week's rota</button>
+      <button type="submit" class="btn-secondary">Clear week</button>
     </form>
   {% endif %}
-  <form method="post" action="{{ url_for('rota_grid.copy_week') }}" onsubmit="return rotaConfirmPasteWeek(this);">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="source_week" value="{{ week_start.isoformat() }}">
-    <label for="page_target_week" class="sr-only">Copy into</label>
-    <select id="page_target_week" name="target_week" required>
-      <option value="" disabled selected>Copy into…</option>
-      {% for option in monday_options %}
-        <option value="{{ option['value'] }}" data-has-shifts="{{ 'true' if option['has_shifts'] else 'false' }}">{{ option['label'] }}{% if option['has_shifts'] %} (has shifts){% endif %}</option>
-      {% endfor %}
-    </select>
-    <button type="submit" class="btn-secondary">Copy week</button>
-  </form>
-  <form method="post" action="{{ url_for('rota_grid.clear_week') }}"
-        onsubmit="return confirm('Clear all shifts from the week of {{ week_start.day }} {{ week_start.strftime('%B %Y') }}? This cannot be undone.');">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="week" value="{{ week_start.isoformat() }}">
-    <button type="submit" class="btn-danger">Clear this week</button>
-  </form>
-  <details class="week-action-info">
-    <summary><span class="info-icon" aria-label="What do Copy week and Clear this week do?">&#9432;</span></summary>
-    <div class="hint">
-      <p><strong>Copy week</strong> copies every shift (and any open shifts) from this week onto the chosen week, keeping the same day-of-week, person, role and time. Won't overwrite anything — a copied shift that would clash with an existing shift or approved leave is skipped rather than double-booked.</p>
-      <p><strong>Clear this week</strong> deletes every shift (scheduled and open) from this week. Leave requests, day-off overrides and event tags are untouched. This cannot be undone.</p>
-    </div>
-  </details>
 </div>
+
+{% if not is_support_session %}
+  <dialog id="copy-week-dialog" class="app-dialog">
+    <form method="post" action="{{ url_for('rota_grid.copy_week') }}" onsubmit="return rotaConfirmPasteWeek(this);">
+      <h2>Copy this week</h2>
+      <p class="hint">Copies every shift (and any open shifts) from this week onto the week you choose, keeping the same day-of-week, person, role and time. Won't overwrite anything — a copied shift that would clash with an existing shift or approved leave is skipped rather than double-booked.</p>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="source_week" value="{{ week_start.isoformat() }}">
+      <label for="page_target_week">Copy into</label>
+      <select id="page_target_week" name="target_week" required>
+        <option value="" disabled selected>Choose a week</option>
+        {% for option in monday_options %}
+          <option value="{{ option['value'] }}" data-has-shifts="{{ 'true' if option['has_shifts'] else 'false' }}">{{ option['label'] }}{% if option['has_shifts'] %} (has shifts){% endif %}</option>
+        {% endfor %}
+      </select>
+      <div class="dialog-actions">
+        <button type="button" class="btn-secondary" onclick="document.getElementById('copy-week-dialog').close()">Cancel</button>
+        <button type="submit" class="btn-primary">Copy week</button>
+      </div>
+    </form>
+  </dialog>
+{% endif %}
 
 <div class="panel">
   <table class="rota-table">
@@ -180,4 +189,15 @@
 </div>
 
 <script src="{{ url_for('static', filename='rota_dragdrop.js') }}?v={{ static_version('rota_dragdrop.js') }}" defer></script>
+<script>
+  // Tap outside the dialog box to dismiss it — ESC and the Cancel button
+  // already close it natively/explicitly; this just covers the third
+  // common way people expect to back out of a popup. A click lands on the
+  // <dialog> element itself (not its content) only when it's on the
+  // backdrop, since the form inside stops the click from bubbling that far
+  // when it's actually inside the box.
+  document.getElementById("copy-week-dialog").addEventListener("click", function (e) {
+    if (e.target === this) this.close();
+  });
+</script>
 {% endblock %}

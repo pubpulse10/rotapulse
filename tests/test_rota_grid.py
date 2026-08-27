@@ -600,7 +600,7 @@ def test_week_grid_offers_a_clear_week_form_directly_on_the_page(app, client, ve
     login_as_pub(client, venue["pub_id"])
     resp = client.get(f"/v/{venue['slug']}/rota/?week=2026-08-03")
     assert resp.status_code == 200
-    assert b"Clear this week" in resp.data
+    assert b"Clear week" in resp.data
     assert f'action="/v/{venue["slug"]}/rota/clear-week"'.encode() in resp.data
     assert b'name="week" value="2026-08-03"' in resp.data
 

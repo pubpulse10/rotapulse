@@ -37,6 +37,22 @@ def test_family_admin_cannot_reach_staff_only_route(client, venue):
     assert "/login" in resp.headers["Location"]
 
 
+def test_family_admin_rota_week_hides_mutating_buttons(client, venue):
+    """The week grid's Notify/Copy/Clear buttons live directly on the page
+    now (2026-08-19, moved off the old nav dropdown, which used to guard
+    these the same way) — the support-readonly bypass in require_permission
+    means these would 403 if actually clicked (see
+    test_family_admin_write_action_is_blocked above), but showing live
+    buttons that just error on click is bad UX for a read-only session."""
+    login_as_family_admin(client)
+    resp = client.get(f"/v/{venue['slug']}/rota/")
+    assert resp.status_code == 200
+    assert b"Notify staff of this week" not in resp.data
+    assert b"Copy Week" not in resp.data
+    assert b"Clear week" not in resp.data
+    assert b"Read-only support view" in resp.data
+
+
 def test_without_the_flag_venues_list_is_forbidden(client):
     resp = client.get("/admin/venues")
     assert resp.status_code == 403
