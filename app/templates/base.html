@@ -20,7 +20,7 @@
     {% set is_support_session = 'support_readonly' in g.get('permission_levels', []) %}
     {% set is_admin_tier = g.get('permission_levels') and ('app_admin' in g.permission_levels or 'rota_admin' in g.permission_levels or is_support_session) %}
     <a class="wordmark" href="{{ url_for('rota_grid.week') if (g.get('slug') and is_admin_tier) else (url_for('staff_portal.home') if g.get('slug') else url_for('venues.entry')) }}">
-      <img src="{{ url_for('static', filename='logo.svg') }}?v={{ static_version('logo.svg') }}" alt="RotaPulse" class="logo-img">
+      <img src="{{ url_for('static', filename='logo.png') }}?v={{ static_version('logo.png') }}" alt="RotaPulse" class="logo-img">
     </a>
     {% if g.get('venue') and g.get('permission_levels') %}
       <button type="button" class="nav-toggle" aria-label="Menu" aria-expanded="false" aria-controls="site-nav">
