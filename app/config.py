@@ -48,6 +48,23 @@ SESSION_COOKIE_SECURE = os.environ.get("FLASK_ENV") == "production"
 # match PricePulse's/TaskPulse's SESSION_COOKIE_DOMAIN exactly.
 SESSION_COOKIE_DOMAIN = os.environ.get("SESSION_COOKIE_DOMAIN") or None
 
+# Flask-WTF expires a CSRF token 3600s (one hour) after the page carrying it
+# was rendered. That default is simply wrong for this app's central action: a
+# staff member opens the shift page to clock in, the phone goes in a pocket
+# for the rest of the shift, and the clock-out POST hours later is rejected
+# with a bare "Bad Request — The CSRF token has expired". Confirmed live —
+# clocked in 08:06, clock-out attempt 10:31, rejected — and it would have hit
+# every shift longer than an hour, i.e. nearly all of them.
+#
+# None means the token instead stays valid for the life of the session. That
+# gives up almost nothing: validate_csrf only ever accepts a token that
+# matches session['csrf_token'], so the token is useless to anyone who
+# doesn't also hold the session cookie — and that cookie is itself a rolling
+# 30 days (above). The one-hour limit was bounding a window the session
+# lifetime already bounds; all it actually bounded was how long a landlord's
+# staff could stay clocked in.
+WTF_CSRF_TIME_LIMIT = None
+
 # Where an unauthenticated visitor with no shared pub session is sent to log
 # into the shared PubPulse account — RotaPulse has no login page of its own
 # for the venue-owner path (see app/venues.py). Invited staff/rota_admins
@@ -136,6 +153,9 @@ def apply(app):
     app.config["SESSION_REFRESH_EACH_REQUEST"] = SESSION_REFRESH_EACH_REQUEST
     app.config["SESSION_COOKIE_SECURE"] = SESSION_COOKIE_SECURE
     app.config["SESSION_COOKIE_DOMAIN"] = SESSION_COOKIE_DOMAIN
+    # Set before CSRFProtect(app), whose init_app only setdefault()s this key,
+    # so an explicit None here survives rather than being replaced by 3600.
+    app.config["WTF_CSRF_TIME_LIMIT"] = WTF_CSRF_TIME_LIMIT
 
 
 def pin_https_scheme(app):

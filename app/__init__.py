@@ -1,9 +1,11 @@
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import flask
 from flask_wtf import CSRFProtect
+from flask_wtf.csrf import CSRFError
 
 from app import config, db
 from app.date_format import format_uk_date, format_uk_datetime, format_uk_time, variance_label
@@ -37,6 +39,32 @@ def create_app():
 
     db.init_app(app)
     csrf = CSRFProtect(app)
+
+    @app.errorhandler(CSRFError)
+    def handle_csrf_error(error):
+        """Replace Werkzeug's bare "Bad Request" body with something a member
+        of bar staff can act on.
+
+        With WTF_CSRF_TIME_LIMIT unset this fired on every long shift (see
+        app/config.py); that cause is fixed, but a CSRF check can still fail
+        legitimately — the session was cleared, the browser dropped the
+        cookie, the page was restored on a different device. Whatever the
+        reason, the person is standing there mid-shift unable to clock out,
+        and an unstyled white page reading "The CSRF token has expired" tells
+        them nothing and offers no way forward. This gives them the one thing
+        that actually helps: a link back to the page they came from, freshly
+        rendered with a valid token.
+
+        Still a 400 — the request genuinely was rejected, and nothing was
+        written. Only the presentation changes."""
+        referrer = flask.request.referrer or ""
+        # Follow the referrer only when it points back at us. It's a link
+        # rather than a redirect, but an attacker-supplied Referer must not
+        # get to put its own destination on a RotaPulse-branded error page.
+        host = urlparse(referrer).netloc
+        back = referrer if referrer and host in ("", flask.request.host) else None
+        return flask.render_template("csrf_error.html", back=back), 400
+
     app.jinja_env.filters["from_json"] = lambda s: json.loads(s) if s else {}
     app.jinja_env.filters["uk_date"] = format_uk_date
     app.jinja_env.filters["uk_datetime"] = format_uk_datetime

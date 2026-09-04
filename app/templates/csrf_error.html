@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Try that again — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>That didn't go through</h1>
+  <p>
+    The page you submitted from had been open a while, so we couldn't confirm
+    the request was really from you. Nothing was saved and nothing was
+    changed — open the page again and it'll work.
+  </p>
+  {% if back %}
+    <p><a class="btn-primary btn-large" href="{{ back }}">Back to that page</a></p>
+  {% else %}
+    <p><a class="btn-primary btn-large" href="{{ url_for('venues.entry') }}">Back to RotaPulse</a></p>
+  {% endif %}
+  <p class="hint">
+    If it keeps happening, log out and back in — and tell your admin, because
+    that shouldn't need doing.
+  </p>
+</div>
+{% endblock %}

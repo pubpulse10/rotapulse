@@ -78,11 +78,13 @@ function captureLocation(formId, button) {
     return true; // no geolocation support — submit without coordinates, server flags "not confirmed"
   }
   const originalLabel = button.textContent;
+  button.dataset.originalLabel = originalLabel;
   button.disabled = true;
   button.textContent = 'Getting your location…';
   const finish = () => {
     button.disabled = false;
     button.textContent = originalLabel;
+    delete button.dataset.originalLabel;
   };
   navigator.geolocation.getCurrentPosition(
     (pos) => {
@@ -95,5 +97,19 @@ function captureLocation(formId, button) {
   );
   return false; // wait for the async geolocation callback to submit
 }
+
+// Pressing Back to return here restores the page from the bfcache exactly as
+// it was left — including a Clock in/out button still disabled and reading
+// "Getting your location…" from the submit that navigated away. The person is
+// then looking at a button they physically cannot press, which is what turned
+// one rejected clock-out into "I can't clock out at all". Re-enable anything
+// captureLocation disabled every time the page is shown.
+window.addEventListener('pageshow', () => {
+  document.querySelectorAll('button[data-original-label]').forEach((button) => {
+    button.disabled = false;
+    button.textContent = button.dataset.originalLabel;
+    delete button.dataset.originalLabel;
+  });
+});
 </script>
 {% endblock %}
