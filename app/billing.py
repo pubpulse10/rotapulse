@@ -315,10 +315,45 @@ def upgrade():
 
     db = get_db()
     existing = get_rota_subscription(db, venue["id"])
+
+    # Guard against starting a SECOND concurrent subscription — a double
+    # monthly charge. The subscription page only offers this route to a venue
+    # without a live subscription (an active one is sent to change_band
+    # instead), but that is a template decision: this is a plain POST target,
+    # so a double-click, a back-button re-submit or a stale second tab still
+    # reaches it after Checkout has already completed.
+    #
+    # Deliberately requires a stored stripe_subscription_id as well as an
+    # active plan. The harm being prevented is duplicating an EXISTING
+    # subscription, so where there is nothing to duplicate there is nothing to
+    # block — which is also what keeps _forget_deleted_customer's recovery path
+    # open for a venue whose Stripe Customer was deleted in the Dashboard.
+    if existing and existing["plan"] == "active" and existing["stripe_subscription_id"]:
+        flash("You're already subscribed to RotaPulse — use Change band to move tier.")
+        return redirect(url_for("billing.subscription"))
+
     # Remember the chosen band now; the webhook confirms activation and doesn't
-    # touch current_tier.
+    # touch current_tier. Runs AFTER the guard above, so a blocked re-submit
+    # can't quietly rewrite an active subscriber's recorded band while nothing
+    # changes at Stripe.
     db.execute("UPDATE rota_subscription SET current_tier = ? WHERE venue_id = ?", (band, venue["id"]))
     db.commit()
+
+    # A venue that has been through Checkout before must NOT be handed another
+    # free trial, or cancel-and-re-subscribe yields an endless string of 30-day
+    # trials. Mirrors PricePulse's returning_customer guard, but tests both ids:
+    # _forget_deleted_customer() nulls the customer id and the subscription id
+    # survives it, so either one is evidence of a prior checkout.
+    returning_customer = bool(
+        existing and (existing["stripe_customer_id"] or existing["stripe_subscription_id"])
+    )
+    subscription_data = {"metadata": {"pubpulse_app": "rotapulse"}}
+    if not returning_customer:
+        # Card-to-start-a-trial: capture a card now and start a Stripe-managed
+        # free trial (no charge until it ends). payment_method_collection=
+        # "always" forces card entry despite the trial; the subscription lands
+        # in status 'trialing', which the webhook already treats as active.
+        subscription_data["trial_period_days"] = config.ROTAPULSE_TRIAL_DAYS
 
     session_kwargs = {
         "mode": "subscription",
@@ -331,14 +366,8 @@ def upgrade():
         # every checkout.session.completed event — each app's webhook uses this
         # tag to ignore events that aren't its own (see stripe_webhook).
         "metadata": {"pubpulse_app": "rotapulse"},
-        # Card-to-start-a-trial: capture a card now and start a Stripe-managed
-        # free trial (no charge until it ends). payment_method_collection=
-        # "always" forces card entry despite the trial; the subscription lands
-        # in status 'trialing', which the webhook already treats as active.
-        "subscription_data": {
-            "trial_period_days": config.ROTAPULSE_TRIAL_DAYS,
-            "metadata": {"pubpulse_app": "rotapulse"},
-        },
+        # Built above: carries trial_period_days only for a first-time customer.
+        "subscription_data": subscription_data,
         "payment_method_collection": "always",
         # VAT. Stripe Tax is on with a UK registration, and prices are
         # tax-exclusive (Tax settings -> "Include tax in prices" = No), so VAT is
