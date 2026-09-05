@@ -25,6 +25,8 @@ from datetime import date, timedelta
 
 import flask
 
+from urllib.parse import quote
+
 from app import config
 from app.date_format import format_uk_date
 from app.db import get_app_id, get_db
@@ -35,7 +37,7 @@ venues_bp = flask.Blueprint("venues", __name__)
 
 
 def _login_redirect():
-    return flask.redirect(f"{config.PRICEPULSE_LOGIN_URL}?next={flask.request.url}")
+    return flask.redirect(f"{config.PRICEPULSE_LOGIN_URL}?next={quote(flask.request.url, safe='')}")
 
 
 def _venue_for_pub(db, pub_id):

@@ -19,6 +19,8 @@ from functools import wraps
 
 import flask
 
+from urllib.parse import quote
+
 from app.db import get_db
 
 
@@ -122,7 +124,7 @@ def require_permission(*levels):
                 if "app_admin" in levels and len(levels) == 1:
                     from app import config
 
-                    return flask.redirect(f"{config.PRICEPULSE_LOGIN_URL}?next={flask.request.url}")
+                    return flask.redirect(f"{config.PRICEPULSE_LOGIN_URL}?next={quote(flask.request.url, safe='')}")
                 return flask.redirect(flask.url_for("rota_login.login", next=flask.request.path))
             return view(*args, **kwargs)
 
