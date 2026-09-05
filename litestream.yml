@@ -23,6 +23,13 @@ dbs:
         force-path-style: true      # required for Cloudflare R2
         access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
         secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
-        # Keep 7 days of point-in-time recovery; snapshot once a day.
-        retention: 168h
+        # 30 days of point-in-time recovery, snapshotting once a day.
+        #
+        # Was 168h (7 days). Seven days is only long enough to catch a problem
+        # you notice within the week — silent corruption, a bad migration, or a
+        # deletion nobody spots until the next busy weekend all fall outside
+        # it, and past the window there is simply nothing to restore from.
+        # Storage for a SQLite database this size is pennies a month, so the
+        # short window was buying nothing.
+        retention: 720h
         snapshot-interval: 24h

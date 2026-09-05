@@ -14,6 +14,30 @@ from datetime import datetime
 from app.db import get_db
 
 
+def shift_hours(start_time: str, end_time: str) -> float:
+    """Planned length of a shift in hours, including one running past midnight.
+
+    A pub's late shift is routinely 20:00-02:00. Subtracting the clock times
+    gives -18 for that, and the caller below used to clamp a negative to zero
+    — so every overnight shift contributed exactly nothing to the predicted
+    wage bill, silently and in the reassuring direction. actual_cost() never
+    had the fault, because it works from full clock-in/clock-out timestamps,
+    so the predicted and actual figures simply disagreed with nothing on
+    screen to explain why.
+
+    Equal times mean zero, not 24 hours: an ad-hoc shift is created with
+    start_time == end_time as a placeholder (see staff_portal.start_ad_hoc_
+    shift), and reading that as a full day would be a much bigger error than
+    the one being fixed here.
+    """
+    start_h, start_m = map(int, start_time.split(":"))
+    end_h, end_m = map(int, end_time.split(":"))
+    minutes = (end_h * 60 + end_m) - (start_h * 60 + start_m)
+    if minutes < 0:
+        minutes += 24 * 60
+    return minutes / 60
+
+
 def predicted_cost(venue_id: int, start_date: str, end_date: str) -> float:
     """From currently-rostered SHIFT data (planned hours x rate)."""
     db = get_db()
@@ -29,10 +53,7 @@ def predicted_cost(venue_id: int, start_date: str, end_date: str) -> float:
     ).fetchall()
     total = 0.0
     for row in rows:
-        start_h, start_m = map(int, row["start_time"].split(":"))
-        end_h, end_m = map(int, row["end_time"].split(":"))
-        hours = (end_h * 60 + end_m - start_h * 60 - start_m) / 60
-        total += max(hours, 0) * float(row["hourly_pay_rate"])
+        total += shift_hours(row["start_time"], row["end_time"]) * float(row["hourly_pay_rate"])
     return round(total, 2)
 
 
