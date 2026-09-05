@@ -177,16 +177,37 @@ def remind_staff_to_clock_in(db, now: datetime) -> int:
 def check_missed_clock_outs(db, now: datetime) -> int:
     cutoff = (now - timedelta(minutes=GRACE_MINUTES)).strftime("%Y-%m-%d %H:%M")
     earliest = (now - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%d %H:%M")
+    # A shift that ends earlier in the clock than it starts ran past midnight,
+    # so it finishes on the FOLLOWING day. Pasting shift_date onto end_time
+    # without that check put a 20:00-02:00 late shift's end 24 hours early,
+    # which landed it inside the window while the person was still behind the
+    # bar — an admin got "hasn't clocked out" mid-shift, and by the time they
+    # really had finished, _already_considered had marked it done and the
+    # genuine alert never came.
+    #
+    # Only end_time needs this. The two queries above key off start_time, and
+    # a shift always starts on its own shift_date.
+    #
+    # Strictly less-than, not <=: equal times are the zero-length placeholder
+    # an ad-hoc shift is created with, not a 24-hour shift. Same rule as
+    # costs.shift_hours().
+    ends_at = (
+        "CASE WHEN shift.end_time < shift.start_time "
+        "THEN date(shift.shift_date, '+1 day') || ' ' || shift.end_time "
+        "ELSE shift.shift_date || ' ' || shift.end_time END"
+    )
     rows = db.execute(
-        """SELECT shift.id AS shift_id, shift.venue_id, shift.shift_date, shift.end_time,
-                  person.name AS person_name
-           FROM shift
-           JOIN person ON person.id = shift.person_id
-           JOIN attendance ON attendance.shift_id = shift.id
-           WHERE shift.status = 'scheduled' AND shift.person_id IS NOT NULL
-           AND attendance.clock_in_at IS NOT NULL AND attendance.clock_out_at IS NULL
-           AND (shift.shift_date || ' ' || shift.end_time) <= ?
-           AND (shift.shift_date || ' ' || shift.end_time) >= ?""",
+        f"""SELECT * FROM (
+               SELECT shift.id AS shift_id, shift.venue_id, shift.shift_date,
+                      shift.end_time, person.name AS person_name,
+                      {ends_at} AS ends_at
+               FROM shift
+               JOIN person ON person.id = shift.person_id
+               JOIN attendance ON attendance.shift_id = shift.id
+               WHERE shift.status = 'scheduled' AND shift.person_id IS NOT NULL
+               AND attendance.clock_in_at IS NOT NULL AND attendance.clock_out_at IS NULL
+           )
+           WHERE ends_at <= ? AND ends_at >= ?""",
         (cutoff, earliest),
     ).fetchall()
 

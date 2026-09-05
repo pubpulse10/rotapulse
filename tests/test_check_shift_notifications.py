@@ -374,3 +374,103 @@ def test_staff_reminder_and_admin_missed_clock_in_notice_both_fire_independently
     assert admin_count == 1
     assert len(sms_sent) == 1
     assert len(emails_sent) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Overnight shifts
+#
+# check_missed_clock_outs built a shift's end as (shift_date || ' ' || end_time),
+# which for a 20:00-02:00 late shift put the end 24 hours early. That landed
+# the shift inside the alert window while the person was still behind the bar,
+# so an admin got "hasn't clocked out" mid-shift — and because
+# _already_considered then marked it done, the genuine alert after they really
+# finished never arrived. Same root cause as the £0 overnight costing bug (see
+# tests/test_overnight_shift_cost.py); found alongside it in the 2026-09-04
+# sweep.
+# --------------------------------------------------------------------------- #
+
+def _clocked_in_overnight_shift(app, venue, person_name="Late Shift"):
+    """A 20:00-02:00 shift, clocked in and not yet out."""
+    person_id, _m, _e = create_active_staff(app, venue["id"], name=person_name)
+    today = date.today()
+    shift_id = _make_scheduled_shift(
+        app, venue["id"], person_id, today.isoformat(), "20:00", "02:00"
+    )
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at) VALUES (?, ?)",
+            (shift_id, datetime.now().isoformat()),
+        )
+        conn.commit()
+    return today
+
+
+def test_no_missed_clock_out_alert_while_the_overnight_shift_is_still_running(
+    app, venue, monkeypatch
+):
+    """22:00 on the night of the shift: they clocked in two hours ago and have
+    four to go. Nothing should fire."""
+    from scripts.check_shift_notifications import check_missed_clock_outs
+
+    sent = []
+    monkeypatch.setattr("app.notification_settings.send_email", lambda *a, **k: sent.append(a) or True)
+    _enable_notification(app, venue, "missed_clock_out", venue["owner_person_id"])
+    today = _clocked_in_overnight_shift(app, venue)
+
+    mid_shift = datetime.combine(today, datetime.min.time()) + timedelta(hours=22)
+    with app.app_context():
+        conn = db_module.get_db()
+        count = check_missed_clock_outs(conn, mid_shift)
+
+    assert count == 0, "alerted mid-shift — the end was being read as the same day"
+    assert sent == []
+
+
+def test_the_overnight_alert_does_fire_once_the_shift_has_really_ended(
+    app, venue, monkeypatch
+):
+    """The other half: 02:20 the next morning, twenty minutes past a 02:00
+    finish, with no clock-out. That is a genuine missed clock-out."""
+    from scripts.check_shift_notifications import check_missed_clock_outs
+
+    sent = []
+    monkeypatch.setattr("app.notification_settings.send_email", lambda *a, **k: sent.append(a) or True)
+    _enable_notification(app, venue, "missed_clock_out", venue["owner_person_id"])
+    today = _clocked_in_overnight_shift(app, venue)
+
+    after = datetime.combine(today, datetime.min.time()) + timedelta(days=1, hours=2, minutes=20)
+    with app.app_context():
+        conn = db_module.get_db()
+        count = check_missed_clock_outs(conn, after)
+
+    assert count == 1
+    assert "Late Shift" in sent[0][2]
+
+
+def test_an_ordinary_day_shift_is_unaffected(app, venue, monkeypatch):
+    """The wrap only applies when end is earlier than start; a normal shift
+    must behave exactly as before."""
+    from scripts.check_shift_notifications import check_missed_clock_outs
+
+    sent = []
+    monkeypatch.setattr("app.notification_settings.send_email", lambda *a, **k: sent.append(a) or True)
+    _enable_notification(app, venue, "missed_clock_out", venue["owner_person_id"])
+
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Day Shift")
+    today = date.today()
+    shift_id = _make_scheduled_shift(app, venue["id"], person_id, today.isoformat(), "09:00", "17:00")
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at) VALUES (?, ?)",
+            (shift_id, datetime.now().isoformat()),
+        )
+        conn.commit()
+
+    during = datetime.combine(today, datetime.min.time()) + timedelta(hours=13)
+    after = datetime.combine(today, datetime.min.time()) + timedelta(hours=17, minutes=20)
+    with app.app_context():
+        conn = db_module.get_db()
+        assert check_missed_clock_outs(conn, during) == 0
+        assert check_missed_clock_outs(conn, after) == 1
