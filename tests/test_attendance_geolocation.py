@@ -6,11 +6,31 @@ from tests.conftest import create_active_staff, login_as_person
 
 
 def _create_shift_for(app, venue_id, person_id, shift_date=None):
+    """A shift that starts NOW, not at a fixed 09:00.
+
+    This file is about geolocation, so every clock-in has to land inside
+    staff_portal.EARLY_CLOCK_IN_GRACE_MINUTES of the planned start — outside
+    it the route flashes "you're more than 30 minutes early, so this needs
+    admin approval" instead of the location message under test. A hardcoded
+    09:00 start made the whole file time-of-day dependent: green in the
+    afternoon, failing on any run before 08:30 (found 2026-09-05, when the
+    suite was first run early in the morning). Two of the tests here were
+    only passing by accident even then — they assert on the substring
+    "location not confirmed", which also appears in a JS comment on the same
+    page. Anchoring the start to uk_now() holds the variance near zero
+    whatever time the suite runs.
+    """
+    now = uk_now()
+    end = now + timedelta(hours=8)
     with app.app_context():
         conn = db_module.get_db()
         cur = conn.execute(
             "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, ?, ?, ?, 'scheduled')",
-            (venue_id, person_id, shift_date or date.today().isoformat(), "09:00", "17:00"),
+            (
+                venue_id, person_id,
+                shift_date or now.date().isoformat(),
+                now.strftime("%H:%M"), end.strftime("%H:%M"),
+            ),
         )
         conn.commit()
         return cur.lastrowid
