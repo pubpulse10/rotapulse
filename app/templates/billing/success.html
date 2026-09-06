@@ -1,9 +1,26 @@
 {% extends "base.html" %}
-{% block title %}Subscribed — RotaPulse{% endblock %}
+{% block title %}{% if confirmed %}Subscribed{% else %}Finishing your subscription{% endif %} — RotaPulse{% endblock %}
 {% block content %}
+{# Two states, driven by current_venue_plan — the same gate that locks the app
+   — rather than by the landlord having merely landed here. The pending branch
+   exists because Stripe's webhook is server-to-server and can arrive after the
+   customer does; telling them they're subscribed while the venue is still
+   locked is what makes a successful payment look like a failed one. #}
+{% if confirmed %}
 <div class="panel narrow">
   <h1>You're subscribed</h1>
   <p>Thanks — {{ venue['name'] }} is now on a paid RotaPulse subscription.</p>
   <a class="btn-primary" href="{{ url_for('rota_grid.week') }}">Back to the rota</a>
 </div>
+{% else %}
+<div class="panel narrow">
+  <h1>We're just finishing your subscription off</h1>
+  <p>Stripe has your card details and we're waiting for it to confirm — that normally takes a few
+    seconds. Give it a moment and check again.</p>
+  <p><strong>Please don't go through checkout a second time</strong> — if your payment went through,
+    doing it again would set up a second subscription.</p>
+  <a class="btn-primary" href="{{ url_for('billing.success', session_id=session_id) }}">Check again</a>
+  <p>Still not showing after a minute or two? Get in touch and we'll sort it out.</p>
+</div>
+{% endif %}
 {% endblock %}

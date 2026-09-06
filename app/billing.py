@@ -434,9 +434,129 @@ def change_band():
     return redirect(url_for("billing.subscription"))
 
 
+def _activate_from_checkout(db, venue_id, customer_id, subscription_id):
+    """Records a completed Checkout Session as a live subscription: flips the
+    venue to plan='active', stores the Stripe ids, the real status and the
+    renewal date, and pushes the new state to the Hub.
+
+    Shared by the Stripe webhook and the /billing/success return page so the
+    two can't drift. Idempotent by construction — the same UPDATE with the
+    same values whichever path runs first, so the second is a no-op in effect.
+    The confirmation emails deliberately stay in the webhook: that fires once
+    per subscription even if the customer closes the tab, whereas this runs on
+    every visit to the return page.
+
+    Deliberately does NOT swallow a Stripe error. The webhook must fail loudly
+    so Stripe retries, and writing plan='active' without the subscription ITEM
+    id would leave change_band with nothing to modify — an active subscriber
+    who can never move band. The return page catches it instead and leaves the
+    webhook to it.
+    """
+    subscription_item_id = None
+    period_end = None
+    # Real status ('trialing' for a fresh card-trial, 'active' when paying) —
+    # plan='active' is what the gate reads, but keep the stored status honest
+    # for display and the Hub badge.
+    sub_status = "active"
+    if subscription_id:
+        stripe_sub = stripe.Subscription.retrieve(subscription_id)
+        items = getattr(stripe_sub, "items", None)
+        data = getattr(items, "data", None) if items else None
+        if data:
+            subscription_item_id = getattr(data[0], "id", None)
+        # Same retrieve call that fetched subscription_item_id — no extra API
+        # call needed to also grab the renewal date + status off the same object.
+        period_end = _period_end_iso(stripe_sub)
+        sub_status = getattr(stripe_sub, "status", None) or "active"
+
+    db.execute(
+        """UPDATE rota_subscription
+           SET plan = 'active', stripe_customer_id = ?, stripe_subscription_id = ?,
+               stripe_subscription_item_id = ?, subscription_status = ?,
+               current_period_end = ?
+           WHERE venue_id = ?""",
+        (customer_id, subscription_id, subscription_item_id, sub_status, period_end, venue_id),
+    )
+    db.commit()
+    _push_entitlement(db, venue_id)
+
+
+def _reconcile_checkout_session(venue_id, session_id):
+    """Activates the subscription straight from the Checkout Session Stripe
+    names on the return URL, for when the customer's browser gets back before
+    Stripe's webhook does.
+
+    Every check here is load-bearing:
+      * `session_id` arrives in the customer's own URL bar, so it is untrusted.
+        The session is re-fetched from Stripe and its client_reference_id must
+        name THIS venue. That check is what binds the two together — this
+        blueprint's venue comes from the URL slug rather than from a login, so
+        it is the only thing standing between a pasted session id and someone
+        else's payment.
+      * the family shares one Stripe account, so the session may belong to a
+        sibling app — the same pubpulse_app tag the webhook filters on.
+      * an 'open' session is one the customer abandoned; it is not a payment
+        and must not grant access. Only a complete session counts, whether it
+        was paid or is a card-backed trial with nothing due yet
+        ('no_payment_required').
+
+    Anything unexpected just returns and leaves the webhook to do its job —
+    this is a shortcut for the customer sitting in front of the screen, never
+    the authority on what was bought.
+    """
+    if not session_id or current_venue_plan(venue_id) == "active":
+        return
+    try:
+        checkout = stripe.checkout.Session.retrieve(session_id)
+    except stripe.error.StripeError:
+        return
+    md = getattr(checkout, "metadata", None)
+    if getattr(md, "pubpulse_app", None) != "rotapulse":
+        return
+    if str(getattr(checkout, "client_reference_id", None) or "") != str(venue_id):
+        return
+    if getattr(checkout, "status", None) != "complete":
+        return
+    if getattr(checkout, "payment_status", None) not in ("paid", "no_payment_required"):
+        return
+    try:
+        _activate_from_checkout(
+            get_db(), venue_id,
+            getattr(checkout, "customer", None),
+            getattr(checkout, "subscription", None),
+        )
+    except stripe.error.StripeError:
+        # The retrieve inside the helper failed, so nothing was written. The
+        # webhook still owes us this subscription; show the pending state.
+        return
+
+
 @billing_bp.route("/success")
 def success():
-    return render_template("billing/success.html", venue=g.venue)
+    """Where Stripe returns the landlord after Checkout.
+
+    This page used to announce "you're subscribed" unconditionally, on the
+    strength of nothing but the landlord having arrived here — it never looked
+    at the session_id Stripe puts on the return URL, and plan only ever flipped
+    in the webhook. That webhook is server-to-server: it can be delayed,
+    retried, or (as has happened in this family) pointed at the wrong URL
+    entirely, and while it is outstanding the landlord has handed over a card
+    and register_venue_gate still shows them the locked screen. That reads as a
+    payment that failed, and the natural response to it is to pay again.
+
+    So: verify the Checkout Session Stripe named on the way in, record the
+    subscription here too if the webhook hasn't landed yet, and then say only
+    what current_venue_plan — the same gate that locks the app — agrees with.
+    """
+    venue = g.venue
+    session_id = request.args.get("session_id")
+    _reconcile_checkout_session(venue["id"], session_id)
+    return render_template(
+        "billing/success.html",
+        venue=venue,
+        confirmed=current_venue_plan(venue["id"]) == "active",
+        session_id=session_id,
+    )
 
 
 @billing_bp.route("/cancelled")
@@ -521,36 +641,15 @@ def register_webhook(app):
                 return "", 200
             venue_id = getattr(checkout, "client_reference_id", None)
             if venue_id:
-                stripe_subscription_id = getattr(checkout, "subscription", None)
-                subscription_item_id = None
-                period_end = None
-                # Real status ('trialing' for a fresh card-trial, 'active' when
-                # paying) — plan='active' is what the gate reads, but keep the
-                # stored status honest for display and the Hub badge.
-                sub_status = "active"
-                if stripe_subscription_id:
-                    stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
-                    items = getattr(stripe_sub, "items", None)
-                    data = getattr(items, "data", None) if items else None
-                    if data:
-                        subscription_item_id = getattr(data[0], "id", None)
-                    # Same retrieve call already made above for
-                    # subscription_item_id — no extra API call needed to
-                    # also grab the renewal date + status off the same object.
-                    period_end = _period_end_iso(stripe_sub)
-                    sub_status = getattr(stripe_sub, "status", None) or "active"
-
-                db.execute(
-                    """UPDATE rota_subscription
-                       SET plan = 'active', stripe_customer_id = ?, stripe_subscription_id = ?,
-                           stripe_subscription_item_id = ?, subscription_status = ?,
-                           current_period_end = ?
-                       WHERE venue_id = ?""",
-                    (getattr(checkout, "customer", None), stripe_subscription_id, subscription_item_id,
-                     sub_status, period_end, venue_id),
+                # Exactly the write the /billing/success return page performs,
+                # shared so the two paths can't disagree about what a completed
+                # checkout means. Whichever gets here first wins; the other is
+                # the same UPDATE with the same values.
+                _activate_from_checkout(
+                    db, venue_id,
+                    getattr(checkout, "customer", None),
+                    getattr(checkout, "subscription", None),
                 )
-                db.commit()
-                _push_entitlement(db, venue_id)
 
                 venue = db.execute("SELECT name FROM venue WHERE id = ?", (venue_id,)).fetchone()
                 venue_name = venue["name"] if venue else "your venue"

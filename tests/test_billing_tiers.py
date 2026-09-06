@@ -495,3 +495,253 @@ def test_gated_route_locks_a_legacy_trial_venue(app, client, venue):
     resp = client.get(f"/v/{venue['slug']}/dashboard/")
     assert resp.status_code == 200
     assert b"is locked" in resp.data
+
+
+# --- /billing/success ----------------------------------------------------
+# The return page Stripe sends the landlord to. It used to render "you're
+# subscribed" unconditionally while plan only flipped in the webhook, so a
+# slow, retried or misdirected webhook told a landlord who had just paid that
+# they were subscribed — and then register_venue_gate showed them the locked
+# screen. These tests pin both halves of the fix: it reconciles the session
+# itself, and it only claims what current_venue_plan agrees to.
+
+SUCCESS_URL = "/v/testvenue/billing/success"
+
+
+def _set_plan(app, venue_id, plan):
+    """The venue fixture provisions plan='active'. Every test below is about
+    the moment BEFORE a subscription is recorded, so the venue has to start
+    without one."""
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute("UPDATE rota_subscription SET plan = ? WHERE venue_id = ?", (plan, venue_id))
+        conn.commit()
+
+
+def _subscription_row(app, venue_id):
+    with app.app_context():
+        conn = db_module.get_db()
+        return conn.execute(
+            "SELECT * FROM rota_subscription WHERE venue_id = ?", (venue_id,)
+        ).fetchone()
+
+
+def _completed_session(venue_id, **overrides):
+    """A stand-in for what Stripe returns for a Checkout Session the landlord
+    has just finished. Overridable field by field so each test can spoil
+    exactly one thing and prove that check is the one doing the work."""
+    fields = {
+        "client_reference_id": str(venue_id),
+        "metadata": SimpleNamespace(pubpulse_app="rotapulse"),
+        "customer": "cus_return",
+        "subscription": "sub_return",
+        "status": "complete",
+        "payment_status": "paid",
+    }
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+def _stub_session_retrieve(monkeypatch, session_obj):
+    import stripe
+
+    calls = []
+
+    def fake_retrieve(session_id):
+        calls.append(session_id)
+        return session_obj
+
+    monkeypatch.setattr(stripe.checkout.Session, "retrieve", fake_retrieve)
+    return calls
+
+
+def _stub_subscription_retrieve(monkeypatch, status="active"):
+    import stripe
+
+    monkeypatch.setattr(
+        stripe.Subscription, "retrieve",
+        lambda _id: SimpleNamespace(
+            items=SimpleNamespace(data=[SimpleNamespace(id="si_return")]),
+            current_period_end=FAKE_PERIOD_END_TS,
+            status=status,
+        ),
+    )
+
+
+def test_success_activates_the_plan_when_the_webhook_has_not_landed(app, client, venue, monkeypatch):
+    _set_plan(app, venue["id"], "inactive")
+    calls = _stub_session_retrieve(monkeypatch, _completed_session(venue["id"]))
+    _stub_subscription_retrieve(monkeypatch)
+
+    resp = client.get(f"{SUCCESS_URL}?session_id=cs_test_123")
+
+    assert resp.status_code == 200
+    assert calls == ["cs_test_123"]
+    row = _subscription_row(app, venue["id"])
+    assert row["plan"] == "active"
+    assert row["stripe_customer_id"] == "cus_return"
+    assert row["stripe_subscription_id"] == "sub_return"
+    # Without the item id, change_band would have nothing to modify — an
+    # active subscriber permanently stuck on their opening band.
+    assert row["stripe_subscription_item_id"] == "si_return"
+    assert row["current_period_end"] == FAKE_PERIOD_END_ISO
+    assert b"You're subscribed" in resp.data
+
+
+def test_success_activates_a_card_trial_with_nothing_to_pay(app, client, venue, monkeypatch):
+    # The normal RotaPulse signup: card captured, Stripe-managed free trial,
+    # nothing due today. Stripe reports payment_status 'no_payment_required' —
+    # if that isn't accepted, every new subscriber lands on the pending page
+    # instead of their rota.
+    _set_plan(app, venue["id"], "inactive")
+    _stub_session_retrieve(
+        monkeypatch, _completed_session(venue["id"], payment_status="no_payment_required")
+    )
+    _stub_subscription_retrieve(monkeypatch, status="trialing")
+
+    resp = client.get(f"{SUCCESS_URL}?session_id=cs_test_trial")
+
+    assert resp.status_code == 200
+    row = _subscription_row(app, venue["id"])
+    assert row["plan"] == "active"
+    assert row["subscription_status"] == "trialing"
+
+
+def test_success_ignores_a_session_belonging_to_another_venue(app, client, venue, monkeypatch):
+    # session_id comes off the customer's own URL bar, and this blueprint's
+    # venue comes from the URL slug rather than a login — the
+    # client_reference_id check is the only thing standing between a pasted
+    # session id and someone else's payment.
+    _set_plan(app, venue["id"], "inactive")
+    _stub_session_retrieve(monkeypatch, _completed_session(venue["id"] + 1))
+    _stub_subscription_retrieve(monkeypatch)
+
+    resp = client.get(f"{SUCCESS_URL}?session_id=cs_someone_elses")
+
+    assert resp.status_code == 200
+    assert _subscription_row(app, venue["id"])["plan"] == "inactive"
+    assert b"finishing your subscription off" in resp.data
+
+
+def test_success_ignores_an_abandoned_session(app, client, venue, monkeypatch):
+    # An 'open' session is one the customer walked away from — no payment, no
+    # trial, no access. Re-visiting the return URL must not conjure a
+    # subscription out of it.
+    _set_plan(app, venue["id"], "inactive")
+    _stub_session_retrieve(
+        monkeypatch, _completed_session(venue["id"], status="open", payment_status="unpaid")
+    )
+    _stub_subscription_retrieve(monkeypatch)
+
+    resp = client.get(f"{SUCCESS_URL}?session_id=cs_abandoned")
+
+    assert resp.status_code == 200
+    assert _subscription_row(app, venue["id"])["plan"] == "inactive"
+
+
+def test_success_ignores_a_sibling_apps_session(app, client, venue, monkeypatch):
+    # One Stripe account for the whole family: a TaskPulse checkout must not
+    # subscribe anyone to RotaPulse. Same filter the webhook applies.
+    _set_plan(app, venue["id"], "inactive")
+    _stub_session_retrieve(
+        monkeypatch,
+        _completed_session(venue["id"], metadata=SimpleNamespace(pubpulse_app="taskpulse")),
+    )
+    _stub_subscription_retrieve(monkeypatch)
+
+    resp = client.get(f"{SUCCESS_URL}?session_id=cs_taskpulse")
+
+    assert resp.status_code == 200
+    assert _subscription_row(app, venue["id"])["plan"] == "inactive"
+
+
+def test_success_does_not_claim_a_subscription_without_one(app, client, venue, monkeypatch):
+    # The original bug, pinned: land on this page with no completed checkout
+    # behind it and it must not say the subscription is live.
+    import stripe
+
+    _set_plan(app, venue["id"], "inactive")
+
+    def never(session_id):
+        raise AssertionError("no session_id, so Stripe must not be called")
+
+    monkeypatch.setattr(stripe.checkout.Session, "retrieve", never)
+
+    resp = client.get(SUCCESS_URL)
+
+    assert resp.status_code == 200
+    assert b"You're subscribed" not in resp.data
+    assert b"finishing your subscription off" in resp.data
+    # url_for drops a None argument, so the retry link stays a bare URL rather
+    # than one carrying the string "None" as a session id.
+    assert b"session_id=None" not in resp.data
+
+
+def test_success_retry_link_keeps_the_session_id(app, client, venue, monkeypatch):
+    # The pending page's whole purpose is that checking again works. If the
+    # link dropped the session id, the retry could never reconcile and the
+    # landlord's only remaining move would be to pay a second time.
+    _set_plan(app, venue["id"], "inactive")
+    _stub_session_retrieve(monkeypatch, _completed_session(venue["id"], status="open"))
+
+    resp = client.get(f"{SUCCESS_URL}?session_id=cs_pending_1")
+
+    assert b"session_id=cs_pending_1" in resp.data
+
+
+def test_success_survives_stripe_being_down(app, client, venue, monkeypatch):
+    import stripe
+
+    _set_plan(app, venue["id"], "inactive")
+
+    def boom(session_id):
+        raise stripe.error.APIConnectionError("stripe unreachable")
+
+    monkeypatch.setattr(stripe.checkout.Session, "retrieve", boom)
+
+    resp = client.get(f"{SUCCESS_URL}?session_id=cs_test_123")
+
+    assert resp.status_code == 200
+    assert _subscription_row(app, venue["id"])["plan"] == "inactive"
+    assert b"finishing your subscription off" in resp.data
+
+
+def test_success_writes_nothing_when_the_subscription_lookup_fails(app, client, venue, monkeypatch):
+    # The Checkout Session reads fine but the follow-up Subscription.retrieve
+    # (the call that yields the item id, status and renewal date) fails. A
+    # half-write here would be worse than no write: plan='active' with no item
+    # id is an active subscriber who can never change band.
+    import stripe
+
+    _set_plan(app, venue["id"], "inactive")
+    _stub_session_retrieve(monkeypatch, _completed_session(venue["id"]))
+
+    def boom(_id):
+        raise stripe.error.APIConnectionError("stripe unreachable")
+
+    monkeypatch.setattr(stripe.Subscription, "retrieve", boom)
+
+    resp = client.get(f"{SUCCESS_URL}?session_id=cs_test_123")
+
+    assert resp.status_code == 200
+    row = _subscription_row(app, venue["id"])
+    assert row["plan"] == "inactive"
+    assert row["stripe_subscription_id"] is None
+    assert b"finishing your subscription off" in resp.data
+
+
+def test_success_skips_stripe_when_the_webhook_already_won(app, client, venue, monkeypatch):
+    # The venue fixture is already plan='active' — the webhook got there
+    # first, so the reconcile is pure overhead and must not fire on every
+    # refresh of the page.
+    import stripe
+
+    def never(session_id):
+        raise AssertionError("already active — Stripe must not be called")
+
+    monkeypatch.setattr(stripe.checkout.Session, "retrieve", never)
+
+    resp = client.get(f"{SUCCESS_URL}?session_id=cs_test_123")
+
+    assert resp.status_code == 200
+    assert b"You're subscribed" in resp.data
