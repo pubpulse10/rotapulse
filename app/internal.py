@@ -16,7 +16,7 @@ import hmac
 from flask import Blueprint, jsonify, request
 
 from app import config
-from app.billing import enforce_band
+from app.billing import cancel_subscriptions_for_pub, enforce_band
 from app.db import get_db, get_app_id, delete_venue_by_pub_id
 from app.extensions import limiter
 from app.notification_settings import check_missed_clock_ins, check_missed_clock_outs, remind_staff_to_clock_in
@@ -202,5 +202,10 @@ def venues_delete():
         return jsonify({"error": "pub_id is required"}), 400
 
     db = get_db()
+    # Cancel any live Stripe subscription BEFORE the rows go. The delete takes
+    # rota_subscription with it, so afterwards there is no stored subscription
+    # id left to cancel from and the customer just goes on being charged.
+    # Best-effort: a Stripe failure must never block the delete.
+    cancelled = cancel_subscriptions_for_pub(db, pub_id)
     deleted = delete_venue_by_pub_id(db, pub_id)
-    return jsonify({"ok": True, "deleted": deleted})
+    return jsonify({"ok": True, "deleted": deleted, "cancelled": cancelled})

@@ -189,6 +189,39 @@ def subscription_summary(status, subscription_id, period_end):
     return summary
 
 
+def cancel_stripe_subscription(subscription_id) -> bool:
+    """Best-effort immediate cancel of a Stripe subscription, used when the
+    family account is deleted so a removed venue is never left billing.
+    Mirrors PricePulse's function of the same name: swallows Stripe errors
+    (already cancelled / not found / Stripe down) so the delete always
+    proceeds, and no-ops when Stripe isn't configured. Returns True only when
+    Stripe confirmed the cancel."""
+    if not subscription_id or not config.STRIPE_SECRET_KEY:
+        return False
+    try:
+        stripe.Subscription.cancel(subscription_id)
+    except stripe.error.StripeError:
+        return False
+    return True
+
+
+def cancel_subscriptions_for_pub(db, pub_id) -> list:
+    """Cancel the live Stripe subscription of every venue belonging to this
+    pub_id, and return the ids Stripe confirmed. Called from
+    /internal/venues/delete BEFORE the rows go: PricePulse's account delete
+    only ever cancelled its OWN subscription, so a landlord who also
+    subscribed here kept being charged, with the rota_subscription row that
+    held the subscription id already deleted — nothing left locally to show
+    the charge or cancel it from."""
+    rows = db.execute(
+        """SELECT s.stripe_subscription_id AS sub_id
+             FROM rota_subscription s JOIN venue v ON v.id = s.venue_id
+            WHERE v.pub_id = ? AND s.stripe_subscription_id IS NOT NULL""",
+        (pub_id,),
+    ).fetchall()
+    return [r["sub_id"] for r in rows if cancel_stripe_subscription(r["sub_id"])]
+
+
 def _band_price(band: int) -> str | None:
     """The flat monthly Stripe price id for a band (1-4), or None if unset."""
     if 1 <= band <= len(config.STRIPE_PRICE_ROTA_BANDS):
