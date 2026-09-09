@@ -163,10 +163,14 @@ def remind_staff_to_clock_in(db, now: datetime) -> int:
         _mark_considered(db, row["shift_id"], "staff_clock_in_reminder")
         if row["person_mobile"]:
             venue = db.execute("SELECT name FROM venue WHERE id = ?", (row["venue_id"],)).fetchone()
+            # ASCII punctuation only: one non-GSM-7 character doubles this
+            # message's segment count (see _send_approval_message). This is
+            # the highest-volume text the app sends — one per shift, per
+            # person — so it is the one that matters most.
             delivered = send_sms(
                 row["person_mobile"],
                 f"Hi {row['person_name']}, you're due in for your {row['start_time']} shift at "
-                f"{venue['name']} — don't forget to clock in when you arrive.",
+                f"{venue['name']}. Don't forget to clock in when you arrive.",
             )
             if delivered:
                 sent += 1

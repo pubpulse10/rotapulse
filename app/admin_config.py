@@ -681,8 +681,13 @@ Can't see those options? You're in your email app's own browser — choose "Open
 
 def _send_approval_message(venue, slug, invite_method, email, mobile):
     login_url = flask.url_for("rota_login.login", slug=slug, _external=True)
+    # Plain ASCII punctuation on purpose — this same text goes out by SMS, and
+    # a single character outside GSM-7 forces the whole message into UCS-2, at
+    # 67 characters per segment instead of 153. Measured 2026-09-09: one
+    # em-dash here was billing this message at 5 segments; it is now 2. Keep
+    # dashes and curly quotes out of anything that reaches send_sms.
     message = (
-        f"Welcome to the team! Your RotaPulse account for {venue['name']} has been approved — you're all set.\n\n"
+        f"Welcome to the team! Your RotaPulse account for {venue['name']} has been approved. You're all set.\n\n"
         "You can now log in to view your upcoming shifts, clock in and out, see and claim open shifts, "
         "request leave, and swap shifts with colleagues.\n\n"
         f"Log in here: {login_url}"
