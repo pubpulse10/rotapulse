@@ -77,12 +77,57 @@
     {% endif %}
   {% endwith %}
 
+  {# The two pages a staff member actually lands on — the venue login they
+     arrive at from their invite, and their own shifts once they're in. Both
+     are reached on a phone, in a real browser, which is exactly when asking
+     them to install is worth anything. app/static/install-hint.js decides
+     whether it's shown at all and which set of steps it shows. #}
+  {% set show_install_hint = request.endpoint in ["rota_login.login", "staff_portal.home"] %}
+
   <main class="content">
+    {% if show_install_hint %}
+      <div class="install-hint" id="install-hint" hidden>
+        <p class="install-hint-title">Keep your shifts one tap away</p>
+        <p class="hint">Add RotaPulse to your phone's home screen and you won't need to find the email again.</p>
+
+        <div class="install-hint-steps" id="install-hint-prompt" hidden>
+          <button type="button" class="btn-primary" id="install-hint-button">Add to home screen</button>
+        </div>
+
+        <div class="install-hint-steps" id="install-hint-ios" hidden>
+          <p class="hint">
+            Tap the <strong>Share</strong> button — the square with an arrow pointing out of it, at the
+            bottom of the screen — then scroll down and choose <strong>Add to Home Screen</strong>.
+          </p>
+          <p class="hint">
+            Can't see it? You're in an email or Facebook app's own browser. Tap
+            <strong>Open in Safari</strong> first, then try again.
+          </p>
+        </div>
+
+        <div class="install-hint-steps" id="install-hint-android" hidden>
+          <p class="hint">
+            Tap the <strong>&#8942;</strong> menu at the top of the screen, then choose
+            <strong>Install app</strong> (or <strong>Add to Home screen</strong>).
+          </p>
+          <p class="hint">
+            Can't see it? You're in an email or Facebook app's own browser. Open this page in
+            Chrome first, then try again.
+          </p>
+        </div>
+
+        <button type="button" class="install-hint-dismiss" id="install-hint-dismiss">Not now</button>
+      </div>
+    {% endif %}
+
     {% block content %}{% endblock %}
   </main>
 
   <script src="{{ url_for('static', filename='sw-register.js') }}" defer></script>
   <script src="{{ url_for('static', filename='nav.js') }}" defer></script>
+  {% if show_install_hint %}
+    <script src="{{ url_for('static', filename='install-hint.js') }}?v={{ static_version('install-hint.js') }}" defer></script>
+  {% endif %}
   <script>
     // Click-to-toggle nav dropdowns (e.g. "Rota") — click, not hover, since
     // this app is used on a tablet where hover doesn't really exist.

@@ -126,6 +126,33 @@ h2 { font-size: 1.2rem; }
 }
 .card.narrow { max-width: 420px; }
 
+/* "Add RotaPulse to your home screen" nudge (base.html + install-hint.js).
+   Starts hidden and stays that way unless the script finds a platform it can
+   actually give working steps for — so the [hidden] rules have to beat the
+   display these would otherwise get. */
+.install-hint {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-accent);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin: 0 0 16px;
+}
+.install-hint[hidden], .install-hint-steps[hidden] { display: none; }
+.install-hint-title { margin: 0 0 4px; font-weight: 600; }
+.install-hint .hint { margin: 0 0 10px; }
+.install-hint-steps .hint:last-child { margin-bottom: 0; }
+.install-hint-steps { margin-bottom: 12px; }
+.install-hint-dismiss {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-muted);
+  font-size: 0.95rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* Real report, 2026-08-19: "Copy this week"/"Clear this week" as full
    boxed panels with their own heading and always-visible explanation text
    took up too much space for what's really just two more buttons. Folded
