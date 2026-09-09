@@ -659,6 +659,26 @@ def approve_staff(access_id):
     return flask.redirect(flask.url_for("admin_config.pending_approval"))
 
 
+# Appended to the approval EMAIL only (see _send_approval_message below).
+# Real report, 2026-09-09: a venue's staff were reopening their original
+# invite email at the start of every shift, because none of them had managed
+# to get an icon onto their phone and that email was the only place the link
+# lived. The app asks them too, once they are in it
+# (app/static/install-hint.js) — this catches them a step earlier, in the
+# message that already tells them they are set up.
+_HOME_SCREEN_STEPS = """
+
+Put it on your phone
+
+Add RotaPulse to your home screen and you won't need to find this email again.
+
+iPhone: open the link above in Safari, tap the Share button at the bottom of the screen, then choose "Add to Home Screen".
+
+Android: open the link above in Chrome, tap the menu button at the top of the screen, then choose "Install app".
+
+Can't see those options? You're in your email app's own browser — choose "Open in Safari" or "Open in Chrome" first, then try again."""
+
+
 def _send_approval_message(venue, slug, invite_method, email, mobile):
     login_url = flask.url_for("rota_login.login", slug=slug, _external=True)
     message = (
@@ -668,9 +688,18 @@ def _send_approval_message(venue, slug, invite_method, email, mobile):
         f"Log in here: {login_url}"
     )
     if invite_method == "sms" and mobile:
+        # Deliberately left without the home-screen steps: an SMS is charged
+        # by the segment and this message already runs to several, whereas
+        # the same words cost nothing in an email. Nobody invited by text
+        # misses out — the app itself asks them the moment they open the
+        # login link above.
         send_sms(mobile, message)
     elif email:
-        send_email(email, f"You're approved for {venue['name']} on RotaPulse", message)
+        send_email(
+            email,
+            f"You're approved for {venue['name']} on RotaPulse",
+            message + _HOME_SCREEN_STEPS,
+        )
 
 
 @admin_bp.route("/staff/<int:membership_id>/leave", methods=["POST"])

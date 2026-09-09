@@ -311,6 +311,61 @@ def test_approving_uses_email_when_that_was_the_invite_method(app, client, venue
     assert "approved" in subject.lower()
 
 
+def test_the_approval_email_says_how_to_get_it_onto_a_phone(app, client, venue, monkeypatch):
+    """Real report, 2026-09-09: a venue's staff were reopening this very email
+    at the start of every shift, because none of them had got an icon onto
+    their phone and this was the only place the link lived. The email that
+    tells them they are set up is the natural place to say how."""
+    sent = []
+
+    def fake_send_email(to, subject, body):
+        sent.append((to, subject, body))
+        return True
+
+    monkeypatch.setattr("app.admin_config.send_email", fake_send_email)
+
+    login_as_pub(client, venue["pub_id"])
+    _create_invite(client, venue)
+    access_id = _get_access_id(app, venue)
+    _put_into_pending_approval(app, access_id)
+    sent.clear()
+
+    client.post(f"/v/{venue['slug']}/admin/staff/{access_id}/approve")
+
+    body = sent[0][2]
+    assert "home screen" in body.lower()
+    # Both platforms, and the way out of the in-app browser that hides the
+    # option on either of them.
+    assert "Safari" in body and "Chrome" in body
+    assert "Add to Home Screen" in body and "Install app" in body
+    # Still leads with the login link; the steps are an addition, not a
+    # replacement.
+    assert f"/v/{venue['slug']}/login" in body
+
+
+def test_the_approval_sms_is_left_short(app, client, venue, monkeypatch):
+    """Texts are charged by the segment and this one already runs to several.
+    Anyone invited by SMS gets the same steps from the app itself the moment
+    they open the login link, so paying to repeat them here buys nothing."""
+    sent = []
+    monkeypatch.setattr("app.admin_config.send_email", lambda *a, **k: True)
+    monkeypatch.setattr(
+        "app.admin_config.send_sms", lambda to, body: sent.append((to, body)) or True
+    )
+
+    login_as_pub(client, venue["pub_id"])
+    _create_invite(client, venue, mobile="07796123456", invite_method="sms", email="")
+    access_id = _get_access_id(app, venue)
+    _put_into_pending_approval(app, access_id)
+    sent.clear()
+
+    client.post(f"/v/{venue['slug']}/admin/staff/{access_id}/approve")
+
+    body = sent[0][1]
+    assert "home screen" not in body.lower()
+    assert f"/v/{venue['slug']}/login" in body
+
+
 def test_approving_twice_does_not_resend_the_welcome_message(app, client, venue, monkeypatch):
     sent = []
     monkeypatch.setattr(
