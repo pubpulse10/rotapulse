@@ -23,6 +23,7 @@ below uses getattr(obj, "field", None), never .get(). Tests must mock with
 SimpleNamespace, never a plain dict, or this can pass silently again.
 """
 
+import logging
 from datetime import datetime, timezone
 
 import requests
@@ -34,6 +35,8 @@ from app.db import get_db, get_rota_subscription
 from app.notifications import send_email
 from app.rota_auth import register_identity, require_permission
 from app.venue_scope import register_venue_scope
+
+logger = logging.getLogger(__name__)
 
 stripe.api_key = config.STRIPE_SECRET_KEY
 
@@ -118,6 +121,92 @@ def _push_entitlement(db, venue_id):
         )
     except requests.RequestException:
         pass
+
+
+def _fetch_referral(pub_id):
+    """PricePulse's stored affiliate referral for this pub, as its JSON dict
+    ({pub_id, referral_id, affiliate_id, affiliate_token}), or None when it
+    can't be had. PricePulse is the family's identity store: the referral is
+    captured there once, at registration, and every sibling app reads it back
+    rather than capturing its own.
+
+    Its own function so the test suite can stub this one HTTP call —
+    tests/conftest.py does for every test, because activation now makes it
+    whenever INTERNAL_API_SECRET is set and no test may reach the real
+    PricePulse. Never raises: a timeout, a 404 for an unknown pub or a bad
+    secret's 401 is logged and reads as "nothing to tag"."""
+    url = f"{config.PRICEPULSE_INTERNAL_URL}/internal/pubs/{pub_id}/referral"
+    try:
+        resp = requests.get(
+            url, headers={"Authorization": f"Bearer {config.INTERNAL_API_SECRET}"}, timeout=5,
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "PricePulse referral lookup for pub %s returned HTTP %s", pub_id, resp.status_code,
+            )
+            return None
+        data = resp.json()
+    except Exception:  # timeout, connection refused, a body that isn't JSON — anything
+        logger.warning("PricePulse referral lookup for pub %s failed", pub_id, exc_info=True)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def apply_referral_metadata(pub_id, customer_id):
+    """Tags this venue's Stripe Customer with its pub's affiliate referral, so
+    Rewardful credits the referring affiliate for what the Customer pays.
+    Mirrors PricePulse's function of the same name (its D55/D56). Rewardful
+    attributes by Customer metadata.referral alone; the Checkout Session's
+    client_reference_id is NOT used for it, because that carries the venue id
+    and the webhook and the return-page reconcile both depend on it.
+
+    `pub_id` is the family account id (venue.pub_id) — what PricePulse stores
+    the referral against — never the venue id.
+
+    The value written is the affiliate's LINK TOKEN, with the referral id only
+    as the fallback for a signup whose token wasn't captured. One referral id
+    attaches to ONE Customer only (a second Customer carrying it is silently
+    ignored — tested live 10 Sep 2026), and a pub has a separate Customer in
+    every family app it subscribes to, so the id may already be spent on a
+    sibling's. A token makes Rewardful open a fresh referral for this Customer.
+
+    Makes no Stripe call at all for a pub that wasn't referred — the common
+    case. Otherwise it reads the Customer first and writes only when the key
+    is absent, which makes it idempotent (the webhook and the return page can
+    both run it) and means an attribution already there is never overwritten.
+    A present value is deliberately not compared with ours: Rewardful swaps the
+    token for its own new referral id within seconds, so it always differs.
+
+    Never raises: a failure is logged and activation carries on. A venue must
+    not lose its subscription because the affiliate tag didn't stick;
+    Rewardful can attribute it by hand afterwards."""
+    if not customer_id or not pub_id or not config.INTERNAL_API_SECRET:
+        return
+    ref = _fetch_referral(pub_id)
+    # A plain JSON dict from PricePulse, so .get() is right here — unlike the
+    # Stripe objects below.
+    value = ref and (ref.get("affiliate_token") or ref.get("referral_id"))
+    if not value:
+        return
+    try:
+        customer = stripe.Customer.retrieve(customer_id)
+        if getattr(customer, "deleted", False):
+            return
+        # Attribute access, not .get(): stripe-python's StripeObject is not a
+        # dict (the .get() bug that once silently broke every webhook in the
+        # family — see the module docstring).
+        existing = getattr(getattr(customer, "metadata", None), "referral", None)
+        if existing:
+            return
+        stripe.Customer.modify(
+            customer_id,
+            metadata={"referral": value, "pubpulse_pub_id": str(pub_id)},
+        )
+    except stripe.error.StripeError:
+        logger.warning(
+            "Couldn't tag Stripe Customer %s with pub %s's referral",
+            customer_id, pub_id, exc_info=True,
+        )
 
 
 def current_venue_plan(venue_id: int) -> str:
@@ -413,6 +502,11 @@ def upgrade():
         "tax_id_collection": {"enabled": True},
     }
     if existing and existing["stripe_customer_id"]:
+        # A returning customer gets no trial, so Checkout charges at once —
+        # tag the Customer BEFORE that invoice exists, or Rewardful records no
+        # commission on it. A no-op for a pub that wasn't referred, and it
+        # never raises, so it can't stand between the landlord and Checkout.
+        apply_referral_metadata(venue["pub_id"], existing["stripe_customer_id"])
         session_kwargs["customer"] = existing["stripe_customer_id"]
         # With an existing Customer, Checkout ignores the address collected
         # on the page unless customer_update.address is 'auto' — without
@@ -470,7 +564,8 @@ def change_band():
 def _activate_from_checkout(db, venue_id, customer_id, subscription_id):
     """Records a completed Checkout Session as a live subscription: flips the
     venue to plan='active', stores the Stripe ids, the real status and the
-    renewal date, and pushes the new state to the Hub.
+    renewal date, pushes the new state to the Hub, and tags the Stripe
+    Customer with the pub's affiliate referral (apply_referral_metadata).
 
     Shared by the Stripe webhook and the /billing/success return page so the
     two can't drift. Idempotent by construction — the same UPDATE with the
@@ -483,7 +578,9 @@ def _activate_from_checkout(db, venue_id, customer_id, subscription_id):
     so Stripe retries, and writing plan='active' without the subscription ITEM
     id would leave change_band with nothing to modify — an active subscriber
     who can never move band. The return page catches it instead and leaves the
-    webhook to it.
+    webhook to it. The referral tag is the one exception: it runs last, after
+    the commit, and swallows its own failures — an affiliate tag that didn't
+    stick is no reason for Stripe to retry an activation that worked.
     """
     subscription_item_id = None
     period_end = None
@@ -512,6 +609,15 @@ def _activate_from_checkout(db, venue_id, customer_id, subscription_id):
     )
     db.commit()
     _push_entitlement(db, venue_id)
+    # Checkout created this Customer, so this is the first moment it can be
+    # tagged for Rewardful. A new customer is on a card-trial, so the only
+    # invoice so far is £0 and nothing commissionable has been missed (a
+    # returning customer reusing its Customer was already tagged in upgrade(),
+    # so this finds the tag and writes nothing).
+    # Keyed by the venue's pub_id — the family account PricePulse stores the
+    # referral against — not by the venue id; a venue without one is skipped.
+    venue = db.execute("SELECT pub_id FROM venue WHERE id = ?", (venue_id,)).fetchone()
+    apply_referral_metadata(venue["pub_id"] if venue else None, customer_id)
 
 
 def _reconcile_checkout_session(venue_id, session_id):

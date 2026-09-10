@@ -74,11 +74,17 @@ PRICEPULSE_LOGIN_URL = os.environ.get(
 )
 
 # Authenticates this app's push to the PubPulse Hub whenever a venue's
-# Stripe subscription changes, AND TaskPulse's inbound call to this app's
+# Stripe subscription changes, this app's affiliate-referral lookup at
+# PricePulse (below), AND TaskPulse's inbound call to this app's
 # /internal/clock-status (see app/internal.py). Must be identical across
 # all family env vars.
 INTERNAL_API_SECRET = os.environ.get("INTERNAL_API_SECRET")
 PUBPULSE_HUB_URL = os.environ.get("PUBPULSE_HUB_URL", "https://app.pubpulse.co.uk")
+# PricePulse is the family's identity store: it captures a pub's Rewardful
+# affiliate referral at registration, and billing reads it back from
+# /internal/pubs/<pub_id>/referral to tag this app's Stripe Customer (see
+# app/billing.py:apply_referral_metadata).
+PRICEPULSE_INTERNAL_URL = os.environ.get("PRICEPULSE_INTERNAL_URL", "https://pricepulse.pubpulse.co.uk")
 
 # Free trial length (days) for a newly-provisioned venue before a
 # subscription is required — matches TaskPulse's own default/reasoning.

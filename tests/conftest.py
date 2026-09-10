@@ -43,6 +43,24 @@ def app(monkeypatch):
     db_path.unlink(missing_ok=True)
 
 
+@pytest.fixture(autouse=True)
+def no_real_pricepulse_lookup(monkeypatch):
+    """Activation and a returning customer's Checkout now ask PricePulse for
+    the pub's affiliate referral whenever INTERNAL_API_SECRET is set — and
+    tests do set it (the Hub-push test, the /internal ones), as can the
+    environment the suite runs in. Stubbed for every test so none can reach
+    the real pricepulse.pubpulse.co.uk; the answer is "not referred", which
+    makes billing.apply_referral_metadata a no-op with no Stripe call.
+
+    Returns the real lookup, so tests/test_referrals.py can put it back over
+    a faked requests.get."""
+    from app import billing
+
+    real_fetch = billing._fetch_referral
+    monkeypatch.setattr(billing, "_fetch_referral", lambda pub_id: None)
+    return real_fetch
+
+
 @pytest.fixture
 def client(app):
     return app.test_client()
