@@ -18,7 +18,7 @@ from app.media import save_attendance_photo
 from app.notification_settings import notify_admins
 from app.rota_auth import register_identity, require_permission
 from app.rota_grid import WEEKDAY_KEYS, _billable_staff, _is_on_approved_leave, _monday_of, _week_dates
-from app.uk_time import uk_now, uk_now_iso, uk_today
+from app.uk_time import planned_datetime, uk_now, uk_now_iso, uk_today
 from app.venue_scope import register_venue_gate, register_venue_scope
 
 staff_bp = flask.Blueprint("staff_portal", __name__, url_prefix="/v/<slug>/staff")
@@ -41,18 +41,32 @@ def home():
     venue = flask.g.venue
     today = uk_today()
     horizon = today + timedelta(days=21)
+    # Real report, 2026-09-13 ("the Cinderella problem"): staff couldn't
+    # clock out of a late shift because it vanished from this list at
+    # midnight — it was filtered purely on shift_date >= today, so the
+    # instant the date ticked over, a 17:00-00:00 shift they were still
+    # clocked into dropped off, and with it the only route to its Clock out
+    # button (clock_out() itself never had a date check). Yesterday's shift
+    # stays listed for as long as it's clocked in but not out. Deliberately
+    # only yesterday, not any older open shift: an overnight shift can only
+    # legitimately run into the next day, and a days-old forgotten clock-out
+    # is an admin correction (cell panel clock-time edit), not something to
+    # invite a "Clock out" tap on that would book days of hours to payroll.
+    yesterday = today - timedelta(days=1)
     shifts = db.execute(
         """SELECT shift.*, attendance.clock_in_at, attendance.clock_out_at, attendance.approval_status
            FROM shift LEFT JOIN attendance ON attendance.shift_id = shift.id
            WHERE shift.venue_id = ? AND shift.person_id = ? AND shift.status = 'scheduled'
-           AND shift.shift_date BETWEEN ? AND ?
+           AND (shift.shift_date BETWEEN ? AND ?
+                OR (shift.shift_date = ? AND attendance.clock_in_at IS NOT NULL AND attendance.clock_out_at IS NULL))
            ORDER BY shift.shift_date, shift.start_time""",
-        (venue["id"], person["id"], today.isoformat(), horizon.isoformat()),
+        (venue["id"], person["id"], today.isoformat(), horizon.isoformat(), yesterday.isoformat()),
     ).fetchall()
     # Governs whether "Start an unplanned shift" is offered (see
-    # start_ad_hoc_shift) — already clocked into something today means
+    # start_ad_hoc_shift) — an unfinished shift today, or last night's one
+    # still clocked in (the only past shifts the query above returns), means
     # that's the shift to use instead.
-    has_open_shift_today = any(s["shift_date"] == today.isoformat() and not s["clock_out_at"] for s in shifts)
+    has_open_shift_today = any(s["shift_date"] <= today.isoformat() and not s["clock_out_at"] for s in shifts)
     return flask.render_template(
         "staff/home.html", shifts=shifts, today=today.isoformat(), has_open_shift_today=has_open_shift_today
     )
@@ -263,19 +277,26 @@ def start_ad_hoc_shift():
     venue = flask.g.venue
     person = flask.g.person
     today = uk_today().isoformat()
+    yesterday = (uk_today() - timedelta(days=1)).isoformat()
 
     # If they already have an open (not-yet-clocked-out) shift today, that's
     # the one to clock into — sends them there instead of creating a second,
-    # overlapping ad-hoc record.
+    # overlapping ad-hoc record. Also catches last night's shift still
+    # clocked in past midnight (see home()'s "Cinderella" note): without it,
+    # someone whose late shift had vanished from My shifts could start a
+    # brand-new ad-hoc shift on top of one they were still clocked into.
     open_shift = db.execute(
-        """SELECT shift.id FROM shift LEFT JOIN attendance ON attendance.shift_id = shift.id
-           WHERE shift.venue_id = ? AND shift.person_id = ? AND shift.shift_date = ?
-           AND attendance.clock_out_at IS NULL
-           ORDER BY shift.start_time LIMIT 1""",
-        (venue["id"], person["id"], today),
+        """SELECT shift.id, shift.shift_date FROM shift LEFT JOIN attendance ON attendance.shift_id = shift.id
+           WHERE shift.venue_id = ? AND shift.person_id = ? AND attendance.clock_out_at IS NULL
+           AND (shift.shift_date = ? OR (shift.shift_date = ? AND attendance.clock_in_at IS NOT NULL))
+           ORDER BY shift.shift_date, shift.start_time LIMIT 1""",
+        (venue["id"], person["id"], today, yesterday),
     ).fetchone()
     if open_shift:
-        flask.flash("You already have a shift today — clock in from that instead.", "error")
+        if open_shift["shift_date"] == yesterday:
+            flask.flash("You're still clocked in to last night's shift — clock out of that first.", "error")
+        else:
+            flask.flash("You already have a shift today — clock in from that instead.", "error")
         return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=open_shift["id"]))
 
     form = flask.request.form
@@ -340,8 +361,12 @@ def clock_out(shift_id):
     if lat is not None and lng is not None and venue["latitude"] is not None and venue["longitude"] is not None:
         location_confirmed = 1 if distance_metres(lat, lng, venue["latitude"], venue["longitude"]) <= _radius() else 0
 
-    end_variance = 1 if abs(_variance_minutes(shift_row["end_time"])) > VARIANCE_THRESHOLD_MINUTES else 0
     now = uk_now()
+    # Anchored on the shift's own date, rolling past midnight for a late
+    # shift — NOT _variance_minutes(), which pastes end_time onto today's
+    # date and read a 23:55 clock-out of a 17:00-00:00 shift as ~24h late.
+    planned_end = planned_datetime(shift_row["shift_date"], shift_row["end_time"], shift_row["start_time"])
+    end_variance = 1 if abs((now - planned_end).total_seconds() / 60) > VARIANCE_THRESHOLD_MINUTES else 0
     db.execute(
         """UPDATE attendance SET clock_out_at = ?, clock_out_lat = ?, clock_out_lng = ?,
            clock_out_location_confirmed = ?, variance_flag = MAX(variance_flag, ?) WHERE shift_id = ?""",
@@ -370,7 +395,11 @@ def _radius():
 
 
 def _variance_minutes(planned_hhmm: str) -> float:
-    """Minutes between now and the planned HH:MM, on today's date — a
+    """Clock-IN only (clock_in() already refuses any day but the shift's own,
+    so today's date is the shift's date) — for an END time use
+    uk_time.planned_datetime() instead, which handles shifts past midnight.
+
+    Minutes between now and the planned HH:MM, on today's date — a
     simple, adequate proxy for "materially different from plan" (spec §6.2)
     without needing to track a running clock client-side. Signed: positive
     means now is AFTER the planned time (late), negative means BEFORE it

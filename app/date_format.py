@@ -56,7 +56,7 @@ def format_uk_time(value) -> str:
     return value.strftime("%H:%M")
 
 
-def variance_label(actual_at, planned_hhmm, threshold_minutes=15) -> str | None:
+def variance_label(actual_at, planned_hhmm, shift_date=None, start_hhmm=None, threshold_minutes=15) -> str | None:
     """"Early" or "Late" relative to a planned HH:MM, or None if either
     value is missing or the difference is within threshold_minutes (kept
     in sync with staff_portal.VARIANCE_THRESHOLD_MINUTES — same "not worth
@@ -66,7 +66,15 @@ def variance_label(actual_at, planned_hhmm, threshold_minutes=15) -> str | None:
     plan), with no sign — so an early arrival was showing under the same
     "Late" badge as a genuinely late one. Direction and magnitude are both
     derived here from the two real timestamps rather than stored, since
-    nothing before this needed to distinguish them."""
+    nothing before this needed to distinguish them.
+
+    Pass shift_date (and start_hhmm, for an END time) to anchor the planned
+    time on the shift's own date, rolling past midnight for a late shift —
+    see uk_time.planned_datetime(). Without them this falls back to the
+    actual timestamp's own date, which mislabels a 23:55 clock-out of a
+    17:00-00:00 shift as "Late" by a whole day."""
+    from app.uk_time import planned_datetime
+
     if not actual_at or not planned_hhmm:
         return None
     if isinstance(actual_at, str):
@@ -74,7 +82,10 @@ def variance_label(actual_at, planned_hhmm, threshold_minutes=15) -> str | None:
             actual_at = datetime.fromisoformat(actual_at)
         except ValueError:
             return None
-    planned = actual_at.replace(hour=int(planned_hhmm[:2]), minute=int(planned_hhmm[3:5]), second=0, microsecond=0)
+    if shift_date:
+        planned = planned_datetime(str(shift_date), planned_hhmm, start_hhmm)
+    else:
+        planned = actual_at.replace(hour=int(planned_hhmm[:2]), minute=int(planned_hhmm[3:5]), second=0, microsecond=0)
     diff_minutes = (actual_at - planned).total_seconds() / 60
     if abs(diff_minutes) <= threshold_minutes:
         return None

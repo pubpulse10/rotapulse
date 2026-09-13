@@ -37,7 +37,7 @@ being shown to a user as "the time" and the same hour-off symptom shows up
 there too.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 _UK_TZ = ZoneInfo("Europe/London")
@@ -59,3 +59,26 @@ def uk_now_iso() -> str:
     produces, for a straight drop-in wherever a column previously relied on
     that (see app/staff_portal.py's attendance/shift timestamp writes)."""
     return uk_now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def planned_datetime(shift_date: str, hhmm: str, start_hhmm: str | None = None) -> datetime:
+    """The planned moment a shift starts or ends, anchored on the SHIFT's own
+    date rather than on whatever day it happens to be now.
+
+    Pass start_hhmm when hhmm is an END time: a pub's late shift is routinely
+    17:00-00:00 or 20:00-02:00, and its end falls on the following calendar
+    day. Same rule as check_missed_clock_outs()'s SQL (end_time < start_time
+    rolls to shift_date + 1 day) so the two can never disagree about when a
+    shift finishes. Equal times do NOT roll — an ad-hoc shift is created with
+    start_time == end_time as a placeholder, same caveat as costs.shift_hours.
+
+    Real report, 2026-09-13: pasting the planned end time onto the clock-out's
+    own date meant clocking out of a 17:00-00:00 shift at 23:55 compared
+    against 00:00 THAT MORNING — read as ~24 hours late, flagging variance and
+    showing a bogus "Late" badge on exactly the shape of shift the pub runs
+    most nights."""
+    h, m = int(hhmm[:2]), int(hhmm[3:5])
+    planned = datetime.fromisoformat(shift_date[:10]).replace(hour=h, minute=m)
+    if start_hhmm is not None and hhmm < start_hhmm:
+        planned += timedelta(days=1)
+    return planned
