@@ -3,6 +3,7 @@
 {% block content %}
 <div class="panel">
   <h1>Payroll report</h1>
+  <p class="hint">Hours are worked out from staff clock-in and clock-out times, not from the rota.</p>
   <form method="get">
     <label for="start">From</label>
     <input type="date" id="start" name="start" value="{{ start_date }}">
@@ -10,6 +11,92 @@
     <input type="date" id="end" name="end" value="{{ end_date }}">
     <button type="submit" class="btn-secondary">Update</button>
   </form>
+
+  {# Real report, 2026-09-15: the totals silently left out any shift missing a
+     clock time, so they could look complete while being short. Everything the
+     totals can't include is listed here, above the export buttons, so it is
+     seen before a file goes to whoever runs the wages. See
+     payroll._needs_attention. #}
+  {% set shifts_missing = attention.no_clock_out|length + attention.clock_out_only|length + attention.no_clock_in|length %}
+  {% if shifts_missing or attention.no_pay_rate %}
+    <div class="payroll-attention">
+      <h2>Check these before you run payroll</h2>
+      {% if shifts_missing %}
+        <p>
+          {% if shifts_missing == 1 %}1 shift in these dates is missing a clock time, so it isn't{% else %}{{ shifts_missing }} shifts in these dates are missing a clock time, so they aren't{% endif %}
+          included in the hours and pay below. Fix them first, then check the totals again.
+        </p>
+      {% endif %}
+
+      {% if attention.no_clock_out %}
+        <h3>Clocked in, but no clock-out</h3>
+        <p class="hint">A shift isn't counted until it has a clock-out time. Open the shift and add the time they finished.</p>
+        <ul class="attention-list">
+          {% for r in attention.no_clock_out %}
+            <li>
+              <span>
+                <strong>{{ r.name }}</strong> · {{ r.shift_date|uk_date }} ·
+                {% if r.shift_label == 'Unplanned' %}unplanned shift{% else %}rostered {{ r.shift_label|replace('-', '–') }}{% endif %}
+                · clocked in {{ r.clock_in_at|uk_time }}
+                {% if r.may_still_be_on_shift %}<span class="badge badge-unnotified">May still be on shift</span>{% endif %}
+              </span>
+              <a class="btn-secondary" href="{{ r.fix_url }}">Add clock-out time</a>
+            </li>
+          {% endfor %}
+        </ul>
+        {% if attention.no_clock_out|selectattr('may_still_be_on_shift')|list %}
+          <p class="hint">Anyone marked "May still be on shift" will drop off this list once they clock out.</p>
+        {% endif %}
+      {% endif %}
+
+      {% if attention.clock_out_only %}
+        <h3>Clock-out time, but no clock-in</h3>
+        <p class="hint">There's no start time, so the length of the shift can't be worked out. Open the shift and add the time they started.</p>
+        <ul class="attention-list">
+          {% for r in attention.clock_out_only %}
+            <li>
+              <span>
+                <strong>{{ r.name }}</strong> · {{ r.shift_date|uk_date }} ·
+                {% if r.shift_label == 'Unplanned' %}unplanned shift{% else %}rostered {{ r.shift_label|replace('-', '–') }}{% endif %}
+                · clocked out {{ r.clock_out_at|uk_time }}
+              </span>
+              <a class="btn-secondary" href="{{ r.fix_url }}">Add clock-in time</a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+
+      {% if attention.no_clock_in %}
+        <h3>On the rota, but never clocked in</h3>
+        <p class="hint">If they worked this shift, add the times they started and finished. If they didn't, delete the shift so the rota matches what actually happened.</p>
+        <ul class="attention-list">
+          {% for r in attention.no_clock_in %}
+            <li>
+              <span>
+                <strong>{{ r.name }}</strong> · {{ r.shift_date|uk_date }} · rostered {{ r.shift_label|replace('-', '–') }}
+              </span>
+              <a class="btn-secondary" href="{{ r.fix_url }}">Open shift</a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+
+      {% if attention.no_pay_rate %}
+        <h3>No pay rate set</h3>
+        <p class="hint">These hours are counted, but paid at £0.00 until you set an hourly rate on their staff record.</p>
+        <ul class="attention-list">
+          {% for r in attention.no_pay_rate %}
+            <li>
+              <span><strong>{{ r.name }}</strong> · {{ r.hours }} hours at £0.00</span>
+              <a class="btn-secondary" href="{{ r.fix_url }}">Set pay rate</a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+  {% elif by_person %}
+    <p class="payroll-all-clear">Nothing missing: every shift that has finished in these dates has a clock-in and a clock-out time.</p>
+  {% endif %}
   <p>
     <a class="btn-secondary" href="{{ url_for('payroll.export_csv', start=start_date, end=end_date) }}">Export CSV</a>
     <a class="btn-secondary" href="{{ url_for('payroll.export_pdf', start=start_date, end=end_date) }}">Export PDF</a>

@@ -485,6 +485,19 @@ def edit_attendance(shift_id):
     form = flask.request.form
     clock_in_time = (form.get("clock_in_time") or "").strip()
     clock_out_time = (form.get("clock_out_time") or "").strip()
+    back_to_cell = flask.url_for("rota_grid.cell", person_id=shift_row["person_id"], on_date=shift_row["shift_date"])
+    if clock_out_time and not clock_in_time:
+        # 2026-09-15: a clock-out saved with the clock-in box emptied wiped the
+        # existing clock-in (the upsert below writes both columns), and a
+        # clock-out with no clock-in has no length to pay. The payroll report
+        # now lists such a record rather than failing on it, but there is no
+        # reason to let one be created: refuse, and change nothing.
+        flask.flash(
+            "Add the time they clocked in as well. A clock-out on its own can't be "
+            "counted towards their hours, so nothing was changed.",
+            "error",
+        )
+        return flask.redirect(back_to_cell)
     clock_in_at = f"{shift_row['shift_date']} {clock_in_time}:00" if clock_in_time else None
     clock_out_date = shift_row["shift_date"]
     if clock_in_time and clock_out_time and clock_out_time < clock_in_time:
@@ -500,9 +513,7 @@ def edit_attendance(shift_id):
     )
     db.commit()
     flask.flash("Clock times updated.")
-    return flask.redirect(
-        flask.url_for("rota_grid.cell", person_id=shift_row["person_id"], on_date=shift_row["shift_date"])
-    )
+    return flask.redirect(back_to_cell)
 
 
 @rota_bp.route("/shift/<int:shift_id>/move", methods=["POST"])

@@ -9,7 +9,7 @@ updates immediately; if an attendance record is corrected, actual cost
 updates immediately.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.db import get_db
 
@@ -36,6 +36,19 @@ def shift_hours(start_time: str, end_time: str) -> float:
     if minutes < 0:
         minutes += 24 * 60
     return minutes / 60
+
+
+def shift_ends_at(shift_date: str, start_time: str, end_time: str) -> datetime:
+    """When a rostered shift finishes, as a full datetime — the day after its
+    shift_date when it runs past midnight.
+
+    Built on shift_hours() so it cannot disagree with the predicted wage bill
+    or with notification_settings.check_missed_clock_outs, which applies the
+    same rule in SQL: a 20:00-02:00 late shift ends at 02:00 the NEXT day, and
+    an ad-hoc shift's equal start/end placeholder ends the moment it starts.
+    """
+    starts = datetime.fromisoformat(f"{shift_date} {start_time}")
+    return starts + timedelta(hours=shift_hours(start_time, end_time))
 
 
 def predicted_cost(venue_id: int, start_date: str, end_date: str) -> float:
