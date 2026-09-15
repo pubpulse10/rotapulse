@@ -97,6 +97,31 @@
   {% elif by_person %}
     <p class="payroll-all-clear">Nothing missing: every shift that has finished in these dates has a clock-in and a clock-out time.</p>
   {% endif %}
+  {% if by_person %}
+    {# One line per person: what whoever runs the wages works from (owner
+       request, 2026-09-15). Gross pay is hours x rate rounded once
+       (payroll._money), so any row can be checked by hand and the column adds
+       up to the All staff total to the penny. #}
+    <h2>Summary</h2>
+    <table class="payroll-summary">
+      <tr><th>Staff</th><th class="num">Hours</th><th class="num">Hourly rate</th><th class="num">Gross pay</th></tr>
+      {% for entry in by_person.values() %}
+        <tr>
+          <td>{{ entry['name'] }}</td>
+          <td class="num">{{ '%.2f'|format(entry['total_hours']) }}</td>
+          <td class="num">{{ entry['rate']|gbp }}</td>
+          <td class="num">{{ entry['total_pay']|gbp }}</td>
+        </tr>
+      {% endfor %}
+      <tr class="grand-total">
+        <td>All staff</td>
+        <td class="num">{{ '%.2f'|format(summary.total_hours) }}</td>
+        <td></td>
+        <td class="num">{{ summary.total_pay|gbp }}</td>
+      </tr>
+    </table>
+  {% endif %}
+
   <p>
     <a class="btn-secondary" href="{{ url_for('payroll.export_csv', start=start_date, end=end_date) }}">Export CSV</a>
     <a class="btn-secondary" href="{{ url_for('payroll.export_pdf', start=start_date, end=end_date) }}">Export PDF</a>
@@ -105,25 +130,37 @@
     <p class="hint">{{ pending_hours }} of the hours below are still awaiting admin approval (unplanned shifts or early starts) — figures may change. <a href="{{ url_for('rota_grid.approvals_queue') }}">Review approvals</a>.</p>
   {% endif %}
 
+  {% if by_person %}<h2>Shift-by-shift detail</h2>{% endif %}
   {% for person_id, entry in by_person.items() %}
-    <h2>{{ entry['name'] }}</h2>
+    <h3>{{ entry['name'] }}</h3>
     <table>
-      <tr><th>Date</th><th>Clocked in</th><th>Clocked out</th><th>Hours</th><th>Pay</th></tr>
+      <tr><th>Date</th><th>Clocked in</th><th>Clocked out</th><th class="num">Hours</th><th class="num">Pay</th></tr>
       {% for day in entry['days'] %}
         <tr>
           <td>{{ day['date']|uk_date }}</td>
           <td>{{ day['clock_in_at']|uk_time }}</td>
           <td>{{ day['clock_out_at']|uk_time }}</td>
-          <td>{{ day['hours'] }}</td>
-          <td>
-            £{{ '%.2f'|format(day['pay']) }}
+          <td class="num">{{ '%.2f'|format(day['hours']) }}</td>
+          <td class="num">
+            {{ day['pay']|gbp }}
             {% if day['approval_status'] == 'pending' %}<span class="badge badge-unnotified">Pending</span>{% endif %}
           </td>
         </tr>
       {% endfor %}
-      <tr><td><strong>Total</strong></td><td></td><td></td><td><strong>{{ entry['total_hours'] }}</strong></td><td><strong>£{{ '%.2f'|format(entry['total_pay']) }}</strong></td></tr>
+      <tr><td><strong>Total</strong></td><td></td><td></td><td class="num"><strong>{{ '%.2f'|format(entry['total_hours']) }}</strong></td><td class="num"><strong>{{ entry['total_pay']|gbp }}</strong></td></tr>
     </table>
   {% endfor %}
-  {% if not by_person %}<p class="hint">No completed shifts in this period yet.</p>{% endif %}
+
+  {% if by_person %}
+    {# The grand total closes the report: how much money this pay run needs. #}
+    <div class="payroll-grand-total">
+      <span class="label">Total gross pay for all staff</span>
+      <strong>{{ summary.total_pay|gbp }}</strong>
+      <span class="detail">{{ '%.2f'|format(summary.total_hours) }} hours · {{ summary.people }} {{ 'person' if summary.people == 1 else 'people' }}{% if pending_hours %} · includes {{ '%.2f'|format(pending_hours) }} hours still awaiting approval{% endif %}</span>
+      <span class="detail">Gross pay, before tax and National Insurance are deducted. Employer's National Insurance and pension contributions are not included.</span>
+    </div>
+  {% else %}
+    <p class="hint">No completed shifts in this period yet.</p>
+  {% endif %}
 </div>
 {% endblock %}

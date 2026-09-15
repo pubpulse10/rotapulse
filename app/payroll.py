@@ -8,6 +8,7 @@ whoever actually runs payroll.
 import csv
 import io
 from datetime import datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from xml.sax.saxutils import escape
 
 import flask
@@ -24,6 +25,27 @@ payroll_bp = flask.Blueprint("payroll", __name__, url_prefix="/v/<slug>/payroll"
 register_venue_scope(payroll_bp)
 register_venue_gate(payroll_bp)
 register_identity(payroll_bp)
+
+
+def _money(hours, rate):
+    """Pay for a number of hours at a rate, rounded ONCE to the penny, half up.
+
+    2026-09-15: a person's total used to be rounded after every shift
+    (total = round(total + hours * rate, 2)), so a month's rounding piled up.
+    121.40 hours at £11.44 came out at £1,388.80 against £1,388.82 for hours
+    times rate. Harmless-looking until it is on a summary sent to whoever runs
+    the wages, where "hours x rate = gross pay" is the first thing checked.
+    Decimal because a float like 75.875 can sit just below .5 and round down.
+    """
+    pay = Decimal(str(hours)) * Decimal(str(rate))
+    return float(pay.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+@payroll_bp.app_template_filter("gbp")
+def format_gbp(value):
+    """£1,234.56 — thousands separator, because a grand total for a whole pay
+    run is routinely four figures."""
+    return f"£{value:,.2f}"
 
 
 def _report_rows(db, venue_id, start_date, end_date):
@@ -68,15 +90,31 @@ def _report_rows(db, venue_id, start_date, end_date):
             },
         )
         entry["days"].append({
-            "date": row["shift_date"], "hours": hours, "pay": round(hours * rate, 2),
+            "date": row["shift_date"], "hours": hours, "pay": _money(hours, rate),
             "clock_in_at": row["clock_in_at"], "clock_out_at": row["clock_out_at"],
             "approval_status": row["approval_status"],
         })
         entry["total_hours"] = round(entry["total_hours"] + hours, 2)
-        entry["total_pay"] = round(entry["total_pay"] + hours * rate, 2)
         if row["approval_status"] == "pending":
             pending_hours = round(pending_hours + hours, 2)
+    # Gross pay is the person's total hours times their rate, worked out once
+    # here rather than accumulated shift by shift — see _money().
+    for entry in by_person.values():
+        entry["total_pay"] = _money(entry["total_hours"], entry["rate"])
     return by_person, pending_hours
+
+
+def _summary(by_person):
+    """The all-staff totals for the one-line-per-person summary and the grand
+    total (owner request, 2026-09-15: the summary is what goes to whoever runs
+    the wages, and the grand total is how much money this pay run needs).
+
+    The grand total is the sum of the per-person figures exactly as displayed,
+    in Decimal, so the Gross pay column always adds up to it to the penny.
+    """
+    total_pay = sum((Decimal(str(e["total_pay"])) for e in by_person.values()), Decimal("0"))
+    total_hours = sum((Decimal(str(e["total_hours"])) for e in by_person.values()), Decimal("0"))
+    return {"total_hours": float(total_hours), "total_pay": float(total_pay), "people": len(by_person)}
 
 
 # How long after a rostered shift's end we still say "may still be on shift"
@@ -198,7 +236,7 @@ def report():
     attention = _needs_attention(db, venue["id"], start_date, end_date, by_person, uk_now())
     return flask.render_template(
         "payroll/report.html", by_person=by_person, pending_hours=pending_hours,
-        attention=attention, start_date=start_date, end_date=end_date,
+        attention=attention, summary=_summary(by_person), start_date=start_date, end_date=end_date,
     )
 
 
@@ -210,9 +248,23 @@ def export_csv():
     start_date = flask.request.args["start"]
     end_date = flask.request.args["end"]
     by_person, pending_hours = _report_rows(db, venue["id"], start_date, end_date)
+    summary = _summary(by_person)
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
+    # Money is written as plain numbers (no £, no thousands separator) so a
+    # spreadsheet treats it as numbers it can add up, not as text.
+    if by_person:
+        # The summary leads: one line per person is what whoever runs the
+        # wages works from. The shift-by-shift detail follows as the evidence.
+        writer.writerow([f"Payroll summary: {format_uk_date(start_date)} to {format_uk_date(end_date)}"])
+        writer.writerow(["Name", "Hours", "Hourly rate", "Gross pay"])
+        for entry in by_person.values():
+            writer.writerow([entry["name"], f"{entry['total_hours']:.2f}",
+                             f"{entry['rate']:.2f}", f"{entry['total_pay']:.2f}"])
+        writer.writerow(["All staff", f"{summary['total_hours']:.2f}", "", f"{summary['total_pay']:.2f}"])
+        writer.writerow([])
+        writer.writerow(["Shift-by-shift detail"])
     writer.writerow(["Name", "Date", "Clocked in", "Clocked out", "Hours", "Pay", "Approval"])
     if not by_person:
         # Same reasoning as export_pdf's empty-state message — payroll is
@@ -224,9 +276,11 @@ def export_csv():
             writer.writerow([
                 entry["name"], format_uk_date(day["date"]),
                 format_uk_time(day["clock_in_at"]), format_uk_time(day["clock_out_at"]),
-                day["hours"], day["pay"], day["approval_status"] or "",
+                f"{day['hours']:.2f}", f"{day['pay']:.2f}", day["approval_status"] or "",
             ])
-        writer.writerow([entry["name"], "TOTAL", "", "", entry["total_hours"], entry["total_pay"], ""])
+        writer.writerow([entry["name"], "TOTAL", "", "", f"{entry['total_hours']:.2f}", f"{entry['total_pay']:.2f}", ""])
+    if by_person:
+        writer.writerow(["All staff", "TOTAL", "", "", f"{summary['total_hours']:.2f}", f"{summary['total_pay']:.2f}", ""])
     if pending_hours:
         writer.writerow([f"{pending_hours} of the hours above are still awaiting admin approval."])
 
@@ -251,7 +305,7 @@ def export_csv():
 @require_permission("app_admin", "rota_admin")
 def export_pdf():
     from reportlab.lib.pagesizes import A4
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+    from reportlab.platypus import SimpleDocTemplate, Spacer, Table, TableStyle, Paragraph
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet
 
@@ -260,12 +314,19 @@ def export_pdf():
     start_date = flask.request.args["start"]
     end_date = flask.request.args["end"]
     by_person, pending_hours = _report_rows(db, venue["id"], start_date, end_date)
+    summary = _summary(by_person)
+
+    navy_header = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#06223b")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+    ]
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4)
     styles = getSampleStyleSheet()
     elements = [Paragraph(
-        f"Payroll report: {venue['name']} — {format_uk_date(start_date)} to {format_uk_date(end_date)}",
+        f"Payroll report: {escape(venue['name'])} — {format_uk_date(start_date)} to {format_uk_date(end_date)}",
         styles["Title"],
     )]
 
@@ -291,28 +352,55 @@ def export_pdf():
             styles["Normal"],
         ))
     else:
+        # Summary first, on page one: it is the part whoever runs the wages
+        # actually needs. The detail below it is the evidence.
+        elements.append(Paragraph("Summary", styles["Heading2"]))
+        summary_rows = [["Name", "Hours", "Hourly rate", "Gross pay"]]
+        for entry in by_person.values():
+            summary_rows.append([entry["name"], f"{entry['total_hours']:.2f}",
+                                 format_gbp(entry["rate"]), format_gbp(entry["total_pay"])])
+        summary_rows.append(["All staff", f"{summary['total_hours']:.2f}", "", format_gbp(summary["total_pay"])])
+        summary_table = Table(summary_rows, colWidths=[190, 80, 90, 100])
+        summary_table.setStyle(TableStyle(navy_header + [
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#eef2f6")),
+        ]))
+        elements.append(summary_table)
+
+        elements.append(Paragraph("Shift-by-shift detail", styles["Heading2"]))
         data = [["Name", "Date", "Clocked in", "Clocked out", "Hours", "Pay", "Approval"]]
         for entry in by_person.values():
             for day in entry["days"]:
                 data.append([
                     entry["name"], format_uk_date(day["date"]),
                     format_uk_time(day["clock_in_at"]) or "", format_uk_time(day["clock_out_at"]) or "",
-                    day["hours"], f"£{day['pay']:.2f}", day["approval_status"] or "",
+                    f"{day['hours']:.2f}", format_gbp(day["pay"]), day["approval_status"] or "",
                 ])
-            data.append([entry["name"], "TOTAL", "", "", entry["total_hours"], f"£{entry['total_pay']:.2f}", ""])
+            data.append([entry["name"], "TOTAL", "", "", f"{entry['total_hours']:.2f}", format_gbp(entry["total_pay"]), ""])
 
         table = Table(data, colWidths=[95, 75, 60, 60, 50, 65, 65])
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#06223b")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ]))
+        table.setStyle(TableStyle(navy_header))
         elements.append(table)
+
+        # The grand total closes the report: how much money this pay run needs.
+        elements.append(Spacer(1, 10))
+        elements.append(Paragraph(
+            f"<b>Total gross pay for all staff: {format_gbp(summary['total_pay'])}</b> "
+            f"({summary['total_hours']:.2f} hours)",
+            styles["Heading3"],
+        ))
+        elements.append(Paragraph(
+            "Gross pay, before tax and National Insurance are deducted. Employer's National Insurance "
+            "and pension contributions are not included.",
+            styles["Normal"],
+        ))
         if pending_hours:
             elements.append(Paragraph(
                 f"{pending_hours} of the hours above are still awaiting admin approval — figures may change.",
                 styles["Normal"],
             ))
+
     if missing or attention["no_pay_rate"]:
         elements.append(Paragraph("Not included in these totals", styles["Heading2"]))
         if missing:
@@ -320,12 +408,7 @@ def export_pdf():
                 [["Name", "Date", "Shift", "Clocked in", "Clocked out", "What's missing"]] + missing,
                 colWidths=[80, 78, 62, 46, 46, 140],
             )
-            not_included.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#06223b")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ]))
+            not_included.setStyle(TableStyle(navy_header + [("FONTSIZE", (0, 0), (-1, -1), 9)]))
             elements.append(not_included)
         for r in attention["no_pay_rate"]:
             elements.append(Paragraph(

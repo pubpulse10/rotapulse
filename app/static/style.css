@@ -409,6 +409,14 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 .attention-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid #f3dca6; }
 .attention-list li:last-child { border-bottom: 0; }
 .payroll-all-clear { background: #e7f6ec; color: var(--color-accent); padding: 10px 14px; border-radius: var(--radius); margin: 16px 0; }
+/* Payroll summary and grand total. .num beats the global `th, td` left
+   alignment on specificity, so money and hours line up on the decimal point. */
+.num { text-align: right; white-space: nowrap; }
+.payroll-summary .grand-total td { font-weight: 700; border-top: 2px solid var(--color-text); border-bottom: 0; }
+.payroll-grand-total { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 24px 0 0; padding: 14px 16px; background: var(--color-bg); border-radius: var(--radius); }
+.payroll-grand-total .label { font-weight: 600; }
+.payroll-grand-total strong { font-size: 1.5rem; }
+.payroll-grand-total .detail { flex-basis: 100%; color: var(--color-muted); font-size: 0.875rem; }
 
 .staff-list-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--color-border); }
 .staff-list-item .avatar { width: 36px; height: 36px; border-radius: 50%; }

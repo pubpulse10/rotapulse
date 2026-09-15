@@ -95,7 +95,7 @@ def test_forgotten_clock_out_is_listed_with_a_fix_link_and_left_out_of_totals(ap
     # Long finished, so this is a missed clock-out, not someone still working.
     assert b"May still be on shift" not in resp.data
     # The complete shift is counted; the incomplete one isn't.
-    assert b"<strong>8.0</strong>" in resp.data
+    assert b"<strong>8.00</strong>" in resp.data
 
 
 def test_a_late_shift_still_running_is_marked_may_still_be_on_shift(app, client, venue, monkeypatch):
