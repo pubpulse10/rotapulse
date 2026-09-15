@@ -71,7 +71,16 @@ def predicted_cost(venue_id: int, start_date: str, end_date: str) -> float:
 
 
 def actual_cost(venue_id: int, start_date: str, end_date: str) -> float:
-    """From ATTENDANCE data (actual clocked hours x rate)."""
+    """From ATTENDANCE data (actual clocked hours x rate).
+
+    Only shifts with BOTH clock times are costed. 2026-09-15: a clock-out with
+    no clock-in made datetime.fromisoformat(None) raise below, which took down
+    the Dashboard's week and month pages and the Monday digest for any week
+    containing one — and scripts/send_weekly_digest.py loops every venue with
+    no error handling, so it stopped the digest for every pub after that one.
+    The payroll report had the same fault and now lists such a shift for the
+    admin to fix (payroll._needs_attention).
+    """
     db = get_db()
     rows = db.execute(
         """SELECT attendance.clock_in_at, attendance.clock_out_at, rota_staff_detail.hourly_pay_rate
@@ -81,7 +90,7 @@ def actual_cost(venue_id: int, start_date: str, end_date: str) -> float:
                AND venue_membership.venue_id = shift.venue_id
            JOIN rota_staff_detail ON rota_staff_detail.venue_membership_id = venue_membership.id
            WHERE shift.venue_id = ? AND shift.shift_date BETWEEN ? AND ?
-           AND attendance.clock_out_at IS NOT NULL
+           AND attendance.clock_in_at IS NOT NULL AND attendance.clock_out_at IS NOT NULL
            AND (attendance.approval_status IS NULL OR attendance.approval_status != 'rejected')""",
         (venue_id, start_date, end_date),
     ).fetchall()

@@ -38,6 +38,47 @@ def test_actual_cost_from_attendance(app, venue):
         assert actual_cost(venue["id"], today, today) == 50.0
 
 
+def test_a_clock_out_with_no_clock_in_does_not_break_costs_dashboard_or_digest(app, client, venue, monkeypatch):
+    """2026-09-15: actual_cost() raised on fromisoformat(None) for a clock-out
+    with no clock-in. It feeds the Dashboard and the Monday digest, and the
+    digest job loops every venue with no error handling — so one such record
+    stopped the digest for that pub and every pub after it."""
+    import app.digest as digest_module
+
+    person_id, _m, _e = create_active_staff(app, venue["id"])
+    with app.app_context():
+        conn = db_module.get_db()
+        complete = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, '2026-08-10', '09:00', '13:00', 'scheduled')",
+            (venue["id"], person_id),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at, clock_out_at) VALUES (?, '2026-08-10 09:00:00', '2026-08-10 13:00:00')",
+            (complete,),
+        )
+        broken = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, '2026-08-11', '17:00', '23:00', 'scheduled')",
+            (venue["id"], person_id),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at, clock_out_at) VALUES (?, NULL, '2026-08-11 23:00:00')",
+            (broken,),
+        )
+        conn.commit()
+
+        # Only the complete shift is costed: 4 hours x £12.50.
+        assert actual_cost(venue["id"], "2026-08-10", "2026-08-16") == 50.0
+
+        # The Monday digest for that week runs to completion.
+        monkeypatch.setattr(digest_module, "uk_today", lambda: date(2026, 8, 17))
+        venue_row = conn.execute("SELECT * FROM venue WHERE id = ?", (venue["id"],)).fetchone()
+        digest_module.send_digest_for_venue(conn, venue_row)
+
+    login_as_pub(client, venue["pub_id"])
+    assert client.get(f"/v/{venue['slug']}/dashboard/?week=2026-08-10").status_code == 200
+    assert client.get(f"/v/{venue['slug']}/dashboard/month?month=2026-08").status_code == 200
+
+
 def test_dashboard_week_renders_with_no_turnover_entered(app, client, venue):
     """Regression coverage: the venue fixture sets target_staff_cost_percent
     without any weekly_turnover row — the dashboard must render cleanly
