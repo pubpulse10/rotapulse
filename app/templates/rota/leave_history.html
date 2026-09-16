@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Leave history — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>One person's leave history</h1>
+  <p class="hint">Everything recorded for one member of staff, and a way to type in leave they took
+    before you started using RotaPulse. Nothing here emails or texts them.</p>
+
+  <form method="get">
+    <label for="person_id">Staff member</label>
+    <select id="person_id" name="person_id" onchange="this.form.submit()">
+      <option value="">Choose a staff member</option>
+      {% for member in staff %}
+        <option value="{{ member['person_id'] }}" {% if chosen and member['person_id'] == chosen['person_id'] %}selected{% endif %}>
+          {{ member['name'] }}{% if member['status'] == 'left' %} (left){% endif %}
+        </option>
+      {% endfor %}
+    </select>
+    <noscript><button type="submit" class="btn-secondary">Show</button></noscript>
+  </form>
+  <p><a class="btn-secondary" href="{{ url_for('rota_grid.leave_queue') }}">Back to leave requests</a></p>
+</div>
+
+{% if chosen %}
+  {% if holiday %}
+    <div class="panel">
+      <h2>{{ chosen['name'] }} — this holiday year</h2>
+      {% if not holiday['countable'] %}
+        {# Their days can't be counted at all without a working pattern, and a
+           figure entered now would freeze against nothing. Worth saying BEFORE
+           a history is typed in, not after. #}
+        <p class="hint">Their working days aren't set, so none of this can be counted. Set those on their
+          staff record first — anything recorded before then will show as uncounted.</p>
+      {% else %}
+        <table class="holiday-position">
+          {% if holiday['allowance']['days'] is not none %}
+            <tr><td>Allowance</td><td class="num">{{ '%g'|format(holiday['allowance']['days']) }}</td></tr>
+            {% if holiday['carried_over'] %}<tr><td>Carried over</td><td class="num">{{ '%g'|format(holiday['carried_over']) }}</td></tr>{% endif %}
+            <tr class="grand-total"><td>Total</td><td class="num">{{ '%g'|format(holiday['total']) }}</td></tr>
+          {% endif %}
+          <tr><td>Taken so far</td><td class="num">{{ '%g'|format(holiday['taken']) }}</td></tr>
+          <tr><td>Booked ahead</td><td class="num">{{ '%g'|format(holiday['booked']) }}</td></tr>
+          {% if holiday['remaining'] is not none %}
+            <tr class="grand-total"><td>Left to book</td><td class="num">{{ '%g'|format(holiday['remaining']) }}</td></tr>
+          {% endif %}
+        </table>
+        <p class="hint">Year runs {{ holiday['year_start']|uk_date }} to {{ holiday['year_end']|uk_date }}.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Record leave they've already taken</h2>
+    <p class="hint">Goes straight to approved and sends them nothing. Fill in as many rows as you need and
+      save once. What each period counts as is worked out now and fixed, so check the figures it reports
+      back — if they look wrong, their working days are probably wrong.</p>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="person_id" value="{{ chosen['person_id'] }}">
+      <table class="backfill-table">
+        <tr><th>From</th><th>To</th><th>Type</th><th>First day</th><th>Last day</th><th>Note (optional)</th></tr>
+        {% for i in rows %}
+          <tr>
+            <td><input type="date" name="start_date_{{ i }}" aria-label="Row {{ loop.index }} from"></td>
+            <td><input type="date" name="end_date_{{ i }}" aria-label="Row {{ loop.index }} to"></td>
+            <td>
+              <select name="leave_type_{{ i }}" aria-label="Row {{ loop.index }} type">
+                {% for key, label in leave_types %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+              </select>
+            </td>
+            <td>
+              <select name="start_portion_{{ i }}" aria-label="Row {{ loop.index }} first day">
+                <option value="full">All day</option>
+                <option value="half">Half day</option>
+              </select>
+            </td>
+            <td>
+              <select name="end_portion_{{ i }}" aria-label="Row {{ loop.index }} last day">
+                <option value="full">All day</option>
+                <option value="half">Half day</option>
+              </select>
+            </td>
+            <td><input type="text" name="note_{{ i }}" maxlength="200" aria-label="Row {{ loop.index }} note"></td>
+          </tr>
+        {% endfor %}
+      </table>
+      <p class="hint">Leave a row blank to skip it. For a single day, put the same date in both boxes.</p>
+      <button type="submit" class="btn-primary">Record this leave</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Everything recorded for {{ chosen['name'] }}</h2>
+    {% if not history %}<p class="hint">Nothing recorded yet.</p>{% endif %}
+    {% for r in history %}
+      <div class="day-list-item">
+        {{ r['start_date']|uk_date }}{% if r['start_portion'] == 'half' %} (from midday){% endif %}
+        {% if r['end_date'] != r['start_date'] %}to {{ r['end_date']|uk_date }}{% if r['end_portion'] == 'half' %} (until midday){% endif %}{% endif %}
+        <span class="leave-badge leave-badge-{{ r['leave_type'] or 'paid' }}">{{ leave_type_labels[r['leave_type'] or 'paid'] }}</span>
+        {% if r['days_counted'] is not none %}
+          <span class="hint">{{ '%g'|format(r['days_counted']) }} day{{ '' if r['days_counted'] == 1 else 's' }}</span>
+        {% else %}
+          <span class="hint">not counted — working days weren't set</span>
+        {% endif %}
+        {% if r['note'] %}<span class="hint">{{ r['note'] }}</span>{% endif %}
+        {# The leave queue only lists current and upcoming leave, so without
+           this there is no way to take back a past record entered by mistake. #}
+        <form method="post" action="{{ url_for('rota_grid.decline_leave', leave_id=r['id']) }}" style="display:inline"
+              onsubmit="return confirm('Remove this leave record?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="link-button">Remove</button>
+        </form>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

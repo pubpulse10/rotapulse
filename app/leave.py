@@ -705,6 +705,14 @@ def notify_decision(db, venue, leave_row, decision: str) -> None:
     outcome = outcomes.get(decision)
     if outcome is None:
         return
+    # Cancelling leave that has already FINISHED is a correction to the
+    # record, not news: "you are back on the rota for those dates" about a
+    # week in February helps nobody and alarms whoever gets it. Common now
+    # that a history can be typed in and a mistyped row taken back
+    # (rota_grid.leave_history). Leave ending TODAY is still current -- they
+    # really are back on today -- so only a finished booking is silent.
+    if decision == "cancelled" and leave_row["end_date"] < uk_today().isoformat():
+        return
 
     type_label = LEAVE_TYPE_LABELS.get(leave_row["leave_type"] or "paid", "Leave").lower()
     message = (

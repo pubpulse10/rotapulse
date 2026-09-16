@@ -17,11 +17,20 @@ import pytest
 
 from app import db as db_module
 from app.leave import count_days, days_taken_count, working_pattern
+from app.uk_time import uk_today
 from tests.conftest import create_active_staff, login_as_person, login_as_pub
 
 MON_TO_FRI = '{"mon":true,"tue":true,"wed":true,"thu":true,"fri":true,"sat":false,"sun":false}'
 # Mon 3rd to Fri 7th August 2026.
 WEEK_START, WEEK_END = "2026-08-03", "2026-08-07"
+
+# A week that has NOT happened yet, for the two cancellation tests. Cancelling
+# leave that is already over is now silent (app/leave.py::notify_decision) --
+# "you are back on the rota for those dates" about a past week helps nobody --
+# so a fixed date in the past would test the suppression, not the message.
+_NEXT_MONDAY = uk_today() + timedelta(days=(7 - uk_today().weekday()) or 7)
+FUTURE_WEEK_START = _NEXT_MONDAY.isoformat()
+FUTURE_WEEK_END = (_NEXT_MONDAY + timedelta(days=4)).isoformat()
 
 
 @pytest.fixture
@@ -358,7 +367,7 @@ def test_cancelling_already_approved_leave_says_cancelled_not_declined(app, clie
     person_id, _m = _staff(app, venue)
     login_as_pub(client, venue["pub_id"])
     client.post(f"/v/{venue['slug']}/rota/leave/create", data={
-        "person_id": person_id, "start_date": WEEK_START, "end_date": WEEK_END,
+        "person_id": person_id, "start_date": FUTURE_WEEK_START, "end_date": FUTURE_WEEK_END,
     }, follow_redirects=True)
     leave_id = _leave_rows(app, person_id)[0]["id"]
 
@@ -394,7 +403,7 @@ def test_somebody_invited_by_text_gets_a_text(app, client, venue, sent):
 
     login_as_pub(client, venue["pub_id"])
     client.post(f"/v/{venue['slug']}/rota/leave/create", data={
-        "person_id": person_id, "start_date": WEEK_START, "end_date": WEEK_END,
+        "person_id": person_id, "start_date": FUTURE_WEEK_START, "end_date": FUTURE_WEEK_END,
     }, follow_redirects=True)
     leave_id = _leave_rows(app, person_id)[0]["id"]
     client.post(f"/v/{venue['slug']}/rota/leave/{leave_id}/decline")

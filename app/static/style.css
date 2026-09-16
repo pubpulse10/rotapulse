@@ -412,6 +412,14 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 .block-roles { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 8px 14px; margin: 12px 0; }
 .block-roles legend { font-weight: 600; padding: 0 4px; }
 
+/* Typing a year of somebody's leave in one go (rota_grid.leave_history).
+   Scrolls sideways on a phone rather than crushing six columns of date
+   pickers into 360px. */
+.backfill-table { width: 100%; display: block; overflow-x: auto; }
+.backfill-table th { text-align: left; font-size: 0.85rem; white-space: nowrap; }
+.backfill-table td { padding: 2px 4px 2px 0; }
+.backfill-table input, .backfill-table select { margin: 0; min-width: 8.5rem; }
+
 /* Draggable shift chips (app/static/rota_dragdrop.js). touch-action: none —
    confirmed live that touch-action: pan-x pan-y does NOT reliably hand
    control back once a hold arms a drag; WebKit can commit to a native pan

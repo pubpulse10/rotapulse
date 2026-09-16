@@ -22,7 +22,7 @@ from app.date_format import format_uk_date
 from app.db import get_db
 from app.leave import (BLOCK_NOTE_MAX, LEAVE_TYPE_KEYS, LEAVE_TYPE_LABELS, LEAVE_TYPES,
                        PORTIONS, blocked_dates_for, blocks_by_date, blocks_in_range,
-                       describe_blocked_dates, freeze_counts, notify_decision)
+                       describe_blocked_dates, freeze_counts, notify_decision, position)
 from app.notifications import send_email, send_sms
 from app.rota_auth import register_identity, require_permission
 from app.uk_time import uk_today
@@ -1071,6 +1071,164 @@ def decline_leave(leave_id):
     else:
         flask.flash("Leave request declined.")
     return flask.redirect(flask.request.referrer or flask.url_for("rota_grid.leave_queue"))
+
+
+# ---------- Past leave: entering a history, and seeing what is there ----------
+
+# How many blank rows the form offers at once. Eight covers a year of a pub
+# worker's holiday in one submission; more would just be a longer page.
+BACKFILL_ROWS = 8
+
+
+def _leave_staff(db, venue_id):
+    """Everyone with a staff record here, including people who have LEFT.
+
+    Not _billable_staff: somebody who left in June still took leave in
+    February, and a screen for entering a history that silently omitted them
+    would be no use for the year it is meant to cover.
+    """
+    return db.execute(
+        """SELECT venue_membership.id AS membership_id, person.id AS person_id, person.name,
+                  venue_membership.status
+           FROM venue_membership
+           JOIN person ON person.id = venue_membership.person_id
+           JOIN rota_staff_detail ON rota_staff_detail.venue_membership_id = venue_membership.id
+           WHERE venue_membership.venue_id = ?
+           ORDER BY person.name""",
+        (venue_id,),
+    ).fetchall()
+
+
+@rota_bp.route("/leave/history")
+@require_permission("app_admin", "rota_admin")
+def leave_history():
+    """One person's whole leave history, and a way to type in the part of it
+    that happened before RotaPulse was being used.
+
+    Two things the leave queue cannot do, both of which matter the moment a
+    pub starts mid-year:
+
+      * It only lists CURRENT AND UPCOMING approved leave, so a past booking
+        is invisible there -- including one just entered by mistake, which
+        therefore could not be taken back.
+      * It takes one booking per submission. A year of somebody's holiday is
+        half a dozen separate periods, per person.
+    """
+    db = get_db()
+    venue_id = flask.g.venue["id"]
+    staff = _leave_staff(db, venue_id)
+    person_id = flask.request.args.get("person_id", type=int)
+
+    chosen = next((m for m in staff if m["person_id"] == person_id), None)
+    history, holiday = [], None
+    if chosen is not None:
+        history = db.execute(
+            """SELECT * FROM leave_request
+               WHERE person_id = ? AND venue_id = ? AND status = 'approved'
+               ORDER BY start_date DESC""",
+            (chosen["person_id"], venue_id),
+        ).fetchall()
+        detail = db.execute(
+            "SELECT * FROM rota_staff_detail WHERE venue_membership_id = ?",
+            (chosen["membership_id"],),
+        ).fetchone()
+        settings_row = db.execute(
+            "SELECT * FROM venue_settings WHERE venue_id = ?", (venue_id,)
+        ).fetchone()
+        holiday = position(db, chosen["person_id"], chosen["membership_id"], detail, settings_row)
+
+    return flask.render_template(
+        "rota/leave_history.html", staff=staff, chosen=chosen, history=history,
+        holiday=holiday, rows=range(BACKFILL_ROWS),
+        leave_types=[(key, label) for key, label, _r, _a in LEAVE_TYPES],
+        leave_type_labels=LEAVE_TYPE_LABELS,
+    )
+
+
+@rota_bp.route("/leave/history", methods=["POST"])
+@require_permission("app_admin", "rota_admin")
+def create_leave_history():
+    """Several periods for one person in one go.
+
+    Silent on purpose: nothing is emailed or texted. This is a record of
+    holiday somebody took months ago, and notifying them about it would be
+    absurd -- the same reason create_leave doesn't notify either.
+
+    Reports what each period COUNTED AS rather than just how many were added,
+    because that figure is frozen here and never recalculated
+    (app/leave.py::freeze_counts). Seeing "5 days" against a week is the only
+    chance to notice that somebody's working pattern is wrong BEFORE the
+    number sets.
+    """
+    db = get_db()
+    venue_id = flask.g.venue["id"]
+    form = flask.request.form
+    person_id = form.get("person_id", type=int)
+
+    member = next((m for m in _leave_staff(db, venue_id) if m["person_id"] == person_id), None)
+    if member is None:
+        flask.flash("Choose a staff member.", "error")
+        return flask.redirect(flask.url_for("rota_grid.leave_history"))
+
+    added, skipped, bad = [], [], []
+    for index in range(BACKFILL_ROWS):
+        start_date = (form.get(f"start_date_{index}") or "").strip()
+        end_date = (form.get(f"end_date_{index}") or "").strip()
+        if not start_date and not end_date:
+            continue
+        if not start_date or not end_date or end_date < start_date:
+            bad.append(f"row {index + 1}")
+            continue
+
+        leave_type = (form.get(f"leave_type_{index}") or "paid").strip()
+        if leave_type not in LEAVE_TYPE_KEYS:
+            bad.append(f"row {index + 1}")
+            continue
+        start_portion = form.get(f"start_portion_{index}") if form.get(f"start_portion_{index}") in PORTIONS else "full"
+        end_portion = form.get(f"end_portion_{index}") if form.get(f"end_portion_{index}") in PORTIONS else "full"
+
+        # Entering the same week twice is the obvious mistake when working
+        # down a list, and a duplicate would silently double somebody's
+        # holiday. Skipped and named rather than added.
+        clash = db.execute(
+            """SELECT 1 FROM leave_request
+               WHERE person_id = ? AND venue_id = ? AND status IN ('pending', 'approved')
+               AND end_date >= ? AND start_date <= ?""",
+            (person_id, venue_id, start_date, end_date),
+        ).fetchone()
+        if clash:
+            skipped.append(f"{format_uk_date(start_date)} to {format_uk_date(end_date)}")
+            continue
+
+        cur = db.execute(
+            """INSERT INTO leave_request
+               (person_id, venue_id, start_date, end_date, leave_type, start_portion, end_portion,
+                note, status, decided_at, decided_by_person_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', datetime('now'), ?)""",
+            (person_id, venue_id, start_date, end_date, leave_type, start_portion, end_portion,
+             (form.get(f"note_{index}") or "").strip() or None,
+             flask.g.person["id"] if flask.g.person else None),
+        )
+        freeze_counts(db, cur.lastrowid)
+        counted = db.execute("SELECT days_counted FROM leave_request WHERE id = ?",
+                             (cur.lastrowid,)).fetchone()["days_counted"]
+        added.append("{} to {} ({})".format(
+            format_uk_date(start_date), format_uk_date(end_date),
+            "working days not set" if counted is None else f"{counted:g} day{'' if counted == 1 else 's'}",
+        ))
+    db.commit()
+
+    if added:
+        flask.flash(f"Recorded for {member['name']}: " + "; ".join(added) + ".")
+    if skipped:
+        flask.flash("Already had leave over these dates, so they were left alone: "
+                    + "; ".join(skipped) + ".", "error")
+    if bad:
+        flask.flash(f"Ignored {', '.join(bad)} — needs a start and an end, with the end on or after "
+                    "the start.", "error")
+    if not added and not skipped and not bad:
+        flask.flash("Nothing to record — fill in at least one row.", "error")
+    return flask.redirect(flask.url_for("rota_grid.leave_history", person_id=person_id))
 
 
 # ---------- Blocked dates (step 3 of docs/leave-design.md) ----------
