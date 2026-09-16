@@ -21,6 +21,20 @@ re-deciding something already recorded here.
 
 ## Decisions
 
+### 2026-09-16 — Leave types, allowances and blocked dates: design agreed, NOT built
+
+The full design is in **`docs/leave-design.md`** — read it before touching leave. Agreed with
+the owner 15-16 September 2026; no code written. Headlines, so this file is enough to avoid a
+wrong turn: five leave types, of which only paid leave reduces a balance; lieu is recorded but
+has NO earned ledger; allowance is `full_time_allowance x (usual days per week / full_time days
+per week)`, capped, editable, NOT a flat 28 for everyone; every leave record stores hours as
+well as days from day one so the 12.07% irregular-hours model can be added later without a
+migration; days/hours are frozen at approval so history can't shift; carry-over is entered by
+hand, never automatic. `app/leave.py::days_taken_count()` has a live bug — a missing
+availability defaults every weekday to "worked", so a week's leave counts as 7 days; fix it in
+step 1, before the number becomes a balance people argue about.
+
+
 ### 2026-09-10 — Affiliate attribution via Rewardful
 
 **Decision (family-wide text, same in every repo):** PubPulse pays affiliates through Rewardful, which attributes a
