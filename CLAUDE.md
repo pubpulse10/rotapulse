@@ -7,6 +7,15 @@ re-deciding something already recorded here.
 
 ## Invariants — do not break these
 
+- **`create_app()` calls `db.init_schema()`, and must keep doing so.** That call is the only thing that makes
+  a migration reach the live database. Every migration lives in `init_schema()` (`CREATE TABLE IF NOT EXISTS`
+  + `_add_column_if_missing`), it is additive-only and idempotent, and nothing else in the running app runs
+  it — not `wsgi.py`, not the Dockerfile, not `docker-entrypoint.sh`. Before 16 September 2026 it was absent,
+  so three steps of leave work shipped to production with the code present and the columns missing.
+  `/health` cannot catch that: it reports `RENDER_GIT_COMMIT`, an environment variable, so it confirms the
+  deploy while the schema stays behind. `tests/test_schema_bootstrap.py` is the tripwire. TaskPulse still has
+  this gap; pubpulse-hub and pricepulse do not.
+
 - **Affiliate attribution (Rewardful) rides on Stripe Customer `metadata.referral`, never on
   `client_reference_id`.** Here `client_reference_id` carries the venue id, and the webhook and the
   `/billing/success` reconcile both depend on it. The referral lives in PricePulse, the family's identity store.

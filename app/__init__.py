@@ -39,6 +39,17 @@ def create_app():
     app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
     db.init_app(app)
+    # Additive-only and idempotent (CREATE TABLE IF NOT EXISTS +
+    # _add_column_if_missing), so it is safe on every boot -- and it is the
+    # only thing that makes a migration actually REACH the deployment. Until
+    # this line existed, a new column landed in the code on push and never in
+    # the live database: nothing in wsgi.py, the Dockerfile or the entrypoint
+    # ran it, and scripts/init_db.py is a developer's script that nobody was
+    # going to remember. /health reports an environment variable, so it
+    # confirmed the deploy while the schema silently stayed behind.
+    # pubpulse-hub does this in create_app() and pricepulse in wsgi.py;
+    # RotaPulse was the outlier.
+    db.init_schema()
     csrf = CSRFProtect(app)
 
     @app.errorhandler(CSRFError)
