@@ -97,6 +97,11 @@ def _gather(db, venue_id, start_date: str, end_date: str, today=None):
         "year_end": year_end,
         "start_date": start_date,
         "end_date": end_date,
+        # Carried onto the page AND both exports: a PDF of holiday balances is
+        # exactly the thing that gets sent on to somebody else, and it must not
+        # travel without saying the figures are still being brought up to date
+        # (venue_settings.leave_figures_provisional).
+        "provisional": bool(settings and settings["leave_figures_provisional"]),
     }
 
 
@@ -162,6 +167,9 @@ def export_csv():
     # Plain ASCII and plain numbers: Excel opens a BOM-less UTF-8 CSV as
     # Windows-1252 and garbles anything else (same reasoning as the payroll
     # export).
+    if data["provisional"]:
+        writer.writerow(["NOT FINAL - leave taken before this pub started using RotaPulse is still being added."])
+        writer.writerow([])
     writer.writerow([f"Leave taken: {format_uk_date(start_date)} to {format_uk_date(end_date)}"])
     writer.writerows(period)
     writer.writerow([])
@@ -199,11 +207,17 @@ def export_pdf():
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4)
     styles = getSampleStyleSheet()
-    elements = [
-        Paragraph(f"Leave: {escape(venue['name'])}", styles["Title"]),
+    elements = [Paragraph(f"Leave: {escape(venue['name'])}", styles["Title"])]
+    if data["provisional"]:
+        elements.append(Paragraph(
+            "These figures are not final. Leave taken before this pub started using RotaPulse is "
+            "still being added, so balances may be too generous.",
+            styles["Heading3"],
+        ))
+    elements.append(
         Paragraph(f"Taken between {format_uk_date(start_date)} and {format_uk_date(end_date)}, in days",
-                  styles["Heading2"]),
-    ]
+                  styles["Heading2"])
+    )
     table = Table(period, colWidths=[130] + [58] * len(TYPE_KEYS) + [50])
     table.setStyle(style)
     elements.append(table)

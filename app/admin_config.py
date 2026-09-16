@@ -117,7 +117,8 @@ def settings():
             """UPDATE venue_settings SET pay_period_type = ?, pay_period_interval_weeks = ?,
                pay_period_anchor_date = ?, pay_period_month_end_day = ?, pay_day_offset = ?,
                holiday_year_start_date = ?, target_staff_cost_percent = ?,
-               full_time_allowance_days = ?, full_time_days_per_week = ?
+               full_time_allowance_days = ?, full_time_days_per_week = ?,
+               leave_figures_provisional = ?
                WHERE venue_id = ?""",
             (
                 form.get("pay_period_type", "weekly"),
@@ -134,6 +135,7 @@ def settings():
                 # allowance computable.
                 form.get("full_time_allowance_days", type=float) or 28,
                 form.get("full_time_days_per_week", type=float) or 5,
+                1 if form.get("leave_figures_provisional") else 0,
                 venue_id,
             ),
         )

@@ -64,6 +64,18 @@
       statutory minimum. You can give more. Each person's figure can be overridden on their own record.
     </p>
 
+    <div class="checkbox-row">
+      <input type="checkbox" id="leave_figures_provisional" name="leave_figures_provisional"
+             {{ 'checked' if settings and settings['leave_figures_provisional'] }}>
+      <label for="leave_figures_provisional">Holiday figures are still being brought up to date</label>
+    </div>
+    <p class="hint">
+      Tick this while you're entering leave your staff took before you started using RotaPulse. Their own
+      Leave page will say the figures aren't final yet, so nobody books time off against a number that's
+      too generous. Untick it when you've finished. Leave requests, approvals and the rota all carry on as
+      normal either way.
+    </p>
+
     <label for="target_staff_cost_percent">Target staff cost %</label>
     <input type="number" step="0.1" id="target_staff_cost_percent" name="target_staff_cost_percent"
            value="{{ settings['target_staff_cost_percent'] if settings else '' }}">

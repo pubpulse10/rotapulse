@@ -3,6 +3,13 @@
 {% block content %}
 <div class="panel">
   <h1>Leave</h1>
+  {% if provisional %}
+    {# Above the figures, not below: somebody who reads the number first and
+       the caveat second has already believed the number. #}
+    <p class="provisional-notice"><strong>These figures aren't final yet.</strong>
+      Any leave you took before we started using RotaPulse is still being added, so you may have fewer
+      days left than it says here. Please check with your manager before booking time off.</p>
+  {% endif %}
   {% if not holiday or not holiday['countable'] %}
     {# leave.working_pattern returns None when availability was never set.
        Saying so beats printing a number that isn't true. #}

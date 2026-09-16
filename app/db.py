@@ -440,6 +440,15 @@ def init_schema(conn=None):
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             PRIMARY KEY (venue_membership_id, year_start_date)
         )""")
+        # Set while a pub is entering the leave its staff took BEFORE it
+        # started using RotaPulse (rota_grid.leave_history). Every balance is
+        # too generous until that history is in, and a staff member who books
+        # against a wrong figure has been misled by us, not by their manager.
+        # So the staff Leave page says so, in the same place as the number.
+        # Every pub that signs up mid-year has this problem, which is why it is
+        # a setting and not a one-off announcement.
+        _add_column_if_missing(conn, "venue_settings", "leave_figures_provisional",
+                               "INTEGER NOT NULL DEFAULT 0")
         # Dates the landlord needs full cover on, which staff cannot request
         # leave against (2026-09-16, step 3 of docs/leave-design.md). The note
         # is capped at 20 characters by the form, on the owner's instruction --

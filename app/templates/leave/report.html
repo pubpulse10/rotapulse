@@ -3,6 +3,13 @@
 {% block content %}
 <div class="panel">
   <h1>Leave report</h1>
+  {% if provisional %}
+    <p class="provisional-notice"><strong>These figures aren't final yet.</strong>
+      Leave taken before you started using RotaPulse is still being added, so balances may be too
+      generous. Staff see the same warning on their own Leave page. Turn this off in Settings when
+      you've finished, or
+      <a href="{{ url_for('rota_grid.leave_history') }}">carry on entering it</a>.</p>
+  {% endif %}
   <p class="hint">Only paid leave comes off a holiday balance. Sick, unpaid, maternity and days in lieu are
     recorded and shown here, but don't reduce anyone's entitlement.</p>
 

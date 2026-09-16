@@ -489,6 +489,9 @@ def leave():
 
     return flask.render_template(
         "staff/leave.html", requests=requests_rows, holiday=holiday,
+        # Said in the same place as the number, because a message sent once is
+        # read once and the wrong figure sits there for weeks.
+        provisional=bool(settings_row and settings_row["leave_figures_provisional"]),
         leave_types=[(key, label) for key, label, requestable, _a in LEAVE_TYPES if requestable],
         # Shown BEFORE they pick their dates: being refused after the fact is
         # annoying, seeing the unavailable dates first is not.
