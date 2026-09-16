@@ -13,7 +13,8 @@ import flask
 
 from app.db import get_db
 from app.geo_distance import distance_metres
-from app.leave import LEAVE_TYPES, PORTIONS, STAFF_REQUESTABLE_TYPES, position
+from app.leave import (LEAVE_TYPES, PORTIONS, STAFF_REQUESTABLE_TYPES, blocked_dates_for,
+                       describe_blocked_dates, position, upcoming_blocks_for)
 from app.media import save_attendance_photo
 from app.notification_settings import notify_admins
 from app.rota_auth import register_identity, require_permission
@@ -440,6 +441,16 @@ def leave():
         if leave_type not in STAFF_REQUESTABLE_TYPES:
             flask.flash("Choose either paid or unpaid leave. Anything else is recorded by your manager.", "error")
             return flask.redirect(flask.url_for("staff_portal.leave"))
+        # Blocked dates: days the landlord needs full cover on. Naming the
+        # clashing dates rather than refusing the whole booking, because a
+        # request that overlaps a block by one day can be re-made a day
+        # shorter, and "your request clashes" is not something anybody can act
+        # on (docs/leave-design.md).
+        clashes = blocked_dates_for(db, venue["id"], person["id"], start_date, end_date, leave_type)
+        if clashes:
+            flask.flash(f"Sorry — leave isn't available on {describe_blocked_dates(clashes)}. "
+                        "Pick dates around it, or speak to your manager.", "error")
+            return flask.redirect(flask.url_for("staff_portal.leave"))
 
         db.execute(
             """INSERT INTO leave_request
@@ -479,6 +490,9 @@ def leave():
     return flask.render_template(
         "staff/leave.html", requests=requests_rows, holiday=holiday,
         leave_types=[(key, label) for key, label, requestable, _a in LEAVE_TYPES if requestable],
+        # Shown BEFORE they pick their dates: being refused after the fact is
+        # annoying, seeing the unavailable dates first is not.
+        blocks=upcoming_blocks_for(db, venue["id"], person["id"]),
     )
 
 

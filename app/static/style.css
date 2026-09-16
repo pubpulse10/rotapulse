@@ -377,6 +377,41 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 }
 .holiday-deadline strong { font-size: 1.6rem; display: block; }
 
+/* Blocked dates (step 3 of docs/leave-design.md). Red rather than the leave
+   purple: this is a refusal, not a kind of leave, and the two must not be
+   mistaken for each other on the grid. */
+.blocked-notice {
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  background: #fdf0ee;
+}
+.blocked-notice p { margin: 0 0 6px; }
+.blocked-list { margin: 0 0 6px; padding-left: 20px; }
+.blocked-list li { margin: 2px 0; }
+.blocked-note {
+  display: inline-block;
+  background: #fdf0ee;
+  color: var(--color-error);
+  border: 1px solid var(--color-error);
+  border-radius: 6px;
+  padding: 0 6px;
+  font-size: 0.8rem;
+}
+/* On the grid day-header, where it sits beside the event badges. */
+.blocked-badge {
+  display: inline-block;
+  background: #fdf0ee;
+  color: var(--color-error);
+  border-radius: 6px;
+  padding: 1px 5px;
+  font-size: 0.7rem;
+  margin-left: 4px;
+}
+.block-roles { border: 1px solid var(--color-border); border-radius: var(--radius); padding: 8px 14px; margin: 12px 0; }
+.block-roles legend { font-weight: 600; padding: 0 4px; }
+
 /* Draggable shift chips (app/static/rota_dragdrop.js). touch-action: none —
    confirmed live that touch-action: pan-x pan-y does NOT reliably hand
    control back once a hold arms a drag; WebKit can commit to a native pan

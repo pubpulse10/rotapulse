@@ -205,6 +205,24 @@ def delete_role(role_id):
             "error",
         )
         return flask.redirect(flask.url_for("admin_config.roles"))
+    # A blocked date scoped to this role holds a foreign key to it. Refusing is
+    # the only safe answer: silently dropping the link would leave the block
+    # with no roles, and a block with no roles applies to EVERYONE
+    # (app/leave.py), so "kitchen staff can't book this week" would quietly
+    # become "nobody can".
+    blocking = db.execute(
+        """SELECT COUNT(*) AS n FROM leave_block_role
+           JOIN leave_block ON leave_block.id = leave_block_role.leave_block_id
+           WHERE leave_block_role.venue_role_id = ? AND leave_block.venue_id = ?""",
+        (role_id, venue_id),
+    ).fetchone()["n"]
+    if blocking:
+        flask.flash(
+            f"Can't delete this role — {blocking} blocked date(s) apply to it. "
+            "Unblock those dates first.",
+            "error",
+        )
+        return flask.redirect(flask.url_for("admin_config.roles"))
     db.execute("DELETE FROM venue_role WHERE id = ? AND venue_id = ?", (role_id, venue_id))
     db.commit()
     flask.flash("Role deleted.")

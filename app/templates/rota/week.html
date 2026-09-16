@@ -79,6 +79,10 @@
                 </form>
               </span>
             {% endfor %}
+            {% for block in blocked_by_date.get(d.isoformat(), []) %}
+              <span class="blocked-badge" title="Staff can't request leave on this date">
+                {{ block['note'] or 'Leave blocked' }}</span>
+            {% endfor %}
             {% if forecast.get(d.isoformat()) %}
               <div class="weather-strip">{{ forecast[d.isoformat()]['temperature_c'] }}°C</div>
             {% endif %}

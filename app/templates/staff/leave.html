@@ -34,6 +34,22 @@
   {% endif %}
 
   <h2>Request leave</h2>
+  {% if blocks %}
+    {# Listed before the date pickers on purpose: being refused after
+       submitting is annoying, seeing the unavailable dates first is not. #}
+    <div class="blocked-notice">
+      <p><strong>Leave isn't available on these dates:</strong></p>
+      <ul class="blocked-list">
+        {% for block in blocks %}
+          <li>
+            {{ block['start_date']|uk_date }}{% if block['end_date'] != block['start_date'] %} to {{ block['end_date']|uk_date }}{% endif %}
+            {% if block['note'] %}<span class="blocked-note">{{ block['note'] }}</span>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="hint">Sick leave and maternity leave aren't affected — those are recorded by your manager.</p>
+    </div>
+  {% endif %}
   <form method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label for="leave_type">Type</label>

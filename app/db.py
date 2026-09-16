@@ -440,6 +440,28 @@ def init_schema(conn=None):
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             PRIMARY KEY (venue_membership_id, year_start_date)
         )""")
+        # Dates the landlord needs full cover on, which staff cannot request
+        # leave against (2026-09-16, step 3 of docs/leave-design.md). The note
+        # is capped at 20 characters by the form, on the owner's instruction --
+        # it sits in a grid day-header, not a paragraph.
+        conn.execute("""CREATE TABLE IF NOT EXISTS leave_block (
+            id INTEGER PRIMARY KEY,
+            venue_id INTEGER NOT NULL REFERENCES venue(id),
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            note TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            created_by_person_id INTEGER REFERENCES person(id)
+        )""")
+        # Which staff groups a block applies to. NO rows for a block means the
+        # whole venue -- an absent row is "everyone", not "nobody", because a
+        # block with every role deleted out from under it must not silently
+        # stop blocking anything.
+        conn.execute("""CREATE TABLE IF NOT EXISTS leave_block_role (
+            leave_block_id INTEGER NOT NULL REFERENCES leave_block(id) ON DELETE CASCADE,
+            venue_role_id INTEGER NOT NULL REFERENCES venue_role(id),
+            PRIMARY KEY (leave_block_id, venue_role_id)
+        )""")
         # Ad-hoc/unplanned clock-in with admin approval (2026-08-18): 'origin'
         # marks a shift that was created BY a clock-in rather than rostered in
         # advance, purely for display (badge on the grid). The approval fields

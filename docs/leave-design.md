@@ -1,12 +1,12 @@
 # Leave — design
 
-**Status: steps 1 and 2 are built and live. Step 3 is not.**
+**Status: all three steps are built.**
 
 | Step | What | State |
 | --- | --- | --- |
 | 1 | Types, half days, approval notification, the availability bug | Built, `118a562` |
-| 2 | Allowances, carry-over, both reports, paid leave on payroll | Built |
-| 3 | Blocked dates, bulk leave button | Not started |
+| 2 | Allowances, carry-over, both reports, paid leave on payroll | Built, `33a75ba` |
+| 3 | Blocked dates, bulk leave button | Built |
 
 Agreed with Steve (owner) over 15–16 September 2026, prompted by two things: RotaPulse
 records leave as a single undifferentiated "away" with no types and no balance, and a
@@ -383,7 +383,24 @@ Two things came out differently from the plan above, both deliberate:
   to; re-basing it on an arbitrary range would produce a "remaining" figure that is true of
   nothing. The page says so where it could otherwise be mistaken.
 
-**3. Blocked dates and the bulk leave button.** NOT STARTED.
+**3. Blocked dates and the bulk leave button.** DONE. Blocks live in
+`leave_block` with `leave_block_role` for the staff-group scoping; the logic is in
+`app/leave.py`, the screens hang off the leave queue, and the grid's day headers carry
+the note. "Add leave for everyone" sits on the same screen.
+
+Three things settled during the build:
+
+- **A block with no roles applies to everyone, and a block with roles does not catch
+  somebody who has no role set.** The first is fail-safe (a block whose roles are later
+  deleted keeps blocking rather than silently going quiet); the second is fail-open on
+  purpose, because guessing that an ungrouped person belongs to a group would refuse
+  leave the landlord never meant to refuse. The admin form says so where it is chosen.
+- **Days in lieu are blockable**, alongside paid and unpaid. A day in lieu is still a day
+  off, and the whole point of a block is that the cover is needed. Only sick and
+  maternity are exempt.
+- **Bulk leave skips anybody with pending OR approved leave over those dates**, not just
+  approved. A request still waiting on a decision is a booking in progress, and
+  approving a second overlapping one behind their back helps nobody.
 
 ---
 

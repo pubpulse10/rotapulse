@@ -20,8 +20,9 @@ import flask
 from app.costs import predicted_cost
 from app.date_format import format_uk_date
 from app.db import get_db
-from app.leave import (LEAVE_TYPE_KEYS, LEAVE_TYPE_LABELS, LEAVE_TYPES, PORTIONS,
-                       freeze_counts, notify_decision)
+from app.leave import (BLOCK_NOTE_MAX, LEAVE_TYPE_KEYS, LEAVE_TYPE_LABELS, LEAVE_TYPES,
+                       PORTIONS, blocked_dates_for, blocks_by_date, blocks_in_range,
+                       describe_blocked_dates, freeze_counts, notify_decision)
 from app.notifications import send_email, send_sms
 from app.rota_auth import register_identity, require_permission
 from app.uk_time import uk_today
@@ -169,6 +170,10 @@ def week():
     for t in event_tags:
         tags_by_date.setdefault(t["tag_date"], []).append({"id": t["id"], "label": t["label"]})
 
+    # A day nobody can book off should explain itself where the week is
+    # actually looked at, rather than only on the screen that created it.
+    blocked_by_date = blocks_by_date(db, venue["id"], date_strs)
+
     forecast = get_week_forecast(venue["id"], venue["latitude"], venue["longitude"], date_strs)
     daily_cost = {d_str: predicted_cost(venue["id"], d_str, d_str) for d_str in date_strs}
     week_cost = predicted_cost(venue["id"], date_strs[0], date_strs[-1])
@@ -214,6 +219,7 @@ def week():
         open_shifts_by_date=open_shifts_by_date,
         roles=roles,
         tags_by_date=tags_by_date,
+        blocked_by_date=blocked_by_date,
         forecast=forecast,
         daily_cost=daily_cost,
         monday_options=_monday_options(db, venue["id"], week_start),
@@ -945,10 +951,15 @@ def leave_queue():
         (flask.g.venue["id"], uk_today().isoformat()),
     ).fetchall()
     staff = _billable_staff(db, flask.g.venue["id"])
+    today = uk_today()
     return flask.render_template(
         "rota/leave_queue.html", requests=rows, current_or_upcoming_leave=current_or_upcoming_leave,
         staff=staff, leave_types=[(key, label) for key, label, _r, _a in LEAVE_TYPES],
         leave_type_labels=LEAVE_TYPE_LABELS,
+        blocks=blocks_in_range(db, flask.g.venue["id"], today.isoformat(), "9999-12-31"),
+        roles=db.execute("SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name",
+                         (flask.g.venue["id"],)).fetchall(),
+        block_note_max=BLOCK_NOTE_MAX,
     )
 
 
@@ -994,7 +1005,15 @@ def create_leave():
     # (app/leave.py::freeze_counts) rather than recomputed on every read.
     freeze_counts(db, cur.lastrowid)
     db.commit()
-    flask.flash("Leave added.")
+    # Deliberately a warning and not a refusal: a blocked date stops STAFF
+    # requesting leave, it does not handcuff the landlord, who is the person
+    # who set the block and is entitled to make an exception to it.
+    clashes = blocked_dates_for(db, venue_id, person_id, start_date, end_date, leave_type)
+    if clashes:
+        flask.flash(f"Leave added, but note these dates are blocked: {describe_blocked_dates(clashes)}.",
+                    "error")
+    else:
+        flask.flash("Leave added.")
     return flask.redirect(flask.url_for("rota_grid.leave_queue"))
 
 
@@ -1052,6 +1071,133 @@ def decline_leave(leave_id):
     else:
         flask.flash("Leave request declined.")
     return flask.redirect(flask.request.referrer or flask.url_for("rota_grid.leave_queue"))
+
+
+# ---------- Blocked dates (step 3 of docs/leave-design.md) ----------
+
+
+@rota_bp.route("/leave/blocked/create", methods=["POST"])
+@require_permission("app_admin", "rota_admin")
+def create_leave_block():
+    """Dates the landlord needs full cover on. Deliberately no annual repeat:
+    the owner did not want one, and a recurring event is re-entered."""
+    db = get_db()
+    venue_id = flask.g.venue["id"]
+    form = flask.request.form
+    start_date = (form.get("start_date") or "").strip()
+    end_date = (form.get("end_date") or "").strip()
+    note = (form.get("note") or "").strip()[:BLOCK_NOTE_MAX] or None
+
+    if not start_date or not end_date or end_date < start_date:
+        flask.flash("Choose a start date and an end date, with the end on or after the start.", "error")
+        return flask.redirect(flask.url_for("rota_grid.leave_queue"))
+
+    # Only roles that belong to THIS venue: role ids arrive from a form, and
+    # a tampered-with one must not attach another pub's role to our block.
+    valid_roles = {
+        row["id"] for row in
+        db.execute("SELECT id FROM venue_role WHERE venue_id = ?", (venue_id,)).fetchall()
+    }
+    chosen = [rid for rid in form.getlist("role_ids", type=int) if rid in valid_roles]
+
+    cur = db.execute(
+        """INSERT INTO leave_block (venue_id, start_date, end_date, note, created_by_person_id)
+           VALUES (?, ?, ?, ?, ?)""",
+        (venue_id, start_date, end_date, note, flask.g.person["id"] if flask.g.person else None),
+    )
+    for role_id in chosen:
+        db.execute("INSERT INTO leave_block_role (leave_block_id, venue_role_id) VALUES (?, ?)",
+                   (cur.lastrowid, role_id))
+    db.commit()
+    if chosen:
+        # Somebody with no role set is not in the group, so they are NOT
+        # caught -- said plainly here rather than discovered later.
+        flask.flash("Dates blocked for the groups you ticked. Staff with no group set can still "
+                    "request these dates.")
+    else:
+        flask.flash("Dates blocked for everyone at this venue.")
+    return flask.redirect(flask.url_for("rota_grid.leave_queue"))
+
+
+@rota_bp.route("/leave/blocked/<int:block_id>/delete", methods=["POST"])
+@require_permission("app_admin", "rota_admin")
+def delete_leave_block(block_id):
+    db = get_db()
+    owned = db.execute("SELECT 1 FROM leave_block WHERE id = ? AND venue_id = ?",
+                       (block_id, flask.g.venue["id"])).fetchone()
+    if owned:
+        db.execute("DELETE FROM leave_block_role WHERE leave_block_id = ?", (block_id,))
+        db.execute("DELETE FROM leave_block WHERE id = ?", (block_id,))
+        db.commit()
+        flask.flash("Dates unblocked.")
+    return flask.redirect(flask.url_for("rota_grid.leave_queue"))
+
+
+# ---------- Leave for everyone at once (step 3 of docs/leave-design.md) ----------
+
+
+@rota_bp.route("/leave/bulk", methods=["POST"])
+@require_permission("app_admin", "rota_admin")
+def create_bulk_leave():
+    """Put every member of staff on leave between two dates.
+
+    This exists because of how a real pub runs: The Cock shuts the first week
+    in January and puts everyone on holiday, which otherwise means adding the
+    same dates person by person.
+
+    Skips anybody who already has leave of any status touching those dates --
+    re-running it must not double-book somebody, and quietly overwriting an
+    existing booking would be worse than skipping it. Says who was skipped.
+    """
+    db = get_db()
+    venue_id = flask.g.venue["id"]
+    form = flask.request.form
+    start_date = (form.get("start_date") or "").strip()
+    end_date = (form.get("end_date") or "").strip()
+    leave_type = (form.get("leave_type") or "paid").strip()
+    start_portion = form.get("start_portion") if form.get("start_portion") in PORTIONS else "full"
+    end_portion = form.get("end_portion") if form.get("end_portion") in PORTIONS else "full"
+    note = (form.get("note") or "").strip() or None
+
+    if not start_date or not end_date or end_date < start_date:
+        flask.flash("Choose a start date and an end date, with the end on or after the start.", "error")
+        return flask.redirect(flask.url_for("rota_grid.leave_queue"))
+    if leave_type not in LEAVE_TYPE_KEYS:
+        flask.flash("Choose a type of leave.", "error")
+        return flask.redirect(flask.url_for("rota_grid.leave_queue"))
+
+    added, skipped = 0, []
+    for member in _billable_staff(db, venue_id):
+        clash = db.execute(
+            """SELECT 1 FROM leave_request
+               WHERE person_id = ? AND venue_id = ? AND status IN ('pending', 'approved')
+               AND end_date >= ? AND start_date <= ?""",
+            (member["person_id"], venue_id, start_date, end_date),
+        ).fetchone()
+        if clash:
+            skipped.append(member["name"])
+            continue
+        cur = db.execute(
+            """INSERT INTO leave_request
+               (person_id, venue_id, start_date, end_date, leave_type, start_portion, end_portion,
+                note, status, decided_at, decided_by_person_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', datetime('now'), ?)""",
+            (member["person_id"], venue_id, start_date, end_date, leave_type, start_portion,
+             end_portion, note, flask.g.person["id"] if flask.g.person else None),
+        )
+        freeze_counts(db, cur.lastrowid)
+        added += 1
+    db.commit()
+
+    if not added and not skipped:
+        flask.flash("No staff to add leave for.", "error")
+    else:
+        message = f"Leave added for {added} staff member{'' if added == 1 else 's'}."
+        if skipped:
+            message += (f" Skipped {len(skipped)} who already had leave booked over those dates: "
+                        f"{', '.join(skipped)}.")
+        flask.flash(message)
+    return flask.redirect(flask.url_for("rota_grid.leave_queue"))
 
 
 # ---------- Event tags (spec §10) ----------

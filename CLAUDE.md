@@ -21,18 +21,33 @@ re-deciding something already recorded here.
 
 ## Decisions
 
-### 2026-09-16 — Leave types, allowances and blocked dates: design agreed, NOT built
+### 2026-09-16 — Leave types, allowances and blocked dates: BUILT
 
 The full design is in **`docs/leave-design.md`** — read it before touching leave. Agreed with
-the owner 15-16 September 2026; no code written. Headlines, so this file is enough to avoid a
-wrong turn: five leave types, of which only paid leave reduces a balance; lieu is recorded but
-has NO earned ledger; allowance is `full_time_allowance x (usual days per week / full_time days
-per week)`, capped, editable, NOT a flat 28 for everyone; every leave record stores hours as
-well as days from day one so the 12.07% irregular-hours model can be added later without a
-migration; days/hours are frozen at approval so history can't shift; carry-over is entered by
-hand, never automatic. `app/leave.py::days_taken_count()` has a live bug — a missing
-availability defaults every weekday to "worked", so a week's leave counts as 7 days; fix it in
-step 1, before the number becomes a balance people argue about.
+the owner 15-16 September 2026 and built in three steps, all of them shipped. Headlines, so
+this file is enough to avoid a wrong turn:
+
+- **Five leave types, of which only paid leave reduces a balance.** Lieu is recorded but has
+  NO earned ledger, so there is no lieu balance to show.
+- **Allowance is `full_time_allowance x (usual days per week / full_time days per week)`**,
+  rounded UP to the next half day, never below the statutory minimum, editable, and NOT a flat
+  28 for everyone — statutory holiday is 5.6 WEEKS, so a flat 28 gives a two-day-a-week cleaner
+  roughly two and a half times their entitlement. A NULL `allowance_days` means "work it out";
+  a number means somebody typed it and it is never recalculated over.
+- **Days and hours are frozen at approval** (`leave.freeze_counts`) so editing an availability
+  cannot rewrite last year's history. Every record stores hours as well as days, so the 12.07%
+  irregular-hours model can be added later without a migration.
+- **Carry-over is entered by hand, never automatic**, one row per person per holiday year.
+- **Paid leave reaches the payroll report** in days and hours but is deliberately NOT added to
+  gross pay: RotaPulse does not calculate holiday pay, because for variable hours that is a
+  52-week average and it belongs with payroll.
+- **Blocked dates** (`leave_block` + `leave_block_role`) stop STAFF requesting leave, never the
+  admin, and never apply to sick or maternity. A block with no roles applies to everyone; a
+  block with roles does not catch somebody with no role set.
+
+The availability bug is fixed: `leave.working_pattern()` returns None when availability was
+never set, instead of the old default-to-worked that counted a week's leave as 7 days. Anything
+that cannot be counted is now NAMED on screen rather than shown as nought.
 
 
 ### 2026-09-10 — Affiliate attribution via Rewardful

@@ -83,4 +83,87 @@
     <button type="submit" class="btn-primary">Add leave</button>
   </form>
 </div>
+
+<div class="panel">
+  <h2>Add leave for everyone</h2>
+  <p class="hint">For a shutdown — the first week in January, say. Everyone gets the same dates, straight to
+    approved. Anyone who already has leave booked over those dates is skipped, not double-booked.</p>
+  <form method="post" action="{{ url_for('rota_grid.create_bulk_leave') }}"
+        onsubmit="return confirm('Add this leave for every member of staff?');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="bulk_leave_type">Type</label>
+    <select id="bulk_leave_type" name="leave_type">
+      {% for key, label in leave_types %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+    </select>
+    <label for="bulk_start_date">From</label>
+    <input type="date" id="bulk_start_date" name="start_date" required>
+    <label for="bulk_end_date">To</label>
+    <input type="date" id="bulk_end_date" name="end_date" required>
+    <div class="leave-halves">
+      <div>
+        <label for="bulk_start_portion">First day</label>
+        <select id="bulk_start_portion" name="start_portion">
+          <option value="full">All day</option>
+          <option value="half">Half day (from midday)</option>
+        </select>
+      </div>
+      <div>
+        <label for="bulk_end_portion">Last day</label>
+        <select id="bulk_end_portion" name="end_portion">
+          <option value="full">All day</option>
+          <option value="half">Half day (until midday)</option>
+        </select>
+      </div>
+    </div>
+    <label for="bulk_note">Note (optional)</label>
+    <input type="text" id="bulk_note" name="note" maxlength="200" placeholder="e.g. January shutdown">
+    <button type="submit" class="btn-primary">Add leave for everyone</button>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Blocked dates</h2>
+  <p class="hint">Dates you need full cover on. Staff can't request leave over them and are told why; you can
+    still add leave yourself if you need to make an exception. Sick and maternity leave are never blocked.</p>
+
+  {% if not blocks %}<p class="hint">No dates blocked.</p>{% endif %}
+  {% for block in blocks %}
+    <div class="day-list-item">
+      {{ block['start_date']|uk_date }}{% if block['end_date'] != block['start_date'] %} to {{ block['end_date']|uk_date }}{% endif %}
+      {% if block['note'] %}<span class="blocked-note">{{ block['note'] }}</span>{% endif %}
+      <span class="hint">
+        {% if block['role_names'] %}{{ block['role_names']|join(', ') }}{% else %}Everyone{% endif %}
+      </span>
+      <form method="post" action="{{ url_for('rota_grid.delete_leave_block', block_id=block['id']) }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="link-button">Unblock</button>
+      </form>
+    </div>
+  {% endfor %}
+
+  <h3>Block dates out</h3>
+  <form method="post" action="{{ url_for('rota_grid.create_leave_block') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="block_start_date">From</label>
+    <input type="date" id="block_start_date" name="start_date" required>
+    <label for="block_end_date">To</label>
+    <input type="date" id="block_end_date" name="end_date" required>
+    <label for="block_note">Why (shown to staff)</label>
+    <input type="text" id="block_note" name="note" maxlength="{{ block_note_max }}"
+           placeholder="e.g. Beer festival">
+    <p class="hint">{{ block_note_max }} characters — it has to fit on the rota.</p>
+    {% if roles %}
+      <fieldset class="block-roles">
+        <legend>Who it applies to</legend>
+        {% for role in roles %}
+          <label class="checkbox-row">
+            <input type="checkbox" name="role_ids" value="{{ role['id'] }}"> {{ role['name'] }}
+          </label>
+        {% endfor %}
+        <p class="hint">Tick none for everyone. If you tick a group, staff with no group set aren't blocked.</p>
+      </fieldset>
+    {% endif %}
+    <button type="submit" class="btn-primary">Block these dates</button>
+  </form>
+</div>
 {% endblock %}

@@ -53,6 +53,14 @@ ALLOWANCE_TYPES = {key for key, _l, _r, uses_allowance in LEAVE_TYPES if uses_al
 
 PORTIONS = {"full", "half"}
 
+# Blocked dates never apply to sick or maternity leave: you cannot block
+# somebody being ill, and both are admin-recorded anyway. Days in lieu are
+# blockable -- a day in lieu is a day off, and the point of a block is that
+# the landlord needs the cover.
+BLOCKABLE_TYPES = {"paid", "unpaid", "lieu"}
+# The owner set this figure. It sits in a rota day-header, not a paragraph.
+BLOCK_NOTE_MAX = 20
+
 # How far back to look when working out what one of a person's days is worth
 # in hours, for staff who have no figure on their record yet.
 USUAL_HOURS_LOOKBACK_WEEKS = 12
@@ -273,6 +281,161 @@ def days_taken_count(db, person_id: int, availability_json: str, year_start_mmdd
     return leave_days_in_window(db, person_id, availability_json, year_start, today, ("paid",))
 
 
+# --------------------------------------------------------------------------- #
+# Blocked dates (step 3 of docs/leave-design.md)
+# --------------------------------------------------------------------------- #
+#
+# Dates the landlord needs full cover on -- a beer festival, the village
+# carnival -- which staff cannot request leave against. Scoped by staff group
+# via venue_role, because a kitchen closure is not a reason to stop the bar
+# booking a week off.
+#
+# Two rules that are easy to get backwards:
+#
+#   * A block with NO roles attached applies to the WHOLE venue. An absent row
+#     means everyone, not nobody, so a block whose roles were later deleted
+#     keeps blocking rather than silently going quiet.
+#   * A block with roles attached does NOT catch somebody with no role set.
+#     They are not in the group, and guessing that they might be would refuse
+#     leave the landlord never meant to refuse. The admin screen says so.
+
+
+def _block_roles(db, block_ids):
+    """role ids per block, as a dict. One query rather than one per block."""
+    if not block_ids:
+        return {}
+    marks = ",".join("?" for _ in block_ids)
+    rows = db.execute(
+        f"SELECT leave_block_id, venue_role_id FROM leave_block_role WHERE leave_block_id IN ({marks})",
+        tuple(block_ids),
+    ).fetchall()
+    out = {}
+    for row in rows:
+        out.setdefault(row["leave_block_id"], set()).add(row["venue_role_id"])
+    return out
+
+
+def blocks_in_range(db, venue_id: int, start_date: str, end_date: str):
+    """Every block overlapping these dates, each with its role ids and their
+    names, oldest date first."""
+    rows = db.execute(
+        """SELECT * FROM leave_block
+           WHERE venue_id = ? AND end_date >= ? AND start_date <= ?
+           ORDER BY start_date, id""",
+        (venue_id, start_date, end_date),
+    ).fetchall()
+    role_ids = _block_roles(db, [row["id"] for row in rows])
+    names = {
+        row["id"]: row["name"]
+        for row in db.execute("SELECT id, name FROM venue_role WHERE venue_id = ?", (venue_id,)).fetchall()
+    }
+    out = []
+    for row in rows:
+        ids = sorted(role_ids.get(row["id"], set()))
+        out.append({
+            "id": row["id"],
+            "start_date": row["start_date"],
+            "end_date": row["end_date"],
+            "note": row["note"],
+            "role_ids": ids,
+            # A role deleted after the block was created leaves an id with no
+            # name; drop it from the display rather than printing "None".
+            "role_names": [names[rid] for rid in ids if rid in names],
+        })
+    return out
+
+
+def block_applies_to(block, job_role_id) -> bool:
+    if not block["role_ids"]:
+        return True
+    return job_role_id is not None and job_role_id in block["role_ids"]
+
+
+def blocks_for_person(db, venue_id: int, job_role_id, start_date: str, end_date: str):
+    """The blocks in this range that this person is actually caught by."""
+    return [b for b in blocks_in_range(db, venue_id, start_date, end_date)
+            if block_applies_to(b, job_role_id)]
+
+
+def job_role_id_for(db, venue_id: int, person_id: int):
+    row = db.execute(
+        "SELECT job_role_id FROM venue_membership WHERE venue_id = ? AND person_id = ?",
+        (venue_id, person_id),
+    ).fetchone()
+    return row["job_role_id"] if row else None
+
+
+def blocked_dates_for(db, venue_id: int, person_id: int, start_date: str, end_date: str,
+                      leave_type: str = "paid"):
+    """The individual dates inside a requested range that are blocked for this
+    person, each with the note explaining why.
+
+    Individual DATES, not the blocks themselves, because a request that only
+    partly overlaps should be told which days are the problem -- "the 12th and
+    13th are blocked" is something a person can act on; "your request clashes"
+    is not.
+    """
+    if leave_type not in BLOCKABLE_TYPES:
+        return []
+    blocks = blocks_for_person(db, venue_id, job_role_id_for(db, venue_id, person_id),
+                               start_date, end_date)
+    if not blocks:
+        return []
+    first = date.fromisoformat(start_date)
+    last = date.fromisoformat(end_date)
+    clashes = []
+    day = first
+    while day <= last:
+        iso = day.isoformat()
+        for block in blocks:
+            if block["start_date"] <= iso <= block["end_date"]:
+                clashes.append({"date": iso, "note": block["note"]})
+                break
+        day += timedelta(days=1)
+    return clashes
+
+
+def describe_blocked_dates(clashes) -> str:
+    """"12 September 2026 and 13 September 2026 (Beer festival)" -- for a flash
+    message.
+
+    Long ranges are summarised rather than listed: a fortnight-long block would
+    otherwise produce a flash nobody reads.
+    """
+    if not clashes:
+        return ""
+    notes = sorted({c["note"] for c in clashes if c["note"]})
+    if len(clashes) > 4:
+        text = (f"{len(clashes)} dates between {format_uk_date(clashes[0]['date'])} "
+                f"and {format_uk_date(clashes[-1]['date'])}")
+    else:
+        dates = [format_uk_date(c["date"]) for c in clashes]
+        text = dates[0] if len(dates) == 1 else ", ".join(dates[:-1]) + " and " + dates[-1]
+    if notes:
+        text += " (" + ", ".join(notes) + ")"
+    return text
+
+
+def upcoming_blocks_for(db, venue_id: int, person_id: int, today=None, months_ahead: int = 12):
+    """What a staff member is shown BEFORE they pick their dates. Being refused
+    after the fact is annoying; seeing the unavailable dates first is not."""
+    today = today or uk_today()
+    horizon = today + timedelta(days=31 * months_ahead)
+    return blocks_for_person(db, venue_id, job_role_id_for(db, venue_id, person_id),
+                             today.isoformat(), horizon.isoformat())
+
+
+def blocks_by_date(db, venue_id: int, date_strs):
+    """Blocks keyed by date, for the rota grid's day headers, so a day that
+    nobody can book off explains itself."""
+    if not date_strs:
+        return {}
+    out = {}
+    for block in blocks_in_range(db, venue_id, min(date_strs), max(date_strs)):
+        for iso in date_strs:
+            if block["start_date"] <= iso <= block["end_date"]:
+                out.setdefault(iso, []).append(block)
+    return out
 # --------------------------------------------------------------------------- #
 # Allowances (step 2 of docs/leave-design.md)
 # --------------------------------------------------------------------------- #
