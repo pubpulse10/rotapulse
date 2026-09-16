@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Leave report — RotaPulse{% endblock %}
+{% block content %}
+<div class="panel">
+  <h1>Leave report</h1>
+  <p class="hint">Only paid leave comes off a holiday balance. Sick, unpaid, maternity and days in lieu are
+    recorded and shown here, but don't reduce anyone's entitlement.</p>
+
+  <form method="get">
+    <label for="start">From</label>
+    <input type="date" id="start" name="start" value="{{ start_date }}">
+    <label for="end">To</label>
+    <input type="date" id="end" name="end" value="{{ end_date }}">
+    <button type="submit" class="btn-secondary">Update</button>
+  </form>
+  <p>
+    <a class="btn-secondary" href="{{ url_for('leave_report.export_csv', start=start_date, end=end_date) }}">Export CSV</a>
+    <a class="btn-secondary" href="{{ url_for('leave_report.export_pdf', start=start_date, end=end_date) }}">Export PDF</a>
+    <a class="btn-secondary" href="{{ url_for('rota_grid.leave_queue') }}">Leave requests</a>
+  </p>
+
+  <h2>Taken between {{ start_date|uk_date }} and {{ end_date|uk_date }}</h2>
+  <table>
+    <tr>
+      <th>Staff</th>
+      {% for label in type_labels %}<th class="num">{{ label }}</th>{% endfor %}
+      <th class="num">Total</th>
+    </tr>
+    {% for row in period %}
+      <tr>
+        <td><a href="{{ url_for('admin_config.edit_staff', membership_id=row['membership_id']) }}">{{ row['name'] }}</a></td>
+        {% if row['countable'] %}
+          {% for key in type_keys %}<td class="num">{{ '%g'|format(row['by_type'][key]) }}</td>{% endfor %}
+          <td class="num"><strong>{{ '%g'|format(row['total']) }}</strong></td>
+        {% else %}
+          <td class="num" colspan="{{ type_keys|length + 1 }}">Working days not set, so their leave can't be counted</td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+  </table>
+  {% if not period %}<p class="hint">No staff records yet.</p>{% endif %}
+</div>
+
+<div class="panel">
+  {# Deliberately the holiday YEAR, not the dates picked above: a position only
+     means anything against the year it belongs to. #}
+  <h2>Holiday position this year</h2>
+  <p class="hint">Year runs {{ year_start|uk_date }} to {{ year_end|uk_date }}, whatever dates are chosen above.</p>
+  <table>
+    <tr>
+      <th>Staff</th>
+      <th class="num">Allowance</th>
+      <th class="num">Carried over</th>
+      <th class="num">Total</th>
+      <th class="num">Taken</th>
+      <th class="num">Booked ahead</th>
+      <th class="num">Left to book</th>
+    </tr>
+    {% for pos in positions %}
+      <tr>
+        <td><a href="{{ url_for('admin_config.edit_staff', membership_id=pos['membership_id']) }}">{{ pos['name'] }}</a></td>
+        {% if pos['countable'] and pos['total'] is not none %}
+          <td class="num">{{ '%g'|format(pos['allowance']['days']) }}</td>
+          <td class="num">{{ '%g'|format(pos['carried_over']) }}</td>
+          <td class="num">{{ '%g'|format(pos['total']) }}</td>
+          <td class="num">{{ '%g'|format(pos['taken']) }}</td>
+          <td class="num">{{ '%g'|format(pos['booked']) }}</td>
+          <td class="num"><strong>{{ '%g'|format(pos['remaining']) }}</strong></td>
+        {% else %}
+          <td class="num" colspan="6">
+            {% if not pos['countable'] %}Working days not set{% else %}No allowance set yet{% endif %}
+            — <a href="{{ url_for('admin_config.edit_staff', membership_id=pos['membership_id']) }}">put that right</a>
+          </td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

@@ -439,6 +439,59 @@ def position(db, person_id: int, membership_id: int, detail, settings, today=Non
     }
 
 
+def paid_leave_in_period(db, venue_id: int, start_date: str, end_date: str):
+    """Paid leave each person took in a period, in days and in hours.
+
+    For the payroll report, which counts clocked hours only and so had no idea
+    holiday existed — whoever runs the wages was being handed a figure with the
+    holiday silently missing from it.
+
+    Hours are days times their usual daily hours, which is what a day off is
+    worth for somebody part-time (statutory holiday is defined in WEEKS, so a
+    day of leave is one of THEIR days: two hours for a cleaner, six or seven
+    for bar staff). None when there is nothing to value it with — an honest
+    blank beats a number somebody might pay against.
+
+    Holiday PAY is deliberately not calculated: for variable hours that is a
+    52-week average and it belongs with payroll, not a rota app.
+    """
+    window_start = date.fromisoformat(start_date)
+    window_end = date.fromisoformat(end_date)
+    rows = db.execute(
+        """SELECT DISTINCT person.id AS person_id, person.name,
+                  rota_staff_detail.availability, rota_staff_detail.usual_daily_hours,
+                  rota_staff_detail.holiday_pay_rolled_up
+           FROM leave_request
+           JOIN person ON person.id = leave_request.person_id
+           JOIN venue_membership ON venue_membership.person_id = person.id
+               AND venue_membership.venue_id = leave_request.venue_id
+           LEFT JOIN rota_staff_detail ON rota_staff_detail.venue_membership_id = venue_membership.id
+           WHERE leave_request.venue_id = ? AND leave_request.status = 'approved'
+           AND leave_request.leave_type = 'paid'
+           AND leave_request.end_date >= ? AND leave_request.start_date <= ?
+           ORDER BY person.name""",
+        (venue_id, start_date, end_date),
+    ).fetchall()
+
+    out = []
+    for row in rows:
+        days = leave_days_in_window(db, row["person_id"], row["availability"], window_start, window_end, ("paid",))
+        if days == 0:
+            continue
+        hours = None
+        if days is not None:
+            per_day = usual_daily_hours(db, row["person_id"], venue_id, row["usual_daily_hours"])
+            if per_day is not None:
+                hours = round(days * per_day, 2)
+        out.append({
+            "name": row["name"],
+            "days": days,
+            "hours": hours,
+            "rolled_up": bool(row["holiday_pay_rolled_up"]),
+        })
+    return out
+
+
 def describe_booking(row) -> str:
     """"3 August 2026 to 5 August 2026", with any half days spelled out.
     Plain ASCII: this text goes out by SMS as well as email."""

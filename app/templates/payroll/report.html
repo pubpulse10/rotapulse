@@ -130,6 +130,31 @@
     <p class="hint">{{ pending_hours }} of the hours below are still awaiting admin approval (unplanned shifts or early starts) — figures may change. <a href="{{ url_for('rota_grid.approvals_queue') }}">Review approvals</a>.</p>
   {% endif %}
 
+  {% if paid_leave %}
+    {# The report counts clocked hours only, so holiday was silently absent
+       from the figures going to whoever runs the wages. Deliberately its own
+       block and NOT added to the gross pay total: RotaPulse does not work out
+       holiday pay (docs/leave-design.md). #}
+    <h2>Paid leave in this period</h2>
+    <p class="hint">Not included in the hours or pay above. RotaPulse doesn't work out holiday pay — for variable
+      hours that's a 52-week average, which is payroll's job.</p>
+    <table>
+      <tr><th>Staff</th><th class="num">Days</th><th class="num">Hours</th><th></th></tr>
+      {% for entry in paid_leave %}
+        <tr>
+          <td>{{ entry['name'] }}</td>
+          <td class="num">{{ '%g'|format(entry['days']) if entry['days'] is not none else '—' }}</td>
+          <td class="num">{{ '%g'|format(entry['hours']) if entry['hours'] is not none else '—' }}</td>
+          <td>
+            {% if entry['rolled_up'] %}<span class="badge badge-unnotified">Holiday pay rolled up — don't pay again</span>
+            {% elif entry['days'] is none %}<span class="hint">Working days not set, so this can't be counted</span>
+            {% elif entry['hours'] is none %}<span class="hint">No usual daily hours set</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+
   {% if by_person %}<h2>Shift-by-shift detail</h2>{% endif %}
   {% for person_id, entry in by_person.items() %}
     <h3>{{ entry['name'] }}</h3>

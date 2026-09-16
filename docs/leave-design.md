@@ -1,6 +1,12 @@
 # Leave — design
 
-**Status: agreed, not built.** No code has been written for any of this.
+**Status: steps 1 and 2 are built and live. Step 3 is not.**
+
+| Step | What | State |
+| --- | --- | --- |
+| 1 | Types, half days, approval notification, the availability bug | Built, `118a562` |
+| 2 | Allowances, carry-over, both reports, paid leave on payroll | Built |
+| 3 | Blocked dates, bulk leave button | Not started |
 
 Agreed with Steve (owner) over 15–16 September 2026, prompted by two things: RotaPulse
 records leave as a single undifferentiated "away" with no types and no balance, and a
@@ -358,15 +364,26 @@ means venue-wide.
 
 ## Order of work
 
-**1. Types, half days, and the approval notification.** All on the same screens. Existing
-leave becomes paid leave. Fix the availability bug here, before the number means money.
+**1. Types, half days, and the approval notification.** DONE. All on the same screens.
+Existing leave became paid leave. The availability bug was fixed here, before the number
+meant money.
 
-**2. Allowances and the reports.** Venue full-time allowance and days per week, per-person
-allowance with pro-rata and the statutory warning, usual daily hours, carry-over, the
-per-person position, the all-staff date-ranged report with exports, and paid leave on the
-payroll report.
+**2. Allowances and the reports.** DONE. Venue full-time allowance and days per week,
+per-person allowance with pro-rata and the statutory warning, usual daily hours,
+carry-over, the per-person position, the all-staff date-ranged report with exports, and
+paid leave on the payroll report.
 
-**3. Blocked dates and the bulk leave button.**
+Two things came out differently from the plan above, both deliberate:
+
+- **No `allowance_is_manual` column.** A NULL allowance means "work it out" and a number
+  means somebody typed it. That is the same information in one column instead of two that
+  can contradict each other.
+- **The all-staff report shows the holiday position for the holiday YEAR**, not for the
+  date range picked at the top. A position only means anything against the year it belongs
+  to; re-basing it on an arbitrary range would produce a "remaining" figure that is true of
+  nothing. The page says so where it could otherwise be mistaken.
+
+**3. Blocked dates and the bulk leave button.** NOT STARTED.
 
 ---
 

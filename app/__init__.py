@@ -130,6 +130,7 @@ def create_app():
     from app.media import media_bp
     from app.onboarding import onboard_bp
     from app.payroll import payroll_bp
+    from app.leave_report import leave_report_bp
     from app.rota_grid import rota_bp
     from app.rota_login import login_bp
     from app.staff_portal import staff_bp
@@ -142,6 +143,7 @@ def create_app():
     app.register_blueprint(rota_bp)
     app.register_blueprint(staff_bp)
     app.register_blueprint(payroll_bp)
+    app.register_blueprint(leave_report_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(billing_bp)
     app.register_blueprint(media_bp)

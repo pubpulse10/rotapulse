@@ -16,6 +16,7 @@ import flask
 from app.costs import shift_ends_at
 from app.date_format import format_uk_date, format_uk_time
 from app.db import get_db
+from app.leave import paid_leave_in_period
 from app.pay_periods import period_containing
 from app.rota_auth import register_identity, require_permission
 from app.uk_time import uk_now, uk_today
@@ -237,6 +238,7 @@ def report():
     return flask.render_template(
         "payroll/report.html", by_person=by_person, pending_hours=pending_hours,
         attention=attention, summary=_summary(by_person), start_date=start_date, end_date=end_date,
+        paid_leave=paid_leave_in_period(db, venue["id"], start_date, end_date),
     )
 
 
@@ -283,6 +285,20 @@ def export_csv():
         writer.writerow(["All staff", "TOTAL", "", "", f"{summary['total_hours']:.2f}", f"{summary['total_pay']:.2f}", ""])
     if pending_hours:
         writer.writerow([f"{pending_hours} of the hours above are still awaiting admin approval."])
+
+    paid_leave = paid_leave_in_period(db, venue["id"], start_date, end_date)
+    if paid_leave:
+        writer.writerow([])
+        writer.writerow(["PAID LEAVE IN THIS PERIOD - not included in the hours or pay above."])
+        writer.writerow(["Name", "Days", "Hours", "Note"])
+        for entry in paid_leave:
+            writer.writerow([
+                entry["name"],
+                f"{entry['days']:g}" if entry["days"] is not None else "",
+                f"{entry['hours']:g}" if entry["hours"] is not None else "",
+                "Holiday pay is rolled up into their rate - do not pay again" if entry["rolled_up"]
+                else ("" if entry["days"] is not None else "Working days not set, so this cannot be counted"),
+            ])
 
     attention = _needs_attention(db, venue["id"], start_date, end_date, by_person, uk_now())
     missing = _attention_export_rows(attention)
@@ -400,6 +416,27 @@ def export_pdf():
                 f"{pending_hours} of the hours above are still awaiting admin approval — figures may change.",
                 styles["Normal"],
             ))
+
+    paid_leave = paid_leave_in_period(db, venue["id"], start_date, end_date)
+    if paid_leave:
+        elements.append(Paragraph("Paid leave in this period", styles["Heading2"]))
+        leave_rows = [["Name", "Days", "Hours", "Note"]]
+        for entry in paid_leave:
+            leave_rows.append([
+                entry["name"],
+                f"{entry['days']:g}" if entry["days"] is not None else "",
+                f"{entry['hours']:g}" if entry["hours"] is not None else "",
+                "Rolled up - do not pay again" if entry["rolled_up"]
+                else ("" if entry["days"] is not None else "Working days not set"),
+            ])
+        leave_table = Table(leave_rows, colWidths=[130, 50, 50, 220])
+        leave_table.setStyle(TableStyle(navy_header + [("FONTSIZE", (0, 0), (-1, -1), 9)]))
+        elements.append(leave_table)
+        elements.append(Paragraph(
+            "Not included in the hours or pay above. RotaPulse does not work out holiday pay: for variable "
+            "hours that is a 52-week average, which is payroll's job.",
+            styles["Normal"],
+        ))
 
     if missing or attention["no_pay_rate"]:
         elements.append(Paragraph("Not included in these totals", styles["Heading2"]))
