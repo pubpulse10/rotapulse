@@ -16,6 +16,7 @@ from app import config
 from app.billing import enforce_band
 from app.consent import erase_person_sensitive_data
 from app.db import get_app_id, get_db
+from app.leave import carried_over_days, holiday_year_bounds, position, usual_daily_hours
 from app.geocoding import geocode_postcode
 from app.notification_settings import METHODS, NOTIFICATION_TYPES
 from app.notifications import send_email, send_sms
@@ -115,7 +116,8 @@ def settings():
         db.execute(
             """UPDATE venue_settings SET pay_period_type = ?, pay_period_interval_weeks = ?,
                pay_period_anchor_date = ?, pay_period_month_end_day = ?, pay_day_offset = ?,
-               holiday_year_start_date = ?, target_staff_cost_percent = ?
+               holiday_year_start_date = ?, target_staff_cost_percent = ?,
+               full_time_allowance_days = ?, full_time_days_per_week = ?
                WHERE venue_id = ?""",
             (
                 form.get("pay_period_type", "weekly"),
@@ -125,6 +127,13 @@ def settings():
                 form.get("pay_day_offset", type=int),
                 holiday_year_start_date,
                 form.get("target_staff_cost_percent", type=float),
+                # Statutory holiday is 5.6 WEEKS, so the venue states what a
+                # full-time year is worth and each person pro-rates off it
+                # (app/leave.py::calculated_allowance). Falling back to the
+                # 28/5 defaults rather than accepting a blank keeps every
+                # allowance computable.
+                form.get("full_time_allowance_days", type=float) or 28,
+                form.get("full_time_days_per_week", type=float) or 5,
                 venue_id,
             ),
         )
@@ -434,28 +443,72 @@ def edit_staff(membership_id):
             pay_rate = form.get("hourly_pay_rate", type=float) or 0
         else:
             pay_rate = detail["hourly_pay_rate"] if detail else 0
+        # Blank means "work it out" for both of these: an allowance is only
+        # pinned when the landlord types one, and usual daily hours fall back
+        # to the person's recent shifts (app/leave.py).
+        allowance_days = form.get("allowance_days", type=float)
+        hours_per_day = form.get("usual_daily_hours", type=float)
         db.execute(
-            """INSERT INTO rota_staff_detail (venue_membership_id, hourly_pay_rate, home_address, availability, start_date)
-               VALUES (?, ?, ?, ?, ?)
+            """INSERT INTO rota_staff_detail (venue_membership_id, hourly_pay_rate, home_address, availability,
+                   start_date, allowance_days, usual_daily_hours, holiday_pay_rolled_up)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(venue_membership_id) DO UPDATE SET
                hourly_pay_rate = excluded.hourly_pay_rate,
                home_address = excluded.home_address,
                availability = excluded.availability,
-               start_date = excluded.start_date""",
+               start_date = excluded.start_date,
+               allowance_days = excluded.allowance_days,
+               usual_daily_hours = excluded.usual_daily_hours,
+               holiday_pay_rolled_up = excluded.holiday_pay_rolled_up""",
             (
                 membership_id, pay_rate, form.get("home_address", "").strip() or None,
                 json.dumps(availability), form.get("start_date") or None,
+                allowance_days, hours_per_day, 1 if form.get("holiday_pay_rolled_up") else 0,
             ),
         )
+
+        # Carry-over is entered by hand, one row per holiday year, never rolled
+        # over automatically (docs/leave-design.md). A blank clears it.
+        settings_row = db.execute("SELECT * FROM venue_settings WHERE venue_id = ?", (venue_id,)).fetchone()
+        year_start, _year_end = holiday_year_bounds(
+            settings_row["holiday_year_start_date"] if settings_row else None
+        )
+        carried = form.get("carried_over_days", type=float)
+        if carried:
+            db.execute(
+                """INSERT INTO leave_carry_over (venue_membership_id, year_start_date, days)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(venue_membership_id, year_start_date) DO UPDATE SET
+                   days = excluded.days, updated_at = datetime('now')""",
+                (membership_id, year_start.isoformat(), carried),
+            )
+        else:
+            db.execute(
+                "DELETE FROM leave_carry_over WHERE venue_membership_id = ? AND year_start_date = ?",
+                (membership_id, year_start.isoformat()),
+            )
         db.commit()
         enforce_band(venue_id)
         flask.flash(f"{name}'s record updated.")
         return flask.redirect(flask.url_for("admin_config.staff_list"))
 
     availability = json.loads(detail["availability"]) if detail and detail["availability"] else {}
+    settings_row = db.execute("SELECT * FROM venue_settings WHERE venue_id = ?", (venue_id,)).fetchone()
+    holiday = position(db, membership["person_id"], membership_id, detail, settings_row)
+    # What last year's balance came to, offered as the carry-over suggestion.
+    # A suggestion and not a default: the agreed figure often differs (The Cock
+    # shuts in January and makes staff use theirs up), and it is worked out
+    # using this year's allowance because last year's was never stored.
+    previous = position(
+        db, membership["person_id"], membership_id, detail, settings_row,
+        today=holiday["year_start"] - timedelta(days=1),
+    )
+    carried = carried_over_days(db, membership_id, holiday["year_start"])
     return flask.render_template(
         "admin/staff_edit.html", person=person, membership=membership, detail=detail,
         roles=roles, availability=availability, days=DAYS, editable_access=editable_access,
+        holiday=holiday, carried_over=carried, carry_over_suggestion=previous["remaining"],
+        usual_daily_hours_suggestion=usual_daily_hours(db, membership["person_id"], venue_id),
     )
 
 

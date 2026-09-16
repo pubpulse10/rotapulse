@@ -362,6 +362,21 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 .leave-halves { display: flex; gap: 12px; flex-wrap: wrap; }
 .leave-halves > div { flex: 1 1 200px; }
 
+/* Holiday position: allowance + carried over = total, minus taken and booked.
+   Narrow on purpose — a short column of figures, not a data table. */
+.holiday-position { max-width: 340px; }
+.holiday-position .grand-total td { font-weight: 700; border-top: 2px solid var(--color-text); }
+.holiday-summary { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.holiday-deadline {
+  flex: 1 1 200px;
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: #efe6fb;
+  color: var(--color-leave);
+}
+.holiday-deadline strong { font-size: 1.6rem; display: block; }
+
 /* Draggable shift chips (app/static/rota_dragdrop.js). touch-action: none —
    confirmed live that touch-action: pan-x pan-y does NOT reliably hand
    control back once a hold arms a drag; WebKit can commit to a native pan

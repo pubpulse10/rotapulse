@@ -52,6 +52,18 @@
       </select>
     </div>
 
+    <label for="full_time_allowance_days">Holiday allowance for a full-time year (days)</label>
+    <input type="number" step="0.5" min="0" id="full_time_allowance_days" name="full_time_allowance_days"
+           value="{{ settings['full_time_allowance_days'] if settings else 28 }}">
+    <label for="full_time_days_per_week">Days a week that counts as full time</label>
+    <input type="number" step="0.5" min="1" max="7" id="full_time_days_per_week" name="full_time_days_per_week"
+           value="{{ settings['full_time_days_per_week'] if settings else 5 }}">
+    <p class="hint">
+      Everyone else is worked out from these two: somebody working three days a week gets three fifths of the
+      full-time allowance. The law sets holiday in weeks (5.6 of them), not days, so 28 and 5 give exactly the
+      statutory minimum. You can give more. Each person's figure can be overridden on their own record.
+    </p>
+
     <label for="target_staff_cost_percent">Target staff cost %</label>
     <input type="number" step="0.1" id="target_staff_cost_percent" name="target_staff_cost_percent"
            value="{{ settings['target_staff_cost_percent'] if settings else '' }}">

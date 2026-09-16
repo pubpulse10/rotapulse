@@ -47,10 +47,80 @@
     <label for="home_address">Home address</label>
     <textarea id="home_address" name="home_address">{{ detail['home_address'] if detail else '' }}</textarea>
 
+  {% if holiday %}
+    <h2>Holiday</h2>
+    {% if not holiday['countable'] %}
+      <p class="hint">Tick the days they normally work, below, and their holiday can be counted. Until then it can't be:
+        a day of holiday means one of <em>their</em> working days.</p>
+    {% else %}
+      <table class="holiday-position">
+        {% if holiday['allowance']['days'] is not none %}
+          <tr><td>Allowance</td><td class="num">{{ '%g'|format(holiday['allowance']['days']) }}</td></tr>
+          {% if carried_over %}<tr><td>Carried over</td><td class="num">{{ '%g'|format(carried_over) }}</td></tr>{% endif %}
+          <tr class="grand-total"><td>Total</td><td class="num">{{ '%g'|format(holiday['total']) }}</td></tr>
+        {% endif %}
+        <tr><td>Taken</td><td class="num">{{ '%g'|format(holiday['taken']) }}</td></tr>
+        <tr><td>Booked ahead</td><td class="num">{{ '%g'|format(holiday['booked']) }}</td></tr>
+        {% if holiday['remaining'] is not none %}
+          <tr class="grand-total"><td>Left to book</td><td class="num">{{ '%g'|format(holiday['remaining']) }}</td></tr>
+        {% endif %}
+      </table>
+      <p class="hint">Holiday year ends {{ holiday['year_end']|uk_date }}.
+        {% if holiday['allowance']['source'] == 'calculated' %}
+          Worked out from {{ holiday['allowance']['days_per_week'] }} days a week{% if holiday['allowance']['prorata_from'] %},
+          pro-rata from their start date of {{ holiday['allowance']['prorata_from']|uk_date }}{% endif %}.
+        {% elif holiday['allowance']['source'] == 'manual' %}Set by hand.{% endif %}
+      </p>
+      {% if holiday['allowance']['below_statutory'] %}
+        <p class="flash flash-error">This is below the statutory minimum of
+          {{ '%g'|format(holiday['allowance']['statutory_minimum']) }} days for someone working
+          {{ holiday['allowance']['days_per_week'] }} days a week. Being more generous is your call; being under isn't.</p>
+      {% endif %}
+      {% set other = [] %}
+      {% for key, days in holiday['by_type'].items() if key != 'paid' and days %}{% set _ = other.append(key|leave_label ~ ' ' ~ '%g'|format(days)) %}{% endfor %}
+      {% if other %}<p class="hint">Also this year: {{ other|join(' · ') }} (none of it comes off the holiday balance).</p>{% endif %}
+    {% endif %}
+
+    <label for="allowance_days">Holiday allowance (days)</label>
+    <input type="number" step="0.5" min="0" id="allowance_days" name="allowance_days"
+           value="{{ detail['allowance_days'] if detail and detail['allowance_days'] is not none else '' }}"
+           placeholder="{{ '%g'|format(holiday['allowance']['days']) if holiday['allowance']['days'] is not none else 'set their working days first' }}">
+    <p class="hint">Leave blank to work it out from the days they work. Type a number to fix it.</p>
+
+    <label for="carried_over_days">Carried over from last year (days)</label>
+    <input type="number" step="0.5" min="0" id="carried_over_days" name="carried_over_days"
+           value="{{ '%g'|format(carried_over) if carried_over else '' }}">
+    <p class="hint">
+      {% if carry_over_suggestion %}They had {{ '%g'|format(carry_over_suggestion) }} left last year.{% endif %}
+      Nothing carries over on its own — whatever you agree, type it here.
+    </p>
+
+    <label for="usual_daily_hours">Usual daily hours</label>
+    <input type="number" step="0.25" min="0" id="usual_daily_hours" name="usual_daily_hours"
+           value="{{ detail['usual_daily_hours'] if detail and detail['usual_daily_hours'] is not none else '' }}"
+           placeholder="{{ usual_daily_hours_suggestion if usual_daily_hours_suggestion else 'from their shifts' }}">
+    <p class="hint">What one day off is worth in hours, for payroll. Blank uses the average of their recent shifts{% if usual_daily_hours_suggestion %}, currently {{ usual_daily_hours_suggestion }} hours{% endif %}.</p>
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="holiday_pay_rolled_up" name="holiday_pay_rolled_up"
+             {{ 'checked' if detail and detail['holiday_pay_rolled_up'] }}>
+      <label for="holiday_pay_rolled_up">Holiday pay is rolled up into their hourly rate</label>
+    </div>
+    <p class="hint">Tick if they already get holiday pay on every payslip, so payroll isn't prompted to pay it twice.</p>
+  {% endif %}
+
     <h2>Which days can they normally work?</h2>
+    {% if not availability %}
+      <p class="hint">Not set yet. Tick the days they normally work — their holiday is counted in those days, so
+        nothing can be worked out until this is filled in.</p>
+    {% endif %}
+    {# Ticked only when the record actually says so. These used to default to
+       ticked for somebody with no availability at all, which turned "we don't
+       know" into "works every day" the moment anybody saved the form — and a
+       7-day week is what made a week off count as 7 days of holiday. #}
     {% for day in days %}
       <div class="checkbox-row">
-        <input type="checkbox" id="available_{{ day }}" name="available_{{ day }}" {{ 'checked' if availability.get(day, True) }}>
+        <input type="checkbox" id="available_{{ day }}" name="available_{{ day }}" {{ 'checked' if availability.get(day) }}>
         <label for="available_{{ day }}">{{ day|capitalize }}</label>
       </div>
     {% endfor %}

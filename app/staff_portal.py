@@ -13,7 +13,7 @@ import flask
 
 from app.db import get_db
 from app.geo_distance import distance_metres
-from app.leave import LEAVE_TYPES, PORTIONS, STAFF_REQUESTABLE_TYPES, days_taken_count
+from app.leave import LEAVE_TYPES, PORTIONS, STAFF_REQUESTABLE_TYPES, position
 from app.media import save_attendance_photo
 from app.notification_settings import notify_admins
 from app.rota_auth import register_identity, require_permission
@@ -462,22 +462,22 @@ def leave():
         (person["id"], venue["id"]),
     ).fetchall()
 
-    detail = db.execute(
-        """SELECT rota_staff_detail.availability, venue_settings.holiday_year_start_date
-           FROM venue_membership
-           JOIN rota_staff_detail ON rota_staff_detail.venue_membership_id = venue_membership.id
-           JOIN venue_settings ON venue_settings.venue_id = venue_membership.venue_id
-           WHERE venue_membership.person_id = ? AND venue_membership.venue_id = ?""",
+    membership = db.execute(
+        "SELECT * FROM venue_membership WHERE person_id = ? AND venue_id = ?",
         (person["id"], venue["id"]),
     ).fetchone()
-    # None (not nought) when their availability isn't set: the page says so
-    # rather than showing a number that isn't true. See leave.working_pattern.
-    days_taken = None
-    if detail:
-        days_taken = days_taken_count(db, person["id"], detail["availability"], detail["holiday_year_start_date"])
+    detail = db.execute(
+        "SELECT * FROM rota_staff_detail WHERE venue_membership_id = ?", (membership["id"],)
+    ).fetchone() if membership else None
+    settings_row = db.execute("SELECT * FROM venue_settings WHERE venue_id = ?", (venue["id"],)).fetchone()
+    # Their own position: allowance, what they have taken, what they have
+    # already booked, and what is left. 'countable' is False when their
+    # availability isn't set, and the page says so rather than showing numbers
+    # that aren't true (see leave.working_pattern).
+    holiday = position(db, person["id"], membership["id"], detail, settings_row) if membership else None
 
     return flask.render_template(
-        "staff/leave.html", requests=requests_rows, days_taken=days_taken,
+        "staff/leave.html", requests=requests_rows, holiday=holiday,
         leave_types=[(key, label) for key, label, requestable, _a in LEAVE_TYPES if requestable],
     )
 

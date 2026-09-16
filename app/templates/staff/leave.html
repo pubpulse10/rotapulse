@@ -3,12 +3,34 @@
 {% block content %}
 <div class="panel">
   <h1>Leave</h1>
-  {% if days_taken is none %}
+  {% if not holiday or not holiday['countable'] %}
     {# leave.working_pattern returns None when availability was never set.
        Saying so beats printing a number that isn't true. #}
     <p class="hint">Your holiday can't be counted until your availability is set — ask your manager to add the days you normally work.</p>
   {% else %}
-    <p>Paid holiday taken this year: <strong>{{ '%g'|format(days_taken) }}</strong></p>
+    <div class="holiday-summary">
+      <table class="holiday-position">
+        {% if holiday['allowance']['days'] is not none %}
+          <tr><td>Your allowance</td><td class="num">{{ '%g'|format(holiday['allowance']['days']) }}</td></tr>
+          {% if holiday['carried_over'] %}<tr><td>Carried over</td><td class="num">{{ '%g'|format(holiday['carried_over']) }}</td></tr>{% endif %}
+          <tr class="grand-total"><td>Total</td><td class="num">{{ '%g'|format(holiday['total']) }}</td></tr>
+        {% endif %}
+        <tr><td>Taken so far</td><td class="num">{{ '%g'|format(holiday['taken']) }}</td></tr>
+        <tr><td>Booked ahead</td><td class="num">{{ '%g'|format(holiday['booked']) }}</td></tr>
+        {% if holiday['remaining'] is not none %}
+          <tr class="grand-total"><td>Left to book</td><td class="num">{{ '%g'|format(holiday['remaining']) }}</td></tr>
+        {% endif %}
+      </table>
+      {% if holiday['remaining'] is not none %}
+        <p class="holiday-deadline"><strong>{{ '%g'|format(holiday['remaining']) }}</strong>
+          day{{ '' if holiday['remaining'] == 1 else 's' }} to use before {{ holiday['year_end']|uk_date }}</p>
+      {% else %}
+        <p class="hint">Your manager hasn't set an allowance yet, so there's no figure for what's left.</p>
+      {% endif %}
+    </div>
+    {% set other = [] %}
+    {% for key, days in holiday['by_type'].items() if key != 'paid' and days %}{% set _ = other.append(key|leave_label ~ ' ' ~ '%g'|format(days)) %}{% endfor %}
+    {% if other %}<p class="hint">Also recorded this year: {{ other|join(' · ') }}. None of it comes off your holiday.</p>{% endif %}
   {% endif %}
 
   <h2>Request leave</h2>

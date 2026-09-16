@@ -25,7 +25,9 @@ built yet. The parts that matter here:
   fixed calendar year) — mirrors the pay-period settings' own pattern.
 """
 
+import calendar
 import json
+import math
 from datetime import date, timedelta
 
 from app.date_format import format_uk_date
@@ -207,45 +209,44 @@ def freeze_counts(db, leave_id: int) -> None:
     )
 
 
-def days_taken_count(db, person_id: int, availability_json: str, year_start_mmdd: str, today=None):
-    """Paid leave a person has used so far this holiday year.
+def leave_days_in_window(db, person_id: int, availability_json: str,
+                        window_start: date, window_end: date, types=("paid",)):
+    """Days of leave of the given types falling inside a window.
 
-    Paid only: the other four types are recorded and reported, but none of
-    them comes off a holiday balance (docs/leave-design.md).
-
-    Still stops at today — leave booked for next month has not been taken.
-    The per-person position screen in step 2 shows taken and booked ahead as
-    separate figures, which is the honest version of this one number.
+    One counter behind every figure on the position screen and the staff page,
+    so "taken", "booked ahead" and the by-type breakdown cannot disagree with
+    each other about what a day is.
 
     None means their availability isn't set, so their days cannot be counted
     at all. Callers must say so rather than show a nought.
     """
-    today = today or uk_today()
-    year_start = _current_holiday_year_start(year_start_mmdd, today)
     if working_pattern(availability_json) is None:
         return None
+    if window_end < window_start:
+        return 0.0
 
+    placeholders = ",".join("?" for _ in types)
     rows = db.execute(
-        """SELECT start_date, end_date, start_portion, end_portion, days_counted
-           FROM leave_request
-           WHERE person_id = ? AND status = 'approved' AND leave_type = 'paid'
-           AND end_date >= ?""",
-        (person_id, year_start.isoformat()),
+        f"""SELECT start_date, end_date, start_portion, end_portion, days_counted
+            FROM leave_request
+            WHERE person_id = ? AND status = 'approved' AND leave_type IN ({placeholders})
+            AND end_date >= ? AND start_date <= ?""",
+        (person_id, *types, window_start.isoformat(), window_end.isoformat()),
     ).fetchall()
 
     total = 0.0
     for row in rows:
         booked_start = date.fromisoformat(row["start_date"])
         booked_end = date.fromisoformat(row["end_date"])
-        start = max(booked_start, year_start)
-        end = min(booked_end, today)
+        start = max(booked_start, window_start)
+        end = min(booked_end, window_end)
         if end < start:
             continue
 
         # The frozen figure covers the whole booking, so it can only be used
         # when the whole booking falls inside the window being counted. One
-        # that straddles the year start, or runs past today, is counted live
-        # for the part that falls inside it.
+        # that straddles the window's edge is counted live for the part inside
+        # it — a half day at an end outside the window is not this window's.
         if start == booked_start and end == booked_end and row["days_counted"] is not None:
             total += float(row["days_counted"])
             continue
@@ -257,6 +258,185 @@ def days_taken_count(db, person_id: int, availability_json: str, year_start_mmdd
         )
         total += counted or 0.0
     return round(total, 2)
+
+
+def days_taken_count(db, person_id: int, availability_json: str, year_start_mmdd: str, today=None):
+    """Paid leave a person has used so far this holiday year.
+
+    Paid only: the other four types are recorded and reported, but none of
+    them comes off a holiday balance (docs/leave-design.md). Stops at today —
+    leave booked for next month has not been taken yet; position() below
+    reports that separately.
+    """
+    today = today or uk_today()
+    year_start = _current_holiday_year_start(year_start_mmdd, today)
+    return leave_days_in_window(db, person_id, availability_json, year_start, today, ("paid",))
+
+
+# --------------------------------------------------------------------------- #
+# Allowances (step 2 of docs/leave-design.md)
+# --------------------------------------------------------------------------- #
+
+def holiday_year_bounds(year_start_mmdd: str, today=None):
+    """First and last day of the holiday year that today falls in."""
+    today = today or uk_today()
+    start = _current_holiday_year_start(year_start_mmdd, today)
+    # A 29 February start has no 29 February next year: fall back to the last
+    # day of that month, the same rule pay_periods.py uses for a month end.
+    last_day = calendar.monthrange(start.year + 1, start.month)[1]
+    next_start = date(start.year + 1, start.month, min(start.day, last_day))
+    return start, next_start - timedelta(days=1)
+
+
+def usual_days_per_week(availability_json):
+    """How many days a week this person normally works, or None if unknown."""
+    pattern = working_pattern(availability_json)
+    if pattern is None:
+        return None
+    return sum(1 for worked in pattern.values() if worked)
+
+
+def _round_up_to_half(value: float) -> float:
+    """Always UP to the next half day. Rounding an allowance down can put it
+    below the statutory minimum — one day a week is 5.6 days, and 5.5 would be
+    short. Half a day in the staff member's favour is the cheap side to err on.
+    """
+    return math.ceil(value * 2) / 2
+
+
+def statutory_minimum_days(days_per_week):
+    """5.6 weeks, capped at 28 days — the statutory minimum for that pattern.
+
+    The author's understanding of the Working Time Regulations, not legal
+    advice; see the note at the end of docs/leave-design.md.
+    """
+    if not days_per_week:
+        return None
+    return round(min(5.6 * days_per_week, 28.0), 2)
+
+
+def calculated_allowance(full_time_allowance, full_time_days_per_week, days_per_week):
+    """The venue's full-time allowance, pro-rated by working pattern.
+
+    With the 28/5 defaults this is exactly 5.6 weeks. It also generalises: a
+    venue giving 30 days to full-timers pro-rates correctly for everyone else.
+    """
+    if not days_per_week or not full_time_days_per_week or not full_time_allowance:
+        return None
+    share = float(full_time_allowance) * (days_per_week / float(full_time_days_per_week))
+    return _round_up_to_half(min(share, float(full_time_allowance)))
+
+
+def prorata_for_starter(allowance, start_date, year_start: date, year_end: date):
+    """Somebody who started part-way through the holiday year gets the share
+    of it they are actually here for."""
+    if not start_date or allowance is None:
+        return allowance
+    try:
+        started = date.fromisoformat(start_date)
+    except (ValueError, TypeError):
+        return allowance
+    if started <= year_start:
+        return allowance
+    if started > year_end:
+        return 0.0
+    days_here = (year_end - started).days + 1
+    days_in_year = (year_end - year_start).days + 1
+    return _round_up_to_half(allowance * days_here / days_in_year)
+
+
+def allowance_for(detail, settings, year_start: date, year_end: date):
+    """What this person's holiday allowance is, and where the figure came from.
+
+    A number on their record is one the landlord typed and is never
+    recalculated over the top of; NULL means work it out. Returns `days` of
+    None when availability isn't set, because then there is no pattern to
+    pro-rate by and a guess would be worse than saying so.
+    """
+    full_time = (settings["full_time_allowance_days"] if settings else None) or 28
+    full_time_week = (settings["full_time_days_per_week"] if settings else None) or 5
+    availability = detail["availability"] if detail else None
+    per_week = usual_days_per_week(availability)
+    statutory = statutory_minimum_days(per_week)
+
+    manual = detail["allowance_days"] if detail else None
+    if manual is not None:
+        days = float(manual)
+        source = "manual"
+        prorata_from = None
+    else:
+        calculated = calculated_allowance(full_time, full_time_week, per_week)
+        prorata_from = None
+        if calculated is not None and detail and detail["start_date"]:
+            after = prorata_for_starter(calculated, detail["start_date"], year_start, year_end)
+            if after != calculated:
+                prorata_from = detail["start_date"]
+                calculated = after
+        days = calculated
+        source = "calculated" if calculated is not None else "unknown"
+
+    return {
+        "days": days,
+        "source": source,
+        "days_per_week": per_week,
+        "prorata_from": prorata_from,
+        "statutory_minimum": statutory,
+        # Being more generous is always the landlord's call. Being accidentally
+        # under is the one that causes trouble.
+        "below_statutory": bool(days is not None and statutory is not None and days < statutory),
+    }
+
+
+def carried_over_days(db, membership_id: int, year_start: date) -> float:
+    row = db.execute(
+        "SELECT days FROM leave_carry_over WHERE venue_membership_id = ? AND year_start_date = ?",
+        (membership_id, year_start.isoformat()),
+    ).fetchone()
+    return float(row["days"]) if row else 0.0
+
+
+def position(db, person_id: int, membership_id: int, detail, settings, today=None):
+    """One staff member's holiday position for the holiday year they are in.
+
+    allowance + carried over = total; minus what they have taken and what they
+    have booked ahead, leaving what there is left to book. Taken and booked are
+    separate on purpose: "I have had 15 days" and "I have committed 19 of my
+    28" are different conversations, and showing only the first is how people
+    end up surprised in December.
+    """
+    today = today or uk_today()
+    year_start_mmdd = settings["holiday_year_start_date"] if settings else None
+    year_start, year_end = holiday_year_bounds(year_start_mmdd, today)
+    availability = detail["availability"] if detail else None
+
+    allowance = allowance_for(detail, settings, year_start, year_end)
+    carried = carried_over_days(db, membership_id, year_start)
+
+    taken = leave_days_in_window(db, person_id, availability, year_start, min(today, year_end), ("paid",))
+    booked = leave_days_in_window(db, person_id, availability, max(today + timedelta(days=1), year_start), year_end, ("paid",))
+    by_type = {
+        key: leave_days_in_window(db, person_id, availability, year_start, year_end, (key,))
+        for key in LEAVE_TYPE_LABELS
+    }
+
+    total = None if allowance["days"] is None else round(allowance["days"] + carried, 2)
+    remaining = None
+    if total is not None and taken is not None and booked is not None:
+        remaining = round(total - taken - booked, 2)
+
+    return {
+        "year_start": year_start,
+        "year_end": year_end,
+        "allowance": allowance,
+        "carried_over": carried,
+        "total": total,
+        "taken": taken,
+        "booked": booked,
+        "remaining": remaining,
+        "by_type": by_type,
+        # Nothing can be counted at all without a working pattern.
+        "countable": taken is not None,
+    }
 
 
 def describe_booking(row) -> str:

@@ -412,6 +412,34 @@ def init_schema(conn=None):
         # editing it arrives in step 2; until then leave.usual_daily_hours()
         # falls back to the average of their recently clocked shifts.
         _add_column_if_missing(conn, "rota_staff_detail", "usual_daily_hours", "NUMERIC")
+        # Holiday allowances (2026-09-16, step 2 of docs/leave-design.md).
+        # Statutory holiday is 5.6 WEEKS, so the venue states what a full-time
+        # year is worth and each person's allowance pro-rates by their own
+        # working pattern. A flat 28 for everybody would give a two-day-a-week
+        # cleaner roughly two and a half times their entitlement.
+        _add_column_if_missing(conn, "venue_settings", "full_time_allowance_days", "NUMERIC NOT NULL DEFAULT 28")
+        _add_column_if_missing(conn, "venue_settings", "full_time_days_per_week", "NUMERIC NOT NULL DEFAULT 5")
+        # NULL means "work it out from their pattern". A number is a figure the
+        # landlord typed, and is never recalculated over the top of.
+        _add_column_if_missing(conn, "rota_staff_detail", "allowance_days", "NUMERIC")
+        # 'fixed' is the model that exists. 'accrual' (12.07% of hours worked,
+        # for genuinely irregular-hours staff) is designed for but NOT built.
+        _add_column_if_missing(conn, "rota_staff_detail", "holiday_basis", "TEXT NOT NULL DEFAULT 'fixed'")
+        # Some pubs pay irregular-hours staff their holiday as a percentage on
+        # every payslip. For those people the payroll report must not prompt
+        # for holiday pay as well, or they get paid twice.
+        _add_column_if_missing(conn, "rota_staff_detail", "holiday_pay_rolled_up", "INTEGER NOT NULL DEFAULT 0")
+        # Carry-over is entered by hand, never rolled over automatically: the
+        # figure the landlord agrees often differs from the raw remainder (The
+        # Cock shuts the first week of January and makes staff use theirs up).
+        # One row per person per holiday year, so history survives.
+        conn.execute("""CREATE TABLE IF NOT EXISTS leave_carry_over (
+            venue_membership_id INTEGER NOT NULL REFERENCES venue_membership(id),
+            year_start_date TEXT NOT NULL,
+            days NUMERIC NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (venue_membership_id, year_start_date)
+        )""")
         # Ad-hoc/unplanned clock-in with admin approval (2026-08-18): 'origin'
         # marks a shift that was created BY a clock-in rather than rostered in
         # advance, purely for display (badge on the grid). The approval fields
