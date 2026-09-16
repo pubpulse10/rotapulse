@@ -119,7 +119,16 @@ def require_permission(*levels):
                     # "staff", since those (e.g. staff_portal.py) dereference
                     # g.person unguarded and support sessions have none.
                     if flask.request.method != "GET":
-                        flask.abort(403)
+                        # Was a bare abort(403), which rendered Werkzeug's
+                        # default "Forbidden" page: no explanation, no way
+                        # forward, and no clue that the cause is a support
+                        # session rather than a broken app. Reported live,
+                        # 2026-09-17 -- a venue setting was ticked and saved,
+                        # the save was refused, and the only sign was that
+                        # page. Still a 403: the request genuinely was
+                        # refused and nothing was written. Only the
+                        # presentation changes.
+                        return flask.render_template("support_readonly.html"), 403
                     return view(*args, **kwargs)
                 if "app_admin" in levels and len(levels) == 1:
                     from app import config

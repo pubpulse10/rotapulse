@@ -85,6 +85,17 @@
   {% set show_install_hint = request.endpoint in ["rota_login.login", "staff_portal.home"] %}
 
   <main class="content">
+    {% if support_readonly %}
+      {# A support session can open every admin screen. Without this the
+         controls look live, a save is refused with a 403, and anybody who
+         misses that page believes the change went through. #}
+      <div class="readonly-banner">
+        <strong>Viewing as PubPulse support — read-only.</strong>
+        Nothing on this screen can be saved. To make changes, sign out of support and log in as this
+        venue's own admin.
+        <a href="{{ support_logout_url }}">Sign out of support</a>
+      </div>
+    {% endif %}
     {% if show_install_hint %}
       <div class="install-hint" id="install-hint" hidden>
         <p class="install-hint-title">Keep your shifts one tap away</p>
@@ -125,6 +136,9 @@
 
   <script src="{{ url_for('static', filename='sw-register.js') }}" defer></script>
   <script src="{{ url_for('static', filename='nav.js') }}" defer></script>
+  {% if support_readonly %}
+    <script src="{{ url_for('static', filename='readonly-guard.js') }}?v={{ static_version('readonly-guard.js') }}" defer></script>
+  {% endif %}
   {% if show_install_hint %}
     <script src="{{ url_for('static', filename='install-hint.js') }}?v={{ static_version('install-hint.js') }}" defer></script>
   {% endif %}

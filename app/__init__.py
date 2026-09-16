@@ -85,6 +85,21 @@ def create_app():
     app.jinja_env.filters["leave_label"] = lambda key: LEAVE_TYPE_LABELS.get(key or "paid", "Leave")
 
     @app.context_processor
+    def inject_support_readonly():
+        """True for a family-admin support session, which may look at every
+        admin screen but cannot save anything (app/rota_auth.py).
+
+        Deliberately g.get(): family_admin's own blueprint never runs
+        register_identity, so permission_levels is unset there -- and that
+        blueprint holds the ONE write a support session IS allowed (granting a
+        complimentary subscription), which must not be disabled.
+        """
+        return {
+            "support_readonly": flask.g.get("permission_levels") == {"support_readonly"},
+            "support_logout_url": config.PRICEPULSE_ADMIN_LOGOUT_URL,
+        }
+
+    @app.context_processor
     def inject_hub_url():
         # An owner session here isn't a RotaPulse-specific login at all —
         # it's the same shared PubPulse session cookie the sibling apps and

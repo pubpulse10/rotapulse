@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Read-only — RotaPulse{% endblock %}
+{% block content %}
+{#
+  Shown instead of Werkzeug's bare "Forbidden" when a family-admin support
+  session tries to save something (app/rota_auth.py::require_permission).
+
+  Same reasoning as csrf_error.html: the request genuinely was refused and
+  nothing was written, so it is still a 403 — but a default error page tells
+  the person nothing, offers no way forward, and leaves them unable to tell a
+  permissions rule from a broken app.
+#}
+<div class="panel">
+  <h1>That can't be saved from a support session</h1>
+  <p>You're signed in as <strong>PubPulse support</strong>, which can look at any pub's screens but
+    can't change anything. Nothing was saved just now.</p>
+
+  <p>This catches people out because the screen looks completely normal — support sessions can open
+    every admin page, so the form was there and the Save button was there.</p>
+
+  <h2>To make the change</h2>
+  <ol>
+    <li>Sign out of support.</li>
+    <li>Log back in as this venue's own admin, through the usual PubPulse login.</li>
+    <li>Make the change and save it again.</li>
+  </ol>
+
+  <p>
+    <a class="btn-primary" href="{{ support_logout_url }}">Sign out of support</a>
+    {% if request.referrer %}
+      <a class="btn-secondary" href="{{ request.referrer }}">Go back without saving</a>
+    {% endif %}
+  </p>
+
+  <p class="hint">Signing out of support clears the shared PubPulse session, so it signs you out of
+    the other apps too. That's the same session cookie across all of them, which is why a support
+    login here makes RotaPulse read-only in the first place.</p>
+</div>
+{% endblock %}

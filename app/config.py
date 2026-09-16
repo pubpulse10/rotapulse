@@ -85,6 +85,13 @@ PUBPULSE_HUB_URL = os.environ.get("PUBPULSE_HUB_URL", "https://app.pubpulse.co.u
 # /internal/pubs/<pub_id>/referral to tag this app's Stripe Customer (see
 # app/billing.py:apply_referral_metadata).
 PRICEPULSE_INTERNAL_URL = os.environ.get("PRICEPULSE_INTERNAL_URL", "https://pricepulse.pubpulse.co.uk")
+# Where a family-admin support session goes to sign out. The session key it
+# clears (pricepulse_admin) is set by PricePulse and shared across the whole
+# family on the .pubpulse.co.uk cookie, so only PricePulse can clear it --
+# which is why a read-only session stuck in RotaPulse has to be sent there.
+PRICEPULSE_ADMIN_LOGOUT_URL = os.environ.get(
+    "PRICEPULSE_ADMIN_LOGOUT_URL", "https://pricepulse.pubpulse.co.uk/admin/logout"
+)
 
 # Free trial length (days) for a newly-provisioned venue before a
 # subscription is required — matches TaskPulse's own default/reasoning.

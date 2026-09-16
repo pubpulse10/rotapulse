@@ -431,6 +431,23 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
   margin: 0 0 16px;
 }
 
+/* Family-admin support session: can look at everything, can save nothing
+   (app/rota_auth.py). Sits above the content on every page, because the
+   screens themselves look completely normal. */
+.readonly-banner {
+  background: #fdf0ee;
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 0.9rem;
+}
+.readonly-banner a { margin-left: 6px; }
+/* Buttons readonly-guard.js has switched off, so they read as unavailable
+   rather than merely unresponsive. */
+.readonly-banner ~ * button[disabled],
+.readonly-banner ~ * input[type="submit"][disabled] { opacity: 0.55; cursor: not-allowed; }
+
 /* Draggable shift chips (app/static/rota_dragdrop.js). touch-action: none —
    confirmed live that touch-action: pan-x pan-y does NOT reliably hand
    control back once a hold arms a drag; WebKit can commit to a native pan
