@@ -13,7 +13,7 @@ import flask
 
 from app.db import get_db
 from app.geo_distance import distance_metres
-from app.leave import days_taken_count
+from app.leave import LEAVE_TYPES, PORTIONS, STAFF_REQUESTABLE_TYPES, days_taken_count
 from app.media import save_attendance_photo
 from app.notification_settings import notify_admins
 from app.rota_auth import register_identity, require_permission
@@ -425,15 +425,34 @@ def leave():
 
     if flask.request.method == "POST":
         form = flask.request.form
+        start_date = (form.get("start_date") or "").strip()
+        end_date = (form.get("end_date") or "").strip()
+        leave_type = (form.get("leave_type") or "paid").strip()
+        start_portion = form.get("start_portion") if form.get("start_portion") in PORTIONS else "full"
+        end_portion = form.get("end_portion") if form.get("end_portion") in PORTIONS else "full"
+
+        if not start_date or not end_date or end_date < start_date:
+            flask.flash("Choose a start date and an end date, with the end on or after the start.", "error")
+            return flask.redirect(flask.url_for("staff_portal.leave"))
+        # Sick, maternity and lieu are recorded by an admin, never requested
+        # here (docs/leave-design.md) — and this is a form post, so the guard
+        # belongs on the server, not on the <select>.
+        if leave_type not in STAFF_REQUESTABLE_TYPES:
+            flask.flash("Choose either paid or unpaid leave. Anything else is recorded by your manager.", "error")
+            return flask.redirect(flask.url_for("staff_portal.leave"))
+
         db.execute(
-            "INSERT INTO leave_request (person_id, venue_id, start_date, end_date) VALUES (?, ?, ?, ?)",
-            (person["id"], venue["id"], form["start_date"], form["end_date"]),
+            """INSERT INTO leave_request
+               (person_id, venue_id, start_date, end_date, leave_type, start_portion, end_portion)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (person["id"], venue["id"], start_date, end_date, leave_type, start_portion, end_portion),
         )
         db.commit()
+        type_label = dict((key, label) for key, label, _r, _a in LEAVE_TYPES)[leave_type]
         notify_admins(
             db, venue, "leave_request",
             f"Leave request — {venue['name']}",
-            f"{person['name']} has requested leave from {form['start_date']} to {form['end_date']} at {venue['name']}.",
+            f"{person['name']} has requested {type_label.lower()} from {start_date} to {end_date} at {venue['name']}.",
         )
         flask.flash("Leave request submitted — awaiting approval.")
         return flask.redirect(flask.url_for("staff_portal.leave"))
@@ -451,11 +470,16 @@ def leave():
            WHERE venue_membership.person_id = ? AND venue_membership.venue_id = ?""",
         (person["id"], venue["id"]),
     ).fetchone()
-    days_taken = 0
+    # None (not nought) when their availability isn't set: the page says so
+    # rather than showing a number that isn't true. See leave.working_pattern.
+    days_taken = None
     if detail:
         days_taken = days_taken_count(db, person["id"], detail["availability"], detail["holiday_year_start_date"])
 
-    return flask.render_template("staff/leave.html", requests=requests_rows, days_taken=days_taken)
+    return flask.render_template(
+        "staff/leave.html", requests=requests_rows, days_taken=days_taken,
+        leave_types=[(key, label) for key, label, requestable, _a in LEAVE_TYPES if requestable],
+    )
 
 
 # ---------- Open shifts (spec §5.4) ----------

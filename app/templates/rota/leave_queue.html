@@ -6,7 +6,9 @@
   {% if not requests %}<p class="hint">Nothing pending.</p>{% endif %}
   {% for r in requests %}
     <div class="day-list-item">
-      {{ r['name'] }}: {{ r['start_date']|uk_date }} to {{ r['end_date']|uk_date }}
+      {{ r['name'] }}: {{ r['start_date']|uk_date }}{% if r['start_portion'] == 'half' %} (from midday){% endif %}
+      to {{ r['end_date']|uk_date }}{% if r['end_portion'] == 'half' %} (until midday){% endif %}
+      <span class="leave-badge leave-badge-{{ r['leave_type'] or 'paid' }}">{{ leave_type_labels[r['leave_type'] or 'paid'] }}</span>
       <form method="post" action="{{ url_for('rota_grid.approve_leave', leave_id=r['id']) }}" style="display:inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn-primary">Approve</button>
@@ -24,7 +26,11 @@
   {% if not current_or_upcoming_leave %}<p class="hint">Nobody's on approved leave right now.</p>{% endif %}
   {% for r in current_or_upcoming_leave %}
     <div class="day-list-item">
-      {{ r['name'] }}: {{ r['start_date']|uk_date }} to {{ r['end_date']|uk_date }}
+      {{ r['name'] }}: {{ r['start_date']|uk_date }}{% if r['start_portion'] == 'half' %} (from midday){% endif %}
+      to {{ r['end_date']|uk_date }}{% if r['end_portion'] == 'half' %} (until midday){% endif %}
+      <span class="leave-badge leave-badge-{{ r['leave_type'] or 'paid' }}">{{ leave_type_labels[r['leave_type'] or 'paid'] }}</span>
+      {% if r['days_counted'] is not none %}<span class="hint">{{ '%g'|format(r['days_counted']) }} day{{ '' if r['days_counted'] == 1 else 's' }}</span>{% endif %}
+      {% if r['note'] %}<span class="hint">{{ r['note'] }}</span>{% endif %}
       <form method="post" action="{{ url_for('rota_grid.decline_leave', leave_id=r['id']) }}" style="display:inline"
             onsubmit="return confirm('Cancel this approved leave? They will be available to roster again for this period.');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -46,10 +52,33 @@
         <option value="{{ member['person_id'] }}">{{ member['name'] }}</option>
       {% endfor %}
     </select>
+    <label for="leave_type">Type</label>
+    <select id="leave_type" name="leave_type">
+      {% for key, label in leave_types %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+    </select>
     <label for="start_date">From</label>
     <input type="date" id="start_date" name="start_date" required>
     <label for="end_date">To</label>
     <input type="date" id="end_date" name="end_date" required>
+    <div class="leave-halves">
+      <div>
+        <label for="admin_start_portion">First day</label>
+        <select id="admin_start_portion" name="start_portion">
+          <option value="full">All day</option>
+          <option value="half">Half day (from midday)</option>
+        </select>
+      </div>
+      <div>
+        <label for="admin_end_portion">Last day</label>
+        <select id="admin_end_portion" name="end_portion">
+          <option value="full">All day</option>
+          <option value="half">Half day (until midday)</option>
+        </select>
+      </div>
+    </div>
+    <p class="hint">For a single day off, set the first day to a half day.</p>
+    <label for="note">Note (optional)</label>
+    <input type="text" id="note" name="note" maxlength="200" placeholder="Only you can see this">
     <button type="submit" class="btn-primary">Add leave</button>
   </form>
 </div>

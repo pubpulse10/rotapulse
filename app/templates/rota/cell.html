@@ -6,7 +6,13 @@
 {% if approved_leave %}
   <div class="panel">
     <h2>On approved leave</h2>
-    <p class="hint">{{ approved_leave['start_date']|uk_date }} to {{ approved_leave['end_date']|uk_date }}.</p>
+    <p class="hint">
+      <span class="leave-badge leave-badge-{{ approved_leave['leave_type'] or 'paid' }}">{{ leave_type_labels[approved_leave['leave_type'] or 'paid'] }}</span>
+      {{ approved_leave['start_date']|uk_date }}{% if approved_leave['start_portion'] == 'half' %} (from midday){% endif %}
+      to {{ approved_leave['end_date']|uk_date }}{% if approved_leave['end_portion'] == 'half' %} (until midday){% endif %}.
+      {% if approved_leave['days_counted'] is not none %}{{ '%g'|format(approved_leave['days_counted']) }} day{{ '' if approved_leave['days_counted'] == 1 else 's' }}.{% endif %}
+      {% if approved_leave['note'] %}<br>{{ approved_leave['note'] }}{% endif %}
+    </p>
     <form method="post" action="{{ url_for('rota_grid.decline_leave', leave_id=approved_leave['id']) }}"
           onsubmit="return confirm('Cancel this approved leave? They will be available to roster again for this period.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

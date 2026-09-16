@@ -332,6 +332,35 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 .day-pill-leave, .cell-leave a::before { color: var(--color-leave); background: #efe6fb; }
 .cell-dayoff a::before { content: "Off"; }
 .cell-leave a::before { content: "Hol"; }
+/* The other four leave types (2026-09-16, docs/leave-design.md). Same pill
+   box model as "Hol" above, only the word and the colour change — a week of
+   sick and a week of holiday have to be told apart at a glance by whoever is
+   staffing the week. Two classes beat the one-class rule above on
+   specificity, so "Hol" stays the default for paid leave. */
+.cell-leave.leave-unpaid a::before { content: "Unpaid"; color: #4b5563; background: #e5e7eb; }
+.cell-leave.leave-sick a::before { content: "Sick"; color: #8a4a12; background: #fdf0e1; }
+.cell-leave.leave-maternity a::before { content: "Mat"; color: #9c2f6b; background: #fce7f3; }
+.cell-leave.leave-lieu a::before { content: "Lieu"; color: #175089; background: #e3edf9; }
+
+/* The same types as a badge, for the leave queue, the cell panel and a staff
+   member's own list. */
+.leave-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-leave);
+  background: #efe6fb;
+}
+.leave-badge-unpaid { color: #4b5563; background: #e5e7eb; }
+.leave-badge-sick { color: #8a4a12; background: #fdf0e1; }
+.leave-badge-maternity { color: #9c2f6b; background: #fce7f3; }
+.leave-badge-lieu { color: #175089; background: #e3edf9; }
+
+/* The two half-day pickers sit side by side where there is room. */
+.leave-halves { display: flex; gap: 12px; flex-wrap: wrap; }
+.leave-halves > div { flex: 1 1 200px; }
 
 /* Draggable shift chips (app/static/rota_dragdrop.js). touch-action: none —
    confirmed live that touch-action: pan-x pan-y does NOT reliably hand

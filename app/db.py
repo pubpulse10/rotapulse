@@ -392,6 +392,26 @@ def init_schema(conn=None):
         # rota_staff_detail row (not person, since a start date is specific
         # to working at THIS venue, unlike date_of_birth).
         _add_column_if_missing(conn, "rota_staff_detail", "start_date", "TEXT")
+        # Leave types, half days and frozen counts (2026-09-16, step 1 of
+        # docs/leave-design.md). Existing rows become 'paid', which is what
+        # every one of them always was: it was the only kind of leave the app
+        # could record.
+        _add_column_if_missing(conn, "leave_request", "leave_type", "TEXT NOT NULL DEFAULT 'paid'")
+        # Either end of a booking can be a half day: 'full' | 'half'.
+        _add_column_if_missing(conn, "leave_request", "start_portion", "TEXT NOT NULL DEFAULT 'full'")
+        _add_column_if_missing(conn, "leave_request", "end_portion", "TEXT NOT NULL DEFAULT 'full'")
+        # Written when the leave is approved and never recomputed on read, so
+        # that changing an availability or an hours figure cannot rewrite last
+        # year (app/leave.py::freeze_counts). NULL on anything approved before
+        # these columns existed, and on anyone whose availability isn't set;
+        # both are counted live instead.
+        _add_column_if_missing(conn, "leave_request", "days_counted", "NUMERIC")
+        _add_column_if_missing(conn, "leave_request", "hours_counted", "NUMERIC")
+        _add_column_if_missing(conn, "leave_request", "note", "TEXT")
+        # What one of this person's days is worth in hours. The screen for
+        # editing it arrives in step 2; until then leave.usual_daily_hours()
+        # falls back to the average of their recently clocked shifts.
+        _add_column_if_missing(conn, "rota_staff_detail", "usual_daily_hours", "NUMERIC")
         # Ad-hoc/unplanned clock-in with admin approval (2026-08-18): 'origin'
         # marks a shift that was created BY a clock-in rather than rostered in
         # advance, purely for display (badge on the grid). The approval fields

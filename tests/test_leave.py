@@ -28,40 +28,62 @@ def test_staff_can_request_leave_and_admin_can_approve(app, client, venue):
         assert leave_row["status"] == "approved"
 
 
-def test_days_taken_only_counts_normal_working_days():
-    class FakeConn:
-        def execute(self, _query, _params):
-            class Result:
-                def fetchall(self_inner):
-                    return [{"start_date": "2026-01-05", "end_date": "2026-01-11"}]  # Mon 5th - Sun 11th
+WORKS_MON_TO_FRI = '{"mon":true,"tue":true,"wed":true,"thu":true,"fri":true,"sat":false,"sun":false}'
 
-            return Result()
 
-    availability = '{"mon":true,"tue":true,"wed":true,"thu":true,"fri":true,"sat":false,"sun":false}'
-    count = days_taken_count(FakeConn(), person_id=1, availability_json=availability, year_start_mmdd="01-01", today=date(2026, 1, 12))
+def _staff_with_leave(app, venue, availability, start, end):
+    """A staff member on a known working pattern, with one approved booking.
+
+    These two used to run against a hand-written fake connection returning
+    dicts of just start_date/end_date. It drifted out of step with the real
+    query the moment leave gained types and frozen counts (2026-09-16), and a
+    fake that has to be kept in step with a query is worth less than the real
+    schema it is standing in for.
+    """
+    person_id, membership_id, _e = create_active_staff(app, venue["id"])
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "UPDATE rota_staff_detail SET availability = ? WHERE venue_membership_id = ?",
+            (availability, membership_id),
+        )
+        conn.execute(
+            """INSERT INTO leave_request (person_id, venue_id, start_date, end_date, status)
+               VALUES (?, ?, ?, ?, 'approved')""",
+            (person_id, venue["id"], start, end),
+        )
+        conn.commit()
+    return person_id
+
+
+def test_days_taken_only_counts_normal_working_days(app, venue):
+    # Mon 5th to Sun 11th January, for somebody who works Monday to Friday.
+    person_id = _staff_with_leave(app, venue, WORKS_MON_TO_FRI, "2026-01-05", "2026-01-11")
+
+    with app.app_context():
+        count = days_taken_count(
+            db_module.get_db(), person_id=person_id, availability_json=WORKS_MON_TO_FRI,
+            year_start_mmdd="01-01", today=date(2026, 1, 12),
+        )
+
     # Mon-Fri = 5 working days counted; Sat/Sun don't count since never worked.
     assert count == 5
 
 
-def test_days_taken_falls_back_to_jan_1_for_a_malformed_year_start(app):
+def test_days_taken_falls_back_to_jan_1_for_a_malformed_year_start(app, venue):
     """Real production crash: a venue's holiday_year_start_date was saved as
     '0101' (no dash) before save-time validation existed (see
     admin_config.py's settings route) -- splitting that on '-' yields a
     single value, and unpacking it into month, day used to raise
     ValueError, taking down every staff member's leave page at that venue."""
-    class FakeConn:
-        def execute(self, _query, _params):
-            class Result:
-                def fetchall(self_inner):
-                    return [{"start_date": "2026-01-05", "end_date": "2026-01-11"}]
+    person_id = _staff_with_leave(app, venue, WORKS_MON_TO_FRI, "2026-01-05", "2026-01-11")
 
-            return Result()
+    with app.app_context():
+        count = days_taken_count(
+            db_module.get_db(), person_id=person_id, availability_json=WORKS_MON_TO_FRI,
+            year_start_mmdd="0101", today=date(2026, 1, 12),
+        )
 
-    availability = '{"mon":true,"tue":true,"wed":true,"thu":true,"fri":true,"sat":false,"sun":false}'
-    count = days_taken_count(
-        FakeConn(), person_id=1, availability_json=availability,
-        year_start_mmdd="0101", today=date(2026, 1, 12),
-    )
     assert count == 5  # same result as a clean "01-01" would give, via the 1 Jan fallback
 
 

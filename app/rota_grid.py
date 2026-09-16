@@ -20,6 +20,8 @@ import flask
 from app.costs import predicted_cost
 from app.date_format import format_uk_date
 from app.db import get_db
+from app.leave import (LEAVE_TYPE_KEYS, LEAVE_TYPE_LABELS, LEAVE_TYPES, PORTIONS,
+                       freeze_counts, notify_decision)
 from app.notifications import send_email, send_sms
 from app.rota_auth import register_identity, require_permission
 from app.uk_time import uk_today
@@ -55,12 +57,21 @@ def _billable_staff(db, venue_id):
     ).fetchall()
 
 
-def _is_on_approved_leave(db, person_id, on_date_str):
+def _approved_leave_on(db, person_id, on_date_str):
+    """The approved leave covering this date, or None. Returns the row rather
+    than a yes/no so the grid can show WHICH kind of leave it is — holiday and
+    sick leave look identical otherwise, which is no use to whoever is
+    staffing the week."""
     return db.execute(
-        """SELECT 1 FROM leave_request WHERE person_id = ? AND status = 'approved'
-           AND start_date <= ? AND end_date >= ?""",
+        """SELECT * FROM leave_request WHERE person_id = ? AND status = 'approved'
+           AND start_date <= ? AND end_date >= ?
+           ORDER BY start_date LIMIT 1""",
         (person_id, on_date_str, on_date_str),
-    ).fetchone() is not None
+    ).fetchone()
+
+
+def _is_on_approved_leave(db, person_id, on_date_str):
+    return _approved_leave_on(db, person_id, on_date_str) is not None
 
 
 def _monday_options(db, venue_id: int, current_week_start: date, weeks_back: int = 8, weeks_forward: int = 52) -> list[dict]:
@@ -180,8 +191,8 @@ def week():
             # and still cancellable from the leave queue/cell panel.
             if shifts_by_person_date.get((member["person_id"], d_str)):
                 cell = {"state": "shift", "shifts": shifts_by_person_date[(member["person_id"], d_str)]}
-            elif _is_on_approved_leave(db, member["person_id"], d_str):
-                cell = {"state": "leave"}
+            elif (leave_row := _approved_leave_on(db, member["person_id"], d_str)) is not None:
+                cell = {"state": "leave", "leave": leave_row}
             elif (member["person_id"], d_str) in override_set:
                 cell = {"state": "day_off", "override": True}
             elif not availability.get(WEEKDAY_KEYS[d.weekday()], True):
@@ -194,6 +205,7 @@ def week():
     return flask.render_template(
         "rota/week.html",
         venue=venue,
+        leave_type_labels=LEAVE_TYPE_LABELS,
         week_start=week_start,
         dates=dates,
         date_strs=date_strs,
@@ -411,7 +423,7 @@ def cell(person_id, on_date):
     roles = db.execute("SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name", (venue["id"],)).fetchall()
     return flask.render_template(
         "rota/cell.html", person=person, on_date=on_date, shifts=shifts, override=override,
-        approved_leave=approved_leave, roles=roles,
+        approved_leave=approved_leave, leave_type_labels=LEAVE_TYPE_LABELS, roles=roles,
     )
 
 
@@ -934,7 +946,9 @@ def leave_queue():
     ).fetchall()
     staff = _billable_staff(db, flask.g.venue["id"])
     return flask.render_template(
-        "rota/leave_queue.html", requests=rows, current_or_upcoming_leave=current_or_upcoming_leave, staff=staff
+        "rota/leave_queue.html", requests=rows, current_or_upcoming_leave=current_or_upcoming_leave,
+        staff=staff, leave_types=[(key, label) for key, label, _r, _a in LEAVE_TYPES],
+        leave_type_labels=LEAVE_TYPE_LABELS,
     )
 
 
@@ -952,6 +966,10 @@ def create_leave():
     person_id = form.get("person_id", type=int)
     start_date = form.get("start_date")
     end_date = form.get("end_date")
+    leave_type = (form.get("leave_type") or "paid").strip()
+    start_portion = form.get("start_portion") if form.get("start_portion") in PORTIONS else "full"
+    end_portion = form.get("end_portion") if form.get("end_portion") in PORTIONS else "full"
+    note = (form.get("note") or "").strip() or None
 
     is_staff_here = db.execute(
         """SELECT 1 FROM venue_membership WHERE person_id = ? AND venue_id = ? AND status = 'active'""",
@@ -960,12 +978,21 @@ def create_leave():
     if not person_id or not is_staff_here or not start_date or not end_date or start_date > end_date:
         flask.flash("Choose a staff member and a valid date range.", "error")
         return flask.redirect(flask.url_for("rota_grid.leave_queue"))
+    if leave_type not in LEAVE_TYPE_KEYS:
+        flask.flash("Choose a type of leave.", "error")
+        return flask.redirect(flask.url_for("rota_grid.leave_queue"))
 
-    db.execute(
-        """INSERT INTO leave_request (person_id, venue_id, start_date, end_date, status, decided_at, decided_by_person_id)
-           VALUES (?, ?, ?, ?, 'approved', datetime('now'), ?)""",
-        (person_id, venue_id, start_date, end_date, flask.g.person["id"] if flask.g.person else None),
+    cur = db.execute(
+        """INSERT INTO leave_request
+           (person_id, venue_id, start_date, end_date, leave_type, start_portion, end_portion, note,
+            status, decided_at, decided_by_person_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', datetime('now'), ?)""",
+        (person_id, venue_id, start_date, end_date, leave_type, start_portion, end_portion, note,
+         flask.g.person["id"] if flask.g.person else None),
     )
+    # Approved the moment it is created, so its days and hours are settled now
+    # (app/leave.py::freeze_counts) rather than recomputed on every read.
+    freeze_counts(db, cur.lastrowid)
     db.commit()
     flask.flash("Leave added.")
     return flask.redirect(flask.url_for("rota_grid.leave_queue"))
@@ -979,7 +1006,15 @@ def approve_leave(leave_id):
         "UPDATE leave_request SET status = 'approved', decided_at = datetime('now'), decided_by_person_id = ? WHERE id = ? AND venue_id = ?",
         (flask.g.person["id"] if flask.g.person else None, leave_id, flask.g.venue["id"]),
     )
+    # What the booking is worth is settled here, at approval, and not touched
+    # again (app/leave.py::freeze_counts).
+    freeze_counts(db, leave_id)
     db.commit()
+    row = db.execute(
+        "SELECT * FROM leave_request WHERE id = ? AND venue_id = ?", (leave_id, flask.g.venue["id"])
+    ).fetchone()
+    if row is not None:
+        notify_decision(db, flask.g.venue, row, "approved")
     return flask.redirect(flask.url_for("rota_grid.leave_queue"))
 
 
@@ -1003,7 +1038,16 @@ def decline_leave(leave_id):
         (flask.g.person["id"] if flask.g.person else None, leave_id, flask.g.venue["id"]),
     )
     db.commit()
-    if existing and existing["status"] == "approved":
+    was_approved = bool(existing and existing["status"] == "approved")
+    row = db.execute(
+        "SELECT * FROM leave_request WHERE id = ? AND venue_id = ?", (leave_id, flask.g.venue["id"])
+    ).fetchone()
+    if row is not None:
+        # Cancelling leave someone had already been granted is a different
+        # message from turning a request down, and the more important of the
+        # two: they are back on the rota and may not expect to be.
+        notify_decision(db, flask.g.venue, row, "cancelled" if was_approved else "declined")
+    if was_approved:
         flask.flash("Leave cancelled.")
     else:
         flask.flash("Leave request declined.")

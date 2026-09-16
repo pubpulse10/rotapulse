@@ -127,7 +127,8 @@
           </td>
           {% for cell in row['cells'] %}
             {% set d_str = date_strs[loop.index0] %}
-            <td class="rota-cell cell-{{ 'shift' if cell['state']=='shift' else ('dayoff' if cell['state']=='day_off' else ('leave' if cell['state']=='leave' else 'empty')) }}"
+            <td class="rota-cell cell-{{ 'shift' if cell['state']=='shift' else ('dayoff' if cell['state']=='day_off' else ('leave' if cell['state']=='leave' else 'empty')) }}{% if cell['state'] == 'leave' %} leave-{{ cell['leave']['leave_type'] or 'paid' }}{% endif %}"
+                {% if cell['state'] == 'leave' %}title="{{ leave_type_labels[cell['leave']['leave_type'] or 'paid'] }}"{% endif %}
                 data-person-id="{{ row['member']['person_id'] }}" data-date="{{ d_str }}">
               {% if cell['state'] == 'shift' %}
                 {# Not a real <a> here deliberately — a shift-chip needs a

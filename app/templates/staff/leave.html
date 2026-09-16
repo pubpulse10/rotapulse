@@ -3,21 +3,57 @@
 {% block content %}
 <div class="panel">
   <h1>Leave</h1>
-  <p>Holiday days taken this year: <strong>{{ days_taken }}</strong></p>
+  {% if days_taken is none %}
+    {# leave.working_pattern returns None when availability was never set.
+       Saying so beats printing a number that isn't true. #}
+    <p class="hint">Your holiday can't be counted until your availability is set — ask your manager to add the days you normally work.</p>
+  {% else %}
+    <p>Paid holiday taken this year: <strong>{{ '%g'|format(days_taken) }}</strong></p>
+  {% endif %}
 
   <h2>Request leave</h2>
   <form method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="leave_type">Type</label>
+    <select id="leave_type" name="leave_type">
+      {% for key, label in leave_types %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+    </select>
+    <p class="hint">Sick leave and maternity leave are recorded by your manager, so they aren't listed here.</p>
     <label for="start_date">From</label>
     <input type="date" id="start_date" name="start_date" required>
     <label for="end_date">To</label>
     <input type="date" id="end_date" name="end_date" required>
+    <div class="leave-halves">
+      <div>
+        <label for="start_portion">First day</label>
+        <select id="start_portion" name="start_portion">
+          <option value="full">All day</option>
+          <option value="half">Half day (from midday)</option>
+        </select>
+      </div>
+      <div>
+        <label for="end_portion">Last day</label>
+        <select id="end_portion" name="end_portion">
+          <option value="full">All day</option>
+          <option value="half">Half day (until midday)</option>
+        </select>
+      </div>
+    </div>
+    <p class="hint">For a single day off, set the first day to a half day.</p>
     <button type="submit" class="btn-primary">Submit request</button>
   </form>
 
   <h2>Your requests</h2>
   {% for r in requests %}
-    <div class="day-list-item">{{ r['start_date']|uk_date }} to {{ r['end_date']|uk_date }} — {{ r['status'] }}</div>
+    <div class="day-list-item">
+      {{ r['start_date']|uk_date }}{% if r['start_portion'] == 'half' %} (from midday){% endif %}
+      to {{ r['end_date']|uk_date }}{% if r['end_portion'] == 'half' %} (until midday){% endif %}
+      — {{ r['status'] }}
+      <span class="leave-badge leave-badge-{{ r['leave_type'] or 'paid' }}">{{ (r['leave_type'] or 'paid')|leave_label }}</span>
+      {% if r['status'] == 'approved' and r['days_counted'] is not none %}
+        <span class="hint">{{ '%g'|format(r['days_counted']) }} day{{ '' if r['days_counted'] == 1 else 's' }}</span>
+      {% endif %}
+    </div>
   {% endfor %}
 </div>
 {% endblock %}
