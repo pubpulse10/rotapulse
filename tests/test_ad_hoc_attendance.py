@@ -3,7 +3,7 @@ approval check on a REAL rostered shift — both added 2026-08-18. See the
 module comment above app/rota_grid.py's approvals routes for the design.
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from app import db as db_module
 from tests.conftest import create_active_staff, login_as_person, login_as_pub
@@ -120,9 +120,17 @@ def test_clocking_in_well_ahead_of_a_real_shift_needs_approval(app, client, venu
     )
     person_id, _m, _e = create_active_staff(app, venue["id"], name="Very Early")
     today = date.today().isoformat()
-    # Rostered to start in 2 hours — well outside the 30-minute grace window.
-    start = (datetime.now() + timedelta(hours=2)).strftime("%H:%M")
-    shift_id = _create_shift_for(app, venue["id"], person_id, today, start_time=start)
+    # Rostered to start at midday and clocking in at 10am — two hours early,
+    # well outside the 30-minute grace window.
+    #
+    # The clock is PINNED rather than read. This used to be
+    # `datetime.now() + timedelta(hours=2)` rendered as HH:MM, which after
+    # 22:00 wrapped past midnight: 01:09 on TODAY's date is not two hours
+    # ahead, it is twenty-two hours behind, so the clock-in read as very LATE,
+    # needed no approval, and the test failed every evening.
+    monkeypatch.setattr("app.staff_portal.uk_now",
+                        lambda: datetime.combine(date.today(), time(10, 0)))
+    shift_id = _create_shift_for(app, venue["id"], person_id, today, start_time="12:00")
     login_as_person(client, person_id)
 
     resp = client.post(f"/v/{venue['slug']}/staff/shift/{shift_id}/clock-in", data={}, follow_redirects=True)
