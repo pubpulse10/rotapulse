@@ -20,6 +20,7 @@ from app.leave import carried_over_days, holiday_year_bounds, position, usual_da
 from app.geocoding import geocode_postcode
 from app.notification_settings import METHODS, NOTIFICATION_TYPES
 from app.notifications import send_email, send_sms
+from app.roles import active_roles, all_roles, role_usage, staff_holding_role
 from app.rota_auth import register_identity, require_permission
 from app.venue_scope import register_venue_gate, register_venue_scope
 
@@ -158,22 +159,63 @@ def settings():
 @require_permission("app_admin")
 def roles():
     db = get_db()
-    role_rows = db.execute(
-        "SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name", (flask.g.venue["id"],)
-    ).fetchall()
-    return flask.render_template("admin/roles.html", roles=role_rows)
+    venue_id = flask.g.venue["id"]
+    rows = []
+    for row in all_roles(db, venue_id):
+        entry = dict(row)
+        # Worked out per row so the screen offers the action that will
+        # actually work, rather than a Delete button that refuses for
+        # nearly every role on it.
+        entry["usage"] = role_usage(db, venue_id, row["id"])
+        entry["deletable"] = not any(entry["usage"].values())
+        rows.append(entry)
+    return flask.render_template(
+        "admin/roles.html",
+        roles=[r for r in rows if r["archived_at"] is None],
+        archived=[r for r in rows if r["archived_at"] is not None],
+    )
+
+
+def _role_named(db, venue_id, name, exclude_id=None):
+    """An existing role with this name, if there is one. NOCASE because
+    "kitchen" and "Kitchen" are the same job, and offering both would be a
+    trap — especially now that one of them can be archived, and so
+    isn't on the screen to explain why the other won't save."""
+    params = [venue_id, name]
+    clause = ""
+    if exclude_id is not None:
+        clause = " AND id != ?"
+        params.append(exclude_id)
+    return db.execute(
+        f"SELECT * FROM venue_role WHERE venue_id = ? AND name = ? COLLATE NOCASE{clause}",
+        params,
+    ).fetchone()
 
 
 @admin_bp.route("/roles/create", methods=["POST"])
 @require_permission("app_admin")
 def create_role():
     db = get_db()
+    venue_id = flask.g.venue["id"]
     name = flask.request.form.get("name", "").strip()
-    if name:
-        db.execute(
-            "INSERT INTO venue_role (venue_id, name) VALUES (?, ?)", (flask.g.venue["id"], name)
-        )
+    if not name:
+        return flask.redirect(flask.url_for("admin_config.roles"))
+    existing = _role_named(db, venue_id, name)
+    if existing is None:
+        db.execute("INSERT INTO venue_role (venue_id, name) VALUES (?, ?)", (venue_id, name))
         db.commit()
+    elif existing["archived_at"] is not None:
+        # An archived role isn't in the list above, so adding it again by
+        # name is the natural thing to try. They mean the old one back —
+        # and a plain INSERT would break UNIQUE(venue_id, name) anyway.
+        db.execute("UPDATE venue_role SET archived_at = NULL WHERE id = ?", (existing["id"],))
+        db.commit()
+        flask.flash(
+            f"“{existing['name']}” was archived — it's back in use, "
+            "with its history intact."
+        )
+    else:
+        flask.flash(f"There's already a role called “{existing['name']}”.", "error")
     return flask.redirect(flask.url_for("admin_config.roles"))
 
 
@@ -181,47 +223,113 @@ def create_role():
 @require_permission("app_admin")
 def rename_role(role_id):
     db = get_db()
+    venue_id = flask.g.venue["id"]
     name = flask.request.form.get("name", "").strip()
-    if name:
-        db.execute(
-            "UPDATE venue_role SET name = ? WHERE id = ? AND venue_id = ?",
-            (name, role_id, flask.g.venue["id"]),
+    if not name:
+        return flask.redirect(flask.url_for("admin_config.roles"))
+    # Renaming onto a name already in use breaks UNIQUE(venue_id, name).
+    # That was always a 500; it matters more now that the other role can be
+    # archived, and therefore not visible on this screen at all.
+    clash = _role_named(db, venue_id, name, exclude_id=role_id)
+    if clash is not None:
+        where = " (it's archived)" if clash["archived_at"] else ""
+        flask.flash(f"There's already a role called “{clash['name']}”{where}.", "error")
+        return flask.redirect(flask.url_for("admin_config.roles"))
+    db.execute(
+        "UPDATE venue_role SET name = ? WHERE id = ? AND venue_id = ?", (name, role_id, venue_id)
+    )
+    db.commit()
+    return flask.redirect(flask.url_for("admin_config.roles"))
+
+
+@admin_bp.route("/roles/<int:role_id>/archive", methods=["POST"])
+@require_permission("app_admin")
+def archive_role(role_id):
+    """Retire a role. It stops being offered anywhere a role is chosen,
+    while every shift, staff record and blocked date that already names it
+    carries on saying so — which is the whole point, since a role that
+    has been used can never be deleted (app/roles.py)."""
+    db = get_db()
+    venue_id = flask.g.venue["id"]
+    role = db.execute(
+        "SELECT * FROM venue_role WHERE id = ? AND venue_id = ?", (role_id, venue_id)
+    ).fetchone()
+    if role is None:
+        flask.abort(404)
+    db.execute(
+        "UPDATE venue_role SET archived_at = datetime('now') WHERE id = ? AND venue_id = ?",
+        (role_id, venue_id),
+    )
+    db.commit()
+    message = f"“{role['name']}” archived — it won't be offered on new shifts or staff."
+    still_assigned = staff_holding_role(db, venue_id, role_id)
+    if still_assigned:
+        # Not a refusal: archiving is exactly what you do to a role you're
+        # winding down, and the people on it might not move for weeks.
+        message += (
+            f" {still_assigned} staff member(s) are still set to it — "
+            "change their role when you're ready."
         )
-        db.commit()
+    flask.flash(message)
+    return flask.redirect(flask.url_for("admin_config.roles"))
+
+
+@admin_bp.route("/roles/<int:role_id>/restore", methods=["POST"])
+@require_permission("app_admin")
+def restore_role(role_id):
+    db = get_db()
+    venue_id = flask.g.venue["id"]
+    role = db.execute(
+        "SELECT * FROM venue_role WHERE id = ? AND venue_id = ?", (role_id, venue_id)
+    ).fetchone()
+    if role is None:
+        flask.abort(404)
+    db.execute(
+        "UPDATE venue_role SET archived_at = NULL WHERE id = ? AND venue_id = ?", (role_id, venue_id)
+    )
+    db.commit()
+    flask.flash(f"“{role['name']}” is back in use.")
     return flask.redirect(flask.url_for("admin_config.roles"))
 
 
 @admin_bp.route("/roles/<int:role_id>/delete", methods=["POST"])
 @require_permission("app_admin")
 def delete_role(role_id):
+    """Only ever removes a role nothing has used. Everything else is
+    archived instead — see app/roles.py for why deleting can't be made
+    to work, and why nulling the references out would be worse."""
     db = get_db()
     venue_id = flask.g.venue["id"]
-    in_use = db.execute(
-        "SELECT COUNT(*) AS n FROM venue_membership WHERE job_role_id = ? AND venue_id = ?",
-        (role_id, venue_id),
-    ).fetchone()["n"]
-    if in_use:
+    usage = role_usage(db, venue_id, role_id)
+    if usage["staff"]:
         flask.flash(
-            f"Can't delete this role — {in_use} staff member(s) are still assigned to it. "
-            "Reassign them to a different role first.",
+            f"Can't delete this role — {usage['staff']} staff member(s) are still assigned "
+            "to it. Reassign them to a different role first, or archive the role instead.",
             "error",
         )
         return flask.redirect(flask.url_for("admin_config.roles"))
-    # A blocked date scoped to this role holds a foreign key to it. Refusing is
-    # the only safe answer: silently dropping the link would leave the block
-    # with no roles, and a block with no roles applies to EVERYONE
+    # A shift holds a foreign key to the role it wanted, and old shifts are
+    # never tidied up, so this is the guard that catches nearly everything.
+    # Refusing rather than nulling those shifts out: on a future OPEN shift
+    # the role is what narrows "notify staff" to the right people
+    # (app/rota_grid.py::notify_open_shift), so a nulled-out kitchen shift
+    # would quietly text the whole venue.
+    if usage["shifts"]:
+        flask.flash(
+            f"Can't delete this role — {usage['shifts']} shift(s) still use it. "
+            "Archive it instead: it stops being offered, and the rota still shows it.",
+            "error",
+        )
+        return flask.redirect(flask.url_for("admin_config.roles"))
+    # A blocked date scoped to this role holds a foreign key to it. Refusing
+    # is the only safe answer: silently dropping the link would leave the
+    # block with no roles, and a block with no roles applies to EVERYONE
     # (app/leave.py), so "kitchen staff can't book this week" would quietly
     # become "nobody can".
-    blocking = db.execute(
-        """SELECT COUNT(*) AS n FROM leave_block_role
-           JOIN leave_block ON leave_block.id = leave_block_role.leave_block_id
-           WHERE leave_block_role.venue_role_id = ? AND leave_block.venue_id = ?""",
-        (role_id, venue_id),
-    ).fetchone()["n"]
-    if blocking:
+    if usage["blocks"]:
         flask.flash(
-            f"Can't delete this role — {blocking} blocked date(s) apply to it. "
-            "Unblock those dates first.",
+            f"Can't delete this role — {usage['blocks']} blocked date(s) apply to it. "
+            "Unblock those dates first, or archive the role instead.",
             "error",
         )
         return flask.redirect(flask.url_for("admin_config.roles"))
@@ -378,7 +486,9 @@ def staff_list():
         entry = dict(row)
         entry["display_status"] = _display_status(row["membership_status"], row["access_status"])
         staff.append(entry)
-    role_rows = db.execute("SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name", (venue_id,)).fetchall()
+    # For the "invite someone new" form, so it can't start a new person off
+    # in a role the venue has retired.
+    role_rows = active_roles(db, venue_id)
     return flask.render_template("admin/staff.html", staff=staff, roles=role_rows)
 
 
@@ -405,7 +515,10 @@ def edit_staff(membership_id):
     detail = db.execute(
         "SELECT * FROM rota_staff_detail WHERE venue_membership_id = ?", (membership_id,)
     ).fetchone()
-    roles = db.execute("SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name", (venue_id,)).fetchall()
+    # Their current role stays in the list even if it has been archived —
+    # otherwise the <select> would render with nothing chosen, and saving a
+    # pay rate would silently clear the role too.
+    roles = active_roles(db, venue_id, include_ids=[membership["job_role_id"]])
     # Someone with a single invited role (the normal case — every regular
     # staff/rota_admin invite creates exactly one app_access row) can have
     # that permission level changed here. The venue owner is a different

@@ -23,6 +23,7 @@ from werkzeug.security import generate_password_hash
 
 from app.db import get_db
 from app.media import save_avatar
+from app.roles import active_roles
 from app.venue_scope import register_venue_scope
 
 onboard_bp = flask.Blueprint("onboarding", __name__, url_prefix="/v/<slug>/onboard")
@@ -62,7 +63,7 @@ def accept(token):
         "SELECT * FROM venue_membership WHERE id = ?", (access["venue_membership_id"],)
     ).fetchone()
     person = db.execute("SELECT * FROM person WHERE id = ?", (membership["person_id"],)).fetchone()
-    roles = db.execute("SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name", (venue["id"],)).fetchall()
+    roles = active_roles(db, venue["id"], include_ids=[membership["job_role_id"]])
 
     if flask.request.method == "POST":
         form = flask.request.form

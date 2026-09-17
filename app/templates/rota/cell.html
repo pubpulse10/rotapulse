@@ -79,7 +79,7 @@
           <div><label>Role</label>
             <select name="venue_role_id">
               <option value="">—</option>
-              {% for role in roles %}<option value="{{ role['id'] }}" {{ 'selected' if s['venue_role_id']==role['id'] }}>{{ role['name'] }}</option>{% endfor %}
+              {% for role in roles_on_shifts %}<option value="{{ role['id'] }}" {{ 'selected' if s['venue_role_id']==role['id'] }}>{{ role['name'] }}{% if role['archived_at'] %} (archived){% endif %}</option>{% endfor %}
             </select>
           </div>
           <button type="submit" class="btn-secondary">Save</button>

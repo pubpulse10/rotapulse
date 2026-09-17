@@ -30,6 +30,41 @@ re-deciding something already recorded here.
 
 ## Decisions
 
+### 2026-09-17 — A job role is archived, never deleted once it has been used
+
+`delete_role` used to 500. `venue_membership.job_role_id`, `shift.venue_role_id` and
+`leave_block_role.venue_role_id` all reference `venue_role(id)`, the connection runs with
+`PRAGMA foreign_keys = ON`, and only the first and third had a friendly refusal in front of them.
+Deleting a role that had ever appeared on a rota raised `sqlite3.IntegrityError: FOREIGN KEY
+constraint failed`, and the landlord got an error page rather than an explanation. Old shifts are
+never tidied up, so after a few weeks of use that is every role.
+
+The owner's decision, 17 September 2026, was **archive — neither a plain refusal nor nulling the
+shifts out**:
+
+- **`venue_role.archived_at`** — NULL means in use. `app/roles.py` is the only place that knows the
+  rule, and every screen that offers a role goes through its `active_roles()`.
+- **Delete now only ever removes a role nothing has touched.** The roles screen works out per row
+  which action can succeed and shows Delete or Archive accordingly, rather than a button that
+  refuses for nearly everything on the page.
+- **Nulling `shift.venue_role_id` out was considered and rejected.** On a future OPEN shift the
+  role is what narrows `notify_open_shift` to the people who can work it, so a nulled-out kitchen
+  shift would quietly text the whole venue — the same shape of trap as a blocked date left with no
+  roles, which applies to everyone.
+- **An archived role stays in a `<select>` that already holds it** (`active_roles(include_ids=…)`),
+  labelled "(archived)". Leave it out and the browser posts nothing for it, so saving an unrelated
+  field on that form silently clears the role.
+- `create_role` **restores** an archived role of the same name (NOCASE) instead of tripping
+  `UNIQUE(venue_id, name)`, and `rename_role` refuses a clash with a message. Both were 500s before,
+  and they matter more now: the role in the way can be archived, and so not on the screen to explain
+  itself.
+- Role ids submitted for a **blocked date are still validated against ALL roles**, archived included.
+  That check exists to reject another pub's role id; narrowing it to active roles would silently drop
+  an archived one and leave the block with no roles at all — which applies to everyone.
+
+The only free-standing "delete" left is for a role nobody ever used. `tests/test_admin_roles.py`
+covers all of it.
+
 ### 2026-09-16 — Leave types, allowances and blocked dates: BUILT
 
 The full design is in **`docs/leave-design.md`** — read it before touching leave. Agreed with

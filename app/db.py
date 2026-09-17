@@ -106,6 +106,8 @@ CREATE TABLE IF NOT EXISTS venue_role (
     id INTEGER PRIMARY KEY,
     venue_id INTEGER NOT NULL REFERENCES venue(id),
     name TEXT NOT NULL,
+    archived_at TEXT,          -- NULL = in use. See app/roles.py: a role that
+                               -- has been used can't be deleted, so it retires.
     UNIQUE(venue_id, name)
 );
 
@@ -482,6 +484,15 @@ def init_schema(conn=None):
         _add_column_if_missing(conn, "attendance", "approval_status", "TEXT")
         _add_column_if_missing(conn, "attendance", "approval_decided_at", "TEXT")
         _add_column_if_missing(conn, "attendance", "approval_decided_by_person_id", "INTEGER")
+        # Retiring a job role (2026-09-17). venue_membership, shift and
+        # leave_block_role all hold a foreign key to venue_role, and this
+        # connection runs with foreign_keys=ON, so deleting a role that has
+        # ever been used raises IntegrityError -- which reached a landlord as
+        # a 500 page. Historic shifts are never tidied up, so after a few
+        # weeks that is every role. archived_at hides a role from every form
+        # that picks one while last March's rota still says who was on the
+        # bar. See app/roles.py.
+        _add_column_if_missing(conn, "venue_role", "archived_at", "TEXT")
         conn.commit()
     finally:
         if owns_conn:

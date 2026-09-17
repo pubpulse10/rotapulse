@@ -24,6 +24,7 @@ from app.leave import (BLOCK_NOTE_MAX, LEAVE_TYPE_KEYS, LEAVE_TYPE_LABELS, LEAVE
                        PORTIONS, blocked_dates_for, blocks_by_date, blocks_in_range,
                        describe_blocked_dates, freeze_counts, notify_decision, position)
 from app.notifications import send_email, send_sms
+from app.roles import active_roles
 from app.rota_auth import register_identity, require_permission
 from app.uk_time import uk_today
 from app.venue_scope import register_venue_gate, register_venue_scope
@@ -157,7 +158,7 @@ def week():
            ORDER BY shift.shift_date, shift.start_time""",
         (venue["id"], date_strs[0], date_strs[-1]),
     ).fetchall()
-    roles = db.execute("SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name", (venue["id"],)).fetchall()
+    roles = active_roles(db, venue["id"])
     open_shifts_by_date = {}
     for s in open_shifts:
         open_shifts_by_date.setdefault(s["shift_date"], []).append(s)
@@ -426,10 +427,12 @@ def cell(person_id, on_date):
            AND start_date <= ? AND end_date >= ?""",
         (person_id, venue["id"], on_date, on_date),
     ).fetchone()
-    roles = db.execute("SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name", (venue["id"],)).fetchall()
+    roles = active_roles(db, venue["id"])
+    roles_on_shifts = active_roles(db, venue["id"], include_ids=[s["venue_role_id"] for s in shifts])
     return flask.render_template(
         "rota/cell.html", person=person, on_date=on_date, shifts=shifts, override=override,
         approved_leave=approved_leave, leave_type_labels=LEAVE_TYPE_LABELS, roles=roles,
+        roles_on_shifts=roles_on_shifts,
     )
 
 
@@ -722,7 +725,7 @@ def open_shift_day(on_date):
            ORDER BY shift.start_time""",
         (venue["id"], on_date),
     ).fetchall()
-    roles = db.execute("SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name", (venue["id"],)).fetchall()
+    roles = active_roles(db, venue["id"])
     return flask.render_template("rota/open_shift_day.html", on_date=on_date, shifts=shifts, roles=roles)
 
 
@@ -957,8 +960,7 @@ def leave_queue():
         staff=staff, leave_types=[(key, label) for key, label, _r, _a in LEAVE_TYPES],
         leave_type_labels=LEAVE_TYPE_LABELS,
         blocks=blocks_in_range(db, flask.g.venue["id"], today.isoformat(), "9999-12-31"),
-        roles=db.execute("SELECT * FROM venue_role WHERE venue_id = ? ORDER BY name",
-                         (flask.g.venue["id"],)).fetchall(),
+        roles=active_roles(db, flask.g.venue["id"]),
         block_note_max=BLOCK_NOTE_MAX,
     )
 
@@ -1252,6 +1254,9 @@ def create_leave_block():
 
     # Only roles that belong to THIS venue: role ids arrive from a form, and
     # a tampered-with one must not attach another pub's role to our block.
+    # Archived roles are deliberately still valid here — the form doesn't
+    # offer them, but silently dropping one would leave the block with no
+    # roles, and a block with no roles applies to EVERYONE (app/leave.py).
     valid_roles = {
         row["id"] for row in
         db.execute("SELECT id FROM venue_role WHERE venue_id = ?", (venue_id,)).fetchall()

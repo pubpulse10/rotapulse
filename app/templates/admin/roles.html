@@ -15,14 +15,29 @@
           </form>
         </td>
         <td>
-          <form method="post" action="{{ url_for('admin_config.delete_role', role_id=role['id']) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="link-button">Delete</button>
-          </form>
+          {# Delete only where it will actually work — a role that's been used
+             can't be removed without taking the rota's memory of it with it. #}
+          {% if role['deletable'] %}
+            <form method="post" action="{{ url_for('admin_config.delete_role', role_id=role['id']) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="link-button">Delete</button>
+            </form>
+          {% else %}
+            <form method="post" action="{{ url_for('admin_config.archive_role', role_id=role['id']) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="link-button">Archive</button>
+            </form>
+          {% endif %}
         </td>
       </tr>
     {% endfor %}
   </table>
+  <p class="hint">
+    Once a role has been used on a rota, or somebody has been assigned to it,
+    it can't be deleted — last month's rota would stop saying what the shift
+    was for. Archive it instead: it stops being offered when you add a shift
+    or a staff member, and everything that already uses it reads the same.
+  </p>
 
   <h2>Add a role</h2>
   <form method="post" action="{{ url_for('admin_config.create_role') }}">
@@ -31,4 +46,32 @@
     <button type="submit" class="btn-primary">Add role</button>
   </form>
 </div>
+
+{% if archived %}
+  <div class="panel">
+    <h2>Archived roles</h2>
+    <p class="hint">Not offered anywhere you choose a role. Still named on every shift, staff record and blocked date that already used them.</p>
+    <table>
+      {% for role in archived %}
+        <tr>
+          <td>{{ role['name'] }}</td>
+          <td>
+            <form method="post" action="{{ url_for('admin_config.restore_role', role_id=role['id']) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn-secondary">Restore</button>
+            </form>
+          </td>
+          <td>
+            {% if role['deletable'] %}
+              <form method="post" action="{{ url_for('admin_config.delete_role', role_id=role['id']) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="link-button">Delete</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
+{% endif %}
 {% endblock %}
