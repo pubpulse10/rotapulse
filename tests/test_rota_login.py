@@ -137,3 +137,29 @@ def test_reset_password_via_sms_delivered_token_actually_works(app, client, venu
         conn = db_module.get_db()
         person = conn.execute("SELECT password_hash FROM person WHERE id = ?", (person_id,)).fetchone()
         assert person["password_hash"] != generate_password_hash(TEST_STAFF_PASSWORD)  # actually changed
+
+
+# --- The owner's signpost off this page -----------------------------------
+# The venue owner has no password here and never will (person.password_hash
+# stays NULL for the one SSO-only owner per venue), but this page looks like
+# an ordinary login, and app/venues.py's entry() sends anyone holding a stale
+# rotapulse_slug cookie straight to it. Without a way out they type their
+# PubPulse password in and get nowhere.
+
+def _hub_url():
+    from app import config
+    return config.PUBPULSE_HUB_URL
+
+
+def test_the_login_page_tells_an_owner_where_to_actually_log_in(client, venue):
+    html = client.get(f"/v/{venue['slug']}/login").get_data(as_text=True)
+    assert "pub owner" in html.lower()
+    assert _hub_url() in html
+
+
+def test_the_forgot_password_page_says_it_too(client, venue):
+    """Where a stuck owner goes next — and its deliberately non-enumerating
+    reply would otherwise leave them none the wiser."""
+    html = client.get(f"/v/{venue['slug']}/forgot-password").get_data(as_text=True)
+    assert "pub owner" in html.lower()
+    assert _hub_url() in html

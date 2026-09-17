@@ -126,6 +126,19 @@ h2 { font-size: 1.2rem; }
 }
 .card.narrow { max-width: 420px; }
 
+/* The owner's signpost on RotaPulse's OWN staff login (templates/login/*).
+   .panel.narrow has no max-width of its own — only .card.narrow does — so
+   this sets its own measure rather than restyling the whole login panel. */
+.login-alt {
+  max-width: 420px;
+  margin: 18px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
 /* "Add RotaPulse to your home screen" nudge (base.html + install-hint.js).
    Starts hidden and stays that way unless the script finds a platform it can
    actually give working steps for — so the [hidden] rules have to beat the
