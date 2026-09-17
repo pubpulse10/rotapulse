@@ -643,3 +643,109 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
     padding: 4px 0 4px 20px;
   }
 }
+
+/* ─── Shared PubPulse identity chip ───────────────────────────────────────
+   Deliberately identical across PricePulse, TaskPulse, RotaPulse, DiaryPulse
+   and the Hub, so "who am I signed in as, and what can I do here" looks and
+   reads the same in all five. Pairs with templates/_whoami.html and
+   app/whoami.py. Keep this block in sync across all five apps.
+
+   Colours read --pp-id-* custom properties that fall back to the canonical
+   brand values (navy #16294A, green #37A526); an app with a dark theme sets
+   them in its own dark-mode block (TaskPulse does), and the four that stay
+   light set none and are unaffected — same convention as .pp-sub. */
+.pp-id { position: relative; display: inline-block; }
+.pp-id > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    list-style: none;
+    padding: 5px 10px;
+    border: 1px solid var(--pp-id-border, #C7D0DC);
+    border-radius: 999px;
+    background: var(--pp-id-bg, #fff);
+    font-size: 13px;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+.pp-id > summary::-webkit-details-marker { display: none; }
+.pp-id > summary::after { content: "\25BE"; font-size: 10px; color: var(--pp-id-text, #5B6672); }
+.pp-id > summary:hover, .pp-id[open] > summary { border-color: var(--pp-id-border-hover, #94A3B8); }
+.pp-id-name {
+    font-weight: 600;
+    color: var(--pp-id-name, #16294A);
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* The role, said out loud rather than left to be inferred from the menu. */
+.pp-id-role {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    padding: 2px 7px;
+    border-radius: 999px;
+    color: #fff;
+    background: #5B6672;
+}
+/* Navy on TaskPulse's dark background is muddy, so this one is a variable
+   too — the other three read fine against both themes. */
+.pp-id-owner   .pp-id-role { background: var(--pp-id-owner-bg, #16294A); }
+.pp-id-manager .pp-id-role { background: #37A526; }
+.pp-id-staff   .pp-id-role { background: #5B6672; }
+.pp-id-support .pp-id-role { background: #B45309; }
+
+.pp-id-menu {
+    position: absolute;
+    right: 0;
+    margin-top: 8px;
+    min-width: 250px;
+    background: var(--pp-id-bg, #fff);
+    border: 1px solid var(--pp-id-border, #C7D0DC);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .14);
+    padding: 12px 14px;
+    z-index: 300;
+    text-align: left;
+    white-space: normal;
+}
+.pp-id-menu p { margin: 0 0 4px; font-size: 13px; color: var(--pp-id-text, #5B6672); }
+.pp-id-who { font-weight: 600; color: var(--pp-id-name, #16294A); word-break: break-word; }
+.pp-id-place { font-size: 12px; }
+.pp-id-blurb {
+    border-top: 1px solid var(--pp-id-border, #C7D0DC);
+    margin-top: 9px;
+    padding-top: 9px;
+    line-height: 1.45;
+}
+.pp-id-blurb strong { color: var(--pp-id-name, #16294A); }
+/* Beats each app's own `nav a` rules, which this menu sits inside. */
+.pp-id-menu a.pp-id-link, .pp-id-menu button.pp-id-link {
+    display: block;
+    width: 100%;
+    padding: 8px 0 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    color: var(--pp-id-name, #16294A);
+    text-decoration: none;
+    cursor: pointer;
+}
+.pp-id-menu a.pp-id-link:hover, .pp-id-menu button.pp-id-link:hover { text-decoration: underline; }
+.pp-id-out {
+    border-top: 1px solid var(--pp-id-border, #C7D0DC);
+    margin-top: 9px;
+    padding-top: 2px;
+}
+.pp-id-menu form.pp-id-out { margin: 0; }
+
+@media (max-width: 720px) {
+    /* The nav is already a stacked column at this width, so an absolutely
+       positioned menu would float over the links below it. */
+    .pp-id { display: block; }
+    .pp-id-menu { position: static; box-shadow: none; margin: 6px 0 0; min-width: 0; }
+}

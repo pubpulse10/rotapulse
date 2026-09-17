@@ -1,0 +1,40 @@
+{# ─── Shared PubPulse identity chip ───────────────────────────────────────
+   Says who you are signed in as and what you're allowed to do, in the same
+   place and the same words in every PubPulse app. Without it, the only clue
+   to your role was which nav links happened to appear, and each app named
+   the same role differently under the hood (is_task_admin / app_admin /
+   rota_admin / manager / a bare pub_id session). app/whoami.py in each app
+   maps its own vocabulary onto the family's four: Owner, Manager, Staff,
+   Support.
+
+   A native <details> rather than each app's own dropdown: the apps implement
+   those three different ways (PricePulse <details>, TaskPulse/RotaPulse via
+   nav.js, DiaryPulse none at all), and this block has to be byte-identical
+   in all five. Keep it in sync across PricePulse, TaskPulse, RotaPulse,
+   DiaryPulse and the Hub. #}
+{% if whoami %}
+<details class="pp-id pp-id-{{ whoami.role }}">
+    <summary>
+        <span class="pp-id-name">{{ whoami.name }}</span>
+        <span class="pp-id-role">{{ whoami.role_label }}</span>
+    </summary>
+    <div class="pp-id-menu">
+        <p class="pp-id-who">{{ whoami.email or whoami.name }}</p>
+        {% if whoami.place %}<p class="pp-id-place">{{ whoami.place }}</p>{% endif %}
+        <p class="pp-id-blurb"><strong>{{ whoami.role_label }}</strong> — {{ whoami.role_blurb }}</p>
+        {% if whoami.manage_url %}
+        <a class="pp-id-link" href="{{ whoami.manage_url }}">People &amp; access</a>
+        {% endif %}
+        {% if whoami.logout_post %}
+        {# RotaPulse's own invited-staff logout is POST-only (it clears a local
+           session key, not the shared cookie), so it needs the CSRF token. #}
+        <form method="post" action="{{ whoami.logout_url }}" class="pp-id-out">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="pp-id-link pp-id-logout">Log out</button>
+        </form>
+        {% else %}
+        <a class="pp-id-link pp-id-out" href="{{ whoami.logout_url }}">Log out</a>
+        {% endif %}
+    </div>
+</details>
+{% endif %}

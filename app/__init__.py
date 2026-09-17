@@ -106,6 +106,16 @@ def create_app():
         # the Hub all read. "My Apps" just links back to it.
         return {"pubpulse_hub_url": config.PUBPULSE_HUB_URL}
 
+    @app.context_processor
+    def _inject_whoami():
+        # Renders on every page, error pages included, so a failure in here
+        # must not take a 500 page down with it — the chip just doesn't show.
+        from app.whoami import current_identity
+        try:
+            return {"whoami": current_identity()}
+        except Exception:
+            return {"whoami": None}
+
     @app.template_global()
     def static_version(filename):
         """Cache-busting query string for a static asset, based on its own

@@ -55,12 +55,10 @@
           <a class="{{ 'active' if active_section == 'my_shifts' else '' }}" href="{{ url_for('staff_portal.home') }}">My shifts</a>
         {% endif %}
         <a href="{{ pubpulse_hub_url }}">My Apps</a>
-        {% if g.person and g.person['pub_id'] is none %}
-          <form method="post" action="{{ url_for('rota_login.logout') }}" class="inline-form" style="display:inline">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="link-button">Log out</button>
-          </form>
-        {% endif %}
+        {# Was a POST log-out shown only to RotaPulse's own invited staff,
+           which left an owner — authenticated by the shared family cookie —
+           with no way to log out at all. The chip covers both. #}
+        {% include "_whoami.html" %}
       </nav>
     {% elif g.get('venue') %}
       <a class="admin-link" href="{{ url_for('rota_login.login') }}">Log in</a>
