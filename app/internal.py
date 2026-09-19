@@ -15,7 +15,7 @@ import hmac
 
 from flask import Blueprint, jsonify, request
 
-from app import config
+from app import config, notifications
 from app.billing import cancel_subscriptions_for_pub, enforce_band
 from app.db import get_db, get_app_id, delete_venue_by_pub_id
 from app.extensions import limiter
@@ -209,3 +209,29 @@ def venues_delete():
     cancelled = cancel_subscriptions_for_pub(db, pub_id)
     deleted = delete_venue_by_pub_id(db, pub_id)
     return jsonify({"ok": True, "deleted": deleted, "cancelled": cancelled})
+
+
+@internal_bp.route("/mail-status", methods=["GET"])
+@limiter.limit("30 per minute")
+def mail_status():
+    """For the Hub's health board: can RotaPulse still log in to the Brevo
+    mail relay? Logs in and quits, sending nothing (pricepulse D60)."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    return jsonify(notifications.check_login())
+
+
+@internal_bp.route("/notify-status", methods=["GET"])
+@limiter.limit("30 per minute")
+def notify_status():
+    """For the Hub's health board: can RotaPulse text, and are its texts and
+    emails actually getting out? send_sms/send_email swallow their failures
+    so a page never 500s over one, which is also what makes a dead Twilio
+    token invisible (pricepulse D60). ?probe=0 skips the Twilio account
+    lookup and returns only the recorded history."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    return jsonify({
+        "twilio": notifications.check_twilio() if request.args.get("probe") != "0" else None,
+        "recent": notifications.recent_attempts(),
+    })
