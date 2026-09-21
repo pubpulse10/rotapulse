@@ -29,6 +29,7 @@ from app import config
 from app.db import get_db
 from app.extensions import limiter
 from app.notifications import send_email, send_sms
+from app.rota_auth import access_statuses, inactive_access_message
 from app.venue_scope import register_venue_gate, register_venue_scope
 
 login_bp = flask.Blueprint("rota_login", __name__, url_prefix="/v/<slug>")
@@ -73,6 +74,16 @@ def login():
         db = get_db()
         person = _find_person_by_identifier(db, venue["id"], identifier)
         if person and check_password_hash(person["password_hash"], password):
+            # Right password, but access not active yet — most often waiting
+            # on an admin's approval after they completed their invite.
+            # Letting them "in" here only bounced them straight back to this
+            # page from the staff portal with nothing said (require_permission),
+            # which is indistinguishable from a wrong password. Real report,
+            # 2026-09-21 (The Queens Head).
+            statuses = access_statuses(db, venue["id"], person["id"])
+            if "active" not in statuses:
+                flask.flash(inactive_access_message(statuses), "error")
+                return flask.render_template("login/login.html", venue=venue)
             flask.session.permanent = True
             flask.session["rotapulse_person_id"] = person["id"]
             next_param = flask.request.args.get("next")

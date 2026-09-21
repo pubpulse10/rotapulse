@@ -3,7 +3,13 @@
 {% block content %}
 <div class="panel">
   <h1>Staff</h1>
-  <p><a href="{{ url_for('admin_config.pending_approval') }}">View pending approvals</a></p>
+  <p>
+    <a href="{{ url_for('admin_config.pending_approval') }}">View pending approvals</a>
+    {% if pending_staff_approvals %}
+      <span class="badge badge-over-target">{{ pending_staff_approvals }} waiting</span>
+      — they can't log in until you approve them.
+    {% endif %}
+  </p>
   <table>
     <tr><th>Name</th><th>Role</th><th>Permission</th><th>Status</th><th>Pay rate</th><th></th><th></th></tr>
     {% for member in staff %}

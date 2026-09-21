@@ -107,6 +107,24 @@ def create_app():
         return {"pubpulse_hub_url": config.PUBPULSE_HUB_URL}
 
     @app.context_processor
+    def _inject_pending_staff_approvals():
+        """Badge on the Staff nav link. Only queried for an admin who has a
+        venue in scope, and wrapped like _inject_whoami below — a badge is
+        never worth taking a page down for."""
+        try:
+            if not (flask.g.get("permission_levels", set()) & {"app_admin", "rota_admin"}):
+                return {"pending_staff_approvals": 0}
+            venue = flask.g.get("venue")
+            if not venue:
+                return {"pending_staff_approvals": 0}
+            from app.admin_config import pending_approval_count
+            from app.db import get_db
+
+            return {"pending_staff_approvals": pending_approval_count(get_db(), venue["id"])}
+        except Exception:
+            return {"pending_staff_approvals": 0}
+
+    @app.context_processor
     def _inject_whoami():
         # Renders on every page, error pages included, so a failure in here
         # must not take a 500 page down with it — the chip just doesn't show.

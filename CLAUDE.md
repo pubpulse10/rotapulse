@@ -30,6 +30,33 @@ re-deciding something already recorded here.
 
 ## Decisions
 
+### 2026-09-21 — The approval step has to announce itself, at both ends
+
+Support report from The Queens Head: "the account seems to get created but then cannot log in."
+Nothing was broken. Staff finish their invite, land in `pending_approval`, and an admin has to
+approve them before `rota_auth` grants any permission level. Neither side was told:
+
+- The staff member typed the **right** password, `rota_login` let them through, and
+  `require_permission` redirected them straight back to the login form with no flash at all —
+  indistinguishable from a wrong password. `login()` now checks `access_statuses()` before
+  creating the session and explains (`inactive_access_message()`, shared with
+  `require_permission`'s redirect so a session that goes stale mid-visit says the same thing).
+  A wrong password still gets the old vague message — never confirm account state to someone
+  who hasn't proved who they are.
+- The admin was told nothing whatsoever. Now: a count badge on the Staff nav link (context
+  processor `_inject_pending_staff_approvals`, admins only, failure-swallowed like `whoami`),
+  the same count on the Staff page, and an email to the venue's admins the moment someone
+  finishes their invite (`onboarding._tell_admins_someone_is_waiting`).
+
+**That email deliberately does NOT go through `notification_settings.notify_admins()`.** That
+system is silent unless the venue has already enabled the event type and picked recipients,
+which a venue setting itself up for the first time has not — so routing it there would have
+sent nothing to the very people who hit this. Like the invite itself, it has to arrive by
+default. Same reasoning as `remind_staff_to_clock_in`.
+
+Still open, for the owner: whether an approval step earns its keep at all when the landlord
+invited the person themselves.
+
 ### 2026-09-17 — A job role is archived, never deleted once it has been used
 
 `delete_role` used to 500. `venue_membership.job_role_id`, `shift.venue_role_id` and

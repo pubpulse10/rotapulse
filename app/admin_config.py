@@ -343,6 +343,20 @@ def delete_role(role_id):
 # hears about what, not each recipient for themselves) ----------
 
 
+def pending_approval_count(db, venue_id):
+    """How many people have finished their invite and are waiting to be
+    approved. Shown as a badge on the Staff nav link so an admin can see it
+    without going looking — see the note on onboarding._tell_admins_someone_
+    is_waiting for why they were never told at all before."""
+    return db.execute(
+        """SELECT COUNT(*) AS n FROM app_access
+           JOIN venue_membership ON venue_membership.id = app_access.venue_membership_id
+           WHERE venue_membership.venue_id = ? AND app_access.status = 'pending_approval'
+           AND app_access.app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+        (venue_id,),
+    ).fetchone()["n"]
+
+
 def _eligible_notification_recipients(db, venue_id):
     """Anyone with active app_admin or rota_admin access at this venue —
     the same pool the owner can pick from for any notification type."""

@@ -23,6 +23,7 @@ from werkzeug.security import generate_password_hash
 
 from app.db import get_db
 from app.media import save_avatar
+from app.notifications import send_email
 from app.roles import active_roles
 from app.venue_scope import register_venue_scope
 
@@ -34,6 +35,33 @@ DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 def _hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
+
+
+def _tell_admins_someone_is_waiting(db, venue, staff_name):
+    """Email the venue's admins that someone is sitting in the approval
+    queue. Real report, 2026-09-21 (The Queens Head): staff completed their
+    invites and nothing told the owner they were waiting, so they sat there
+    unable to log in and it looked like the accounts were broken.
+
+    Deliberately NOT through notification_settings.notify_admins(): that is
+    the owner-configurable monitoring system, and it is silent unless the
+    venue has already enabled that event type AND picked recipients — which
+    a venue setting itself up for the first time has not. This one has to
+    arrive by default, like the invite itself. Best-effort: a failed send
+    must never break the staff member's onboarding (send_email already
+    swallows its own errors and returns False)."""
+    from app.admin_config import _eligible_notification_recipients
+
+    approvals_url = flask.url_for("admin_config.pending_approval", slug=venue["slug"], _external=True)
+    for admin in _eligible_notification_recipients(db, venue["id"]):
+        if not admin["email"]:
+            continue
+        send_email(
+            admin["email"],
+            f"{staff_name} is waiting for approval on RotaPulse",
+            f"{staff_name} has finished setting up their RotaPulse account at {venue['name']}.\n\n"
+            f"They can't log in until you approve them:\n{approvals_url}\n",
+        )
 
 
 def _find_access_by_token(db, token):
@@ -104,6 +132,7 @@ def accept(token):
             (access["id"],),
         )
         db.commit()
+        _tell_admins_someone_is_waiting(db, venue, person["name"])
 
         flask.flash(
             "Profile complete — an admin needs to approve your account before you can log in."

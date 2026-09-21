@@ -42,7 +42,9 @@
             </div>
           </div>
           <a class="{{ 'active' if active_section == 'leave' else '' }}" href="{{ url_for('rota_grid.leave_queue') }}">Leave</a>
-          <a class="{{ 'active' if active_section == 'staff' else '' }}" href="{{ url_for('admin_config.staff_list') }}">Staff</a>
+          {# Badge = people who finished their invite and can't log in until
+             someone approves them. Nothing used to say they were waiting. #}
+          <a class="{{ 'active' if active_section == 'staff' else '' }}" href="{{ url_for('admin_config.staff_list') }}">Staff{% if pending_staff_approvals %} <span class="badge badge-over-target" title="{{ pending_staff_approvals }} waiting to be approved before they can log in">{{ pending_staff_approvals }}</span>{% endif %}</a>
           <a class="{{ 'active' if active_section == 'payroll' else '' }}" href="{{ url_for('payroll.report') }}">Payroll</a>
           <a class="{{ 'active' if active_section == 'dashboard' else '' }}" href="{{ url_for('dashboard.week') }}">Dashboard</a>
         {% endif %}

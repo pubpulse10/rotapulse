@@ -24,6 +24,40 @@ from urllib.parse import quote
 from app.db import get_db
 
 
+def access_statuses(db, venue_id, person_id):
+    """Every RotaPulse app_access status this person holds at this venue.
+    A set, because the owner holds two rows (app_admin + rota_admin) — the
+    question is always "is any of them active?", never "what is the one
+    status". Empty for someone with no access row at all."""
+    return {
+        row["status"]
+        for row in db.execute(
+            """SELECT app_access.status FROM app_access
+               JOIN venue_membership ON venue_membership.id = app_access.venue_membership_id
+               WHERE venue_membership.venue_id = ? AND venue_membership.person_id = ?
+               AND app_access.app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+            (venue_id, person_id),
+        ).fetchall()
+    }
+
+
+def inactive_access_message(statuses):
+    """What to tell someone whose password is right but whose access isn't
+    active yet. Real report, 2026-09-21 (The Queens Head): staff completed
+    their invite, weren't approved yet, and got bounced back to the login
+    form with NO message — identical to typing the wrong password, so it
+    read as "the account was created but can't log in"."""
+    if "pending_approval" in statuses:
+        return (
+            "Your profile is complete, but your account still needs approving before you "
+            "can log in. Ask your manager to approve you — it's under Staff, "
+            "\"View pending approvals\"."
+        )
+    if "invited" in statuses:
+        return "Finish setting up your account using the invite link you were sent, then log in."
+    return "Your access to this venue isn't active — please speak to your manager."
+
+
 def register_identity(blueprint):
     @blueprint.before_request
     def _resolve_identity():
@@ -134,6 +168,17 @@ def require_permission(*levels):
                     from app import config
 
                     return flask.redirect(f"{config.PRICEPULSE_LOGIN_URL}?next={quote(flask.request.url, safe='')}")
+                # Someone signed in whose access has since stopped being
+                # active (approval pending, or revoked while they were
+                # logged in) would otherwise be redirected to the login
+                # page with nothing said — the same silent bounce the
+                # login route now explains. Say why here too.
+                person = flask.g.get("person")
+                if person is not None and flask.g.get("venue"):
+                    flask.flash(
+                        inactive_access_message(access_statuses(get_db(), flask.g.venue["id"], person["id"])),
+                        "error",
+                    )
                 return flask.redirect(flask.url_for("rota_login.login", next=flask.request.path))
             return view(*args, **kwargs)
 
