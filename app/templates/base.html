@@ -57,6 +57,9 @@
           <a class="{{ 'active' if active_section == 'my_shifts' else '' }}" href="{{ url_for('staff_portal.home') }}">My shifts</a>
         {% endif %}
         <a href="{{ pubpulse_hub_url }}">My Apps</a>
+        {# Where the shared Help & feedback widget puts its link — an explicit
+           mount so it lands before the identity chip rather than after it. #}
+        <span id="pp-help-mount"></span>
         {# Was a POST log-out shown only to RotaPulse's own invited staff,
            which left an owner — authenticated by the shared family cookie —
            with no way to log out at all. The chip covers both. #}
@@ -141,6 +144,24 @@
   {% endif %}
   {% if show_install_hint %}
     <script src="{{ url_for('static', filename='install-hint.js') }}?v={{ static_version('install-hint.js') }}" defer></script>
+  {% endif %}
+  {# The shared PubPulse "Help & feedback" widget, served by the Hub so there
+     is one copy across all five apps — do NOT vendor it into our static/.
+     It posts to help_feedback.submit on this origin, with our CSRF token;
+     that endpoint fills in who the customer is and forwards it to the Hub.
+     See pubpulse-hub docs/help-widget-integration.md.
+
+     Signed-in staff only, and never in a support-readonly session: PubPulse
+     support looking at someone's account must not file feedback as them. #}
+  {% if g.get('venue') and g.get('person') and not support_readonly %}
+    <script data-pp-help-widget
+            src="{{ pubpulse_hub_url }}/static/help-widget.js"
+            data-app="rotapulse"
+            data-endpoint="{{ url_for('help_feedback.submit') }}"
+            data-csrf="{{ csrf_token() }}"
+            data-version="{{ app_version() }}"
+            data-mount="#pp-help-mount"
+            defer></script>
   {% endif %}
   <script>
     // Click-to-toggle nav dropdowns (e.g. "Rota") — click, not hover, since

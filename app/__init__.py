@@ -135,6 +135,14 @@ def create_app():
             return {"whoami": None}
 
     @app.template_global()
+    def app_version():
+        """The commit this instance is running, sent with a Help & feedback
+        report so "which version were they on?" is answerable from the ticket
+        rather than from guessing at the deploy history. Same value /health
+        reports."""
+        return os.environ.get("RENDER_GIT_COMMIT", "dev")[:12]
+
+    @app.template_global()
     def static_version(filename):
         """Cache-busting query string for a static asset, based on its own
         mtime — same idiom as the sibling apps."""
@@ -180,6 +188,7 @@ def create_app():
     from app.billing import billing_bp, register_webhook
     from app.dashboard import dashboard_bp
     from app.family_admin import family_admin_bp
+    from app.help_feedback import help_feedback_bp
     from app.internal import internal_bp
     from app.media import media_bp
     from app.onboarding import onboard_bp
@@ -202,6 +211,10 @@ def create_app():
     app.register_blueprint(billing_bp)
     app.register_blueprint(media_bp)
     app.register_blueprint(family_admin_bp)
+    # Deliberately NOT csrf-exempt, unlike internal_bp below: this one is a
+    # browser POST on our own origin (the Help & feedback widget), so it is an
+    # ordinary CSRF target. See app/help_feedback.py.
+    app.register_blueprint(help_feedback_bp)
 
     @app.route("/favicon.ico")
     def favicon():
@@ -294,8 +307,12 @@ def create_app():
         # promote to an enforcing Content-Security-Policy header.
         resp.headers.setdefault(
             "Content-Security-Policy-Report-Only",
+            # app.pubpulse.co.uk serves the shared Help & feedback widget
+            # (pubpulse-hub docs/help-widget-integration.md). Added to the
+            # report-only policy NOW rather than when it is promoted, so
+            # promoting it cannot silently stop the widget loading.
             "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
-            "script-src 'self' 'unsafe-inline' https://js.stripe.com; "
+            f"script-src 'self' 'unsafe-inline' https://js.stripe.com {config.PUBPULSE_HUB_URL}; "
             "frame-src https://js.stripe.com; object-src 'none'; base-uri 'self'",
         )
         return resp

@@ -30,6 +30,44 @@ re-deciding something already recorded here.
 
 ## Decisions
 
+### 2026-09-22 — Help & feedback: the widget is the Hub's, the identity is ours
+
+RotaPulse is the first app to carry the family's shared "Help & feedback" widget. Two
+pieces, and the split matters:
+
+- **The widget itself is served by the Hub** (`{{ pubpulse_hub_url }}/static/help-widget.js`,
+  loaded in `base.html` for a signed-in person outside a support session). **Do not vendor a
+  copy into `app/static/`.** One form across five apps is the entire point; four copies is
+  four forms that drift until one of them is still sending a type the Hub stopped accepting.
+- **`app/help_feedback.py` is ours, and its only job is saying who is submitting.** The
+  widget posts here — on our own origin, with our own CSRF token — and this forwards it to
+  the Hub with `INTERNAL_API_SECRET` (pubpulse-hub `docs/decisions.md` D3). It never posts
+  to the Hub from the browser: that would mean a credentialed CORS surface on the identity
+  hub and a Hub CSRF token fetched into our page.
+
+**The browser never says who it is.** `pub_id`, `user_email`, `user_name` and `app` are all
+set server-side from `g.person` / `g.venue` / the session, overwriting anything posted. A
+`pub_id` trusted from a form would let any signed-in customer file feedback as any other —
+and the Hub's "Your conversations" page keys off exactly those values, so it would be a way
+to read a stranger's support replies too. An invited staff member has `person.pub_id = NULL`,
+hence the fall back to `venue.pub_id` and then the shared cookie.
+
+**No `register_venue_gate` on that blueprint, deliberately** — the same exemption the
+billing blueprint has. That gate locks a whole venue when the subscription is not active,
+and someone who has just been locked out is exactly the person who needs to ask why.
+
+We validate nothing about the message and store nothing: lengths, enums and the screenshot
+are the Hub's rules, checked in the Hub, and the screenshot is streamed straight through
+rather than saved (a copy here would be a second store of customer screenshots with none of
+the Hub's magic-byte checks or re-encoding done to it). The Hub's JSON and status code are
+passed back untouched, because the widget shows `errors[0]` to the customer.
+
+`app.pubpulse.co.uk` is now in the report-only CSP's `script-src` — added now rather than
+when the policy is promoted, so promoting it cannot silently stop the widget loading.
+
+The recipe, for when the other three apps follow: pubpulse-hub
+`docs/help-widget-integration.md`. Tests: `tests/test_help_feedback.py` (14).
+
 ### 2026-09-21 — The approval step has to announce itself, at both ends
 
 Support report from The Queens Head: "the account seems to get created but then cannot log in."
