@@ -586,10 +586,14 @@ def edit_staff(membership_id):
         # shown on the staff self-edit screen") — a rota_admin using this
         # same consolidated form must not be able to smuggle a pay-rate
         # change through it by posting the field directly.
-        if "app_admin" in flask.g.permission_levels:
+        # Keep what's there unless an app_admin actually submitted a new
+        # figure: the form has to be missing the field for a rota_admin, and
+        # `or 0` on an absent field would quietly wipe somebody's pay rate.
+        current_rate = (detail["hourly_pay_rate"] if detail else 0) or 0
+        if "app_admin" in flask.g.permission_levels and "hourly_pay_rate" in form:
             pay_rate = form.get("hourly_pay_rate", type=float) or 0
         else:
-            pay_rate = detail["hourly_pay_rate"] if detail else 0
+            pay_rate = current_rate
         # Blank means "work it out" for both of these: an allowance is only
         # pinned when the landlord types one, and usual daily hours fall back
         # to the person's recent shifts (app/leave.py).

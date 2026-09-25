@@ -42,6 +42,15 @@
           <option value="rota_admin" {{ 'selected' if editable_access['permission_level'] == 'rota_admin' }}>Rota admin</option>
         </select>
       {% endif %}
+    {% else %}
+      {# Shown, not hidden. A rota_admin used to get no pay rate on this screen
+         at all, which reads as "this app can't edit pay rates" rather than
+         "you can't" — and that is how a wrong rate went uncorrected through a
+         payroll run. Editing stays app_admin-only (spec §2.1/§4). #}
+      <label>Hourly pay rate</label>
+      <p class="hint">£{{ '%.2f'|format((detail['hourly_pay_rate'] if detail else 0) or 0) }} —
+        only the account owner can change pay rates. Ask them to open this
+        screen and change it here.</p>
     {% endif %}
 
     <label for="home_address">Home address</label>

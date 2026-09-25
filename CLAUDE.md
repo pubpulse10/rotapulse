@@ -16,6 +16,17 @@ re-deciding something already recorded here.
   deploy while the schema stays behind. `tests/test_schema_bootstrap.py` is the tripwire. TaskPulse still has
   this gap; pubpulse-hub and pricepulse do not.
 
+- **`app_admin` belongs to the venue owner, and nothing outside `venues.setup()` may create or
+  destroy it.** It is not a grant somebody made: it follows from owning the PubPulse account,
+  and `setup()` writes `app_admin` + `rota_admin` once. `app/internal.py`'s Hub push must never
+  write it, never delete it, and must ignore a push aimed at the owner's own person row
+  entirely (their `person.pub_id` is set; a staff person's never is). `rota_auth` rebuilds the
+  pair whenever a session that resolved to the owner by `pub_id` turns out to be missing
+  `app_admin`, so a venue that has already lost it repairs itself on the next page view.
+  Losing it is nearly silent — rota_admin still runs the whole day-to-day app, so all the owner
+  sees is Settings gone from the menu and the pay-rate field gone from a staff record
+  (25 September 2026).
+
 - **Affiliate attribution (Rewardful) rides on Stripe Customer `metadata.referral`, never on
   `client_reference_id`.** Here `client_reference_id` carries the venue id, and the webhook and the
   `/billing/success` reconcile both depend on it. The referral lives in PricePulse, the family's identity store.
@@ -67,6 +78,50 @@ when the policy is promoted, so promoting it cannot silently stop the widget loa
 
 The recipe, for when the other three apps follow: pubpulse-hub
 `docs/help-widget-integration.md`. Tests: `tests/test_help_feedback.py` (14).
+
+### 2026-09-25 — A pay rate that couldn't be edited was the owner losing app_admin
+
+Reported after the first payroll run: a staff member's hourly rate had been entered wrongly
+at onboarding and the Staff → Edit screen offered no way to correct it. The field was not
+missing. It is `app_admin`-only (spec §2.1/§4) and has been since it was built, with a test;
+what had gone was the owner's `app_admin`.
+
+`app/internal.py::_link_or_create_person` matched an incoming Hub person to a local person
+row **by email**, which exists for a good reason — RotaPulse's own invite flow is still how
+staff are actually onboarded ([[family-access-plan]] Phase 4 is deferred), so the same human
+can arrive down both paths and must not end up as two records. But the owner's person row
+carries the landlord's account email, so a Hub person invited under that address adopted it,
+and the next line —
+
+    DELETE FROM app_access WHERE venue_membership_id = ? AND app_id = ?
+
+— then took `app_admin` and `rota_admin` with it and put back a single row at whatever level
+the Hub held. Everything else went on working, which is why it read as a missing field rather
+than as lost access.
+
+Three changes, and deliberately all three rather than only the one that stops it recurring:
+
+1. The email match skips any row with a `pub_id` (that is the owner, by definition).
+2. A push that still resolves to an owner's row — because an earlier version already stamped
+   the Hub id on it — returns `{"ok": true, "skipped": "venue owner"}` without touching the
+   person or their access. Ignoring it is right: the owner already holds more than any grant
+   could give, and the alternative is renaming the landlord and demoting them.
+3. `rota_auth._restore_owner_access()` puts the pair back for anyone the `pub_id` cookie
+   already proves is the owner. A one-off repair script would have needed a Render Shell and
+   would fix exactly one venue; this fixes the one that was broken, on the next page view,
+   and any other that ever gets there.
+
+Also, the Edit screen now **shows** a rota_admin the pay rate as read-only text saying only
+the account owner can change it, instead of leaving the field out altogether. An absent field
+reads as "this app can't do that" rather than "you can't" — which is a fair part of why a
+wrong rate survived a payroll run. And `edit_staff` no longer treats an absent
+`hourly_pay_rate` as 0: the rota_admin form has no such field, and `or 0` on a missing value
+would wipe a rate rather than keep it.
+
+Payroll reads the current rate live, so correcting the rate and re-running the report for the
+period is the whole fix — there is no frozen historical figure to back-correct.
+
+`tests/test_owner_app_admin_survives.py`.
 
 ### 2026-09-21 — The approval step has to announce itself, at both ends
 

@@ -101,6 +101,7 @@ def register_identity(blueprint):
         # Owner via the shared pub cookie — only when this ISN'T a Hub-staff
         # session (a staff session carries the owner's pub_id too, so a bare
         # pub_id match would otherwise resolve them as the owner).
+        resolved_as_owner = False
         if person is None and flask.session.get("pub_id") is not None and hub_person_id is None:
             person = db.execute(
                 """SELECT person.* FROM person
@@ -108,6 +109,7 @@ def register_identity(blueprint):
                    WHERE person.pub_id = ? AND venue_membership.venue_id = ?""",
                 (flask.session["pub_id"], venue["id"]),
             ).fetchone()
+            resolved_as_owner = person is not None
 
         if person is None:
             return
@@ -121,15 +123,57 @@ def register_identity(blueprint):
 
         flask.g.person = person
         flask.g.membership = membership
-        flask.g.permission_levels = {
-            row["permission_level"]
-            for row in db.execute(
-                """SELECT permission_level FROM app_access
-                   WHERE venue_membership_id = ? AND status = 'active'
-                   AND app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
-                (membership["id"],),
-            ).fetchall()
-        }
+        levels = _active_levels(db, membership["id"])
+        if resolved_as_owner and "app_admin" not in levels:
+            levels = _restore_owner_access(db, membership["id"])
+        flask.g.permission_levels = levels
+
+
+def _active_levels(db, membership_id):
+    return {
+        row["permission_level"]
+        for row in db.execute(
+            """SELECT permission_level FROM app_access
+               WHERE venue_membership_id = ? AND status = 'active'
+               AND app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+            (membership_id,),
+        ).fetchall()
+    }
+
+
+def _restore_owner_access(db, membership_id):
+    """Put the owner's app_admin back, for whoever is demonstrably the owner.
+
+    Their tier is not a grant anybody made: it follows from owning the PubPulse
+    account, and venues.setup() writes app_admin + rota_admin once, at the
+    start. Losing app_admin is close to invisible — every day-to-day screen
+    still works on rota_admin, so what the owner sees is Settings quietly gone
+    from the menu and the pay-rate field quietly gone from a staff record. It
+    reads as "that field isn't editable", not as "you are no longer the owner",
+    which is how it reached us: a payroll rate that couldn't be corrected
+    (25 September 2026).
+
+    RotaPulse's own screens never delete these rows. app/internal.py's Hub push
+    did, whenever a Hub person shared the landlord's email address, and that is
+    fixed at the same time as this. Rebuilding here rather than in a one-off
+    script means a venue that already lost them repairs itself on the owner's
+    next page view, with no Render Shell and nothing for anyone to run.
+
+    Reached only when the session resolved to the owner by pub_id — the same
+    test that already decides they're the owner at all.
+    """
+    app_id_row = db.execute("SELECT id FROM app WHERE key = 'rotapulse'").fetchone()
+    for level in ("app_admin", "rota_admin"):
+        db.execute(
+            """INSERT INTO app_access
+                   (venue_membership_id, app_id, permission_level, status, accepted_at, approved_at)
+               VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))
+               ON CONFLICT(venue_membership_id, app_id, permission_level)
+               DO UPDATE SET status = 'active'""",
+            (membership_id, app_id_row["id"], level),
+        )
+    db.commit()
+    return _active_levels(db, membership_id)
 
 
 def require_permission(*levels):

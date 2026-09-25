@@ -102,8 +102,14 @@ def _link_or_create_person(db, hub_person_id, name, email):
         return person["id"]
 
     if email:
+        # `pub_id IS NULL` keeps this away from the VENUE OWNER's own person
+        # row, which carries their pub_id and their account email. Without it,
+        # a Hub person invited under the same address as the landlord adopted
+        # the owner's record — and the grant write below then replaced the
+        # owner's app_admin with a single staff-tier row (25 September 2026).
         person = db.execute(
-            "SELECT id FROM person WHERE hub_person_id IS NULL AND email = ?", (email,)
+            "SELECT id FROM person WHERE hub_person_id IS NULL AND pub_id IS NULL AND email = ?",
+            (email,),
         ).fetchone()
         if person is not None:
             db.execute("UPDATE person SET hub_person_id = ? WHERE id = ?", (hub_person_id, person["id"]))
@@ -153,6 +159,18 @@ def access():
 
     # pub_id stays NULL on this person row (that's owner-only).
     person_id = _link_or_create_person(db, hub_person_id, name, email)
+
+    # The venue owner is not staff, and their access is not a grant: it comes
+    # from owning the PubPulse account, and venues.setup() writes app_admin +
+    # rota_admin once. Nothing pushed from the Hub may rewrite it. This catches
+    # a person row that an earlier version of _link_or_create_person already
+    # attached to the owner by email — renaming them and demoting them to
+    # whatever the Hub calls them would be worse than ignoring the push, and
+    # the owner already has more access than any grant could give.
+    owner_row = db.execute("SELECT pub_id FROM person WHERE id = ?", (person_id,)).fetchone()
+    if owner_row is not None and owner_row["pub_id"] is not None:
+        return jsonify({"ok": True, "skipped": "venue owner"})
+
     db.execute("UPDATE person SET name = ?, email = ? WHERE id = ?", (name, email, person_id))
 
     membership = db.execute(
@@ -169,8 +187,12 @@ def access():
 
     app_id = get_app_id(db, "rotapulse")
     # One current RotaPulse grant per membership: clear any prior level, set new.
-    db.execute("DELETE FROM app_access WHERE venue_membership_id = ? AND app_id = ?",
-               (membership_id, app_id))
+    # Never app_admin — that tier is the owner's, provisioned from the SSO
+    # account, and this endpoint has no business creating or destroying it.
+    db.execute(
+        "DELETE FROM app_access WHERE venue_membership_id = ? AND app_id = ? "
+        "AND permission_level != 'app_admin'",
+        (membership_id, app_id))
     db.execute(
         "INSERT INTO app_access (venue_membership_id, app_id, permission_level, status, accepted_at) "
         "VALUES (?, ?, ?, ?, datetime('now'))",
