@@ -28,12 +28,12 @@ def test_owner_sees_the_owner_chip_and_a_working_log_out(client, venue):
 
 def test_only_the_owner_is_offered_people_and_access(client, app, venue):
     login_as_pub(client, venue["pub_id"])
-    assert "People &amp; access" in client.get(WEEK.format(slug=venue["slug"])).get_data(as_text=True)
+    assert "Staff &amp; access" in client.get(WEEK.format(slug=venue["slug"])).get_data(as_text=True)
 
     person_id, _, _ = create_active_staff(app, venue["id"], permission_level="rota_admin")
     login_as_person(client, person_id)
     body = client.get(WEEK.format(slug=venue["slug"])).get_data(as_text=True)
-    assert "People &amp; access" not in body
+    assert "Staff &amp; access" not in body
 
 
 def test_rota_admin_reads_as_manager(client, app, venue):

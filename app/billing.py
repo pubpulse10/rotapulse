@@ -227,6 +227,16 @@ def current_venue_plan(venue_id: int) -> str:
     return "active" if row["plan"] == "active" else "inactive"
 
 
+def is_returning_customer(row) -> bool:
+    """True for a venue that has been through Checkout before, and so gets no
+    second free trial. Tests both ids: _forget_deleted_customer() nulls the
+    customer id and the subscription id survives it, so either one is evidence
+    of a prior checkout. upgrade() decides the trial on this, and the
+    subscription and locked pages word themselves on it, so the two can't
+    disagree."""
+    return bool(row and (row["stripe_customer_id"] or row["stripe_subscription_id"]))
+
+
 # Friendly labels for the raw Stripe/DB status values. NEVER render the raw
 # value to a landlord: this page used to print "Plan status: active" straight
 # from the database. Kept identical across all four apps so the wording can't
@@ -463,12 +473,9 @@ def upgrade():
 
     # A venue that has been through Checkout before must NOT be handed another
     # free trial, or cancel-and-re-subscribe yields an endless string of 30-day
-    # trials. Mirrors PricePulse's returning_customer guard, but tests both ids:
-    # _forget_deleted_customer() nulls the customer id and the subscription id
-    # survives it, so either one is evidence of a prior checkout.
-    returning_customer = bool(
-        existing and (existing["stripe_customer_id"] or existing["stripe_subscription_id"])
-    )
+    # trials. Mirrors PricePulse's returning_customer guard (see
+    # is_returning_customer for why it tests both ids).
+    returning_customer = is_returning_customer(existing)
     subscription_data = {"metadata": {"pubpulse_app": "rotapulse"}}
     if not returning_customer:
         # Card-to-start-a-trial: capture a card now and start a Stripe-managed
@@ -729,6 +736,9 @@ def subscription():
         bands=bands,
         active=bool(sub and sub["stripe_subscription_id"]),
         stripe_configured=all(config.STRIPE_PRICE_ROTA_BANDS),
+        # A returning customer is charged at Checkout with no trial, so the
+        # page mustn't offer them one.
+        returning_customer=is_returning_customer(sub),
     )
 
 

@@ -46,7 +46,7 @@ def register_venue_gate(blueprint):
 
     @blueprint.before_request
     def _require_active_venue():
-        from app.billing import current_venue_plan
+        from app.billing import current_venue_plan, is_returning_customer
 
         venue = flask.g.get("venue")
         if venue is None:
@@ -67,6 +67,6 @@ def register_venue_gate(blueprint):
                         and not flask.session.get("rotapulse_person_id"))
             return flask.render_template(
                 "locked.html", venue=venue, is_owner=is_owner,
-                ever_subscribed=bool(sub and (sub["stripe_customer_id"] or sub["stripe_subscription_id"])),
+                ever_subscribed=is_returning_customer(sub),
                 trial_days=config.ROTAPULSE_TRIAL_DAYS,
             )

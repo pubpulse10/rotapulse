@@ -23,7 +23,7 @@
         {% if whoami.place %}<p class="pp-id-place">{{ whoami.place }}</p>{% endif %}
         <p class="pp-id-blurb"><strong>{{ whoami.role_label }}</strong> — {{ whoami.role_blurb }}</p>
         {% if whoami.manage_url %}
-        <a class="pp-id-link" href="{{ whoami.manage_url }}">People &amp; access</a>
+        <a class="pp-id-link" href="{{ whoami.manage_url }}">Staff &amp; access</a>
         {% endif %}
         {% if whoami.logout_post %}
         {# RotaPulse's own invited-staff logout is POST-only (it clears a local

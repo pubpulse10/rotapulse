@@ -67,6 +67,15 @@
         change we move you between bands automatically and email you — we charge or credit the
         difference for the rest of the month pro rata, so you only ever pay for the band you're
         actually on. A change you make here works the same way.</p>
+    {% elif returning_customer %}
+      {# A venue that has checked out before gets no second trial (billing.
+         is_returning_customer, which upgrade() also uses), so it is charged the
+         moment Checkout finishes — the page must not promise a trial. #}
+      <h2>Choose your band</h2>
+      <p class="hint">Welcome back. You've had your free trial, so you'll be charged when you
+        finish checkout. Your price is a flat monthly fee based on how many staff you have, plus
+        VAT — cancel any time. Pick the band that fits — as your numbers change later we move you
+        between bands automatically and email you, charging or crediting the difference pro rata.</p>
     {% else %}
       <h2>Choose your band</h2>
       <p class="hint">Your price is a flat monthly fee based on how many staff you have, plus VAT. Pick the
@@ -93,6 +102,12 @@
 
   {% endif %}
 
+  {# The Next payment row is Stripe's real amount, VAT included, so the
+     "exclude VAT" line only belongs beside the + VAT plan buttons. #}
+  {% if active %}
+  <p class="hint">The Next payment amount includes VAT, charged at the prevailing rate.</p>
+  {% else %}
   <p class="hint">All prices exclude VAT, charged at the prevailing rate.</p>
+  {% endif %}
 </div>
 {% endblock %}
