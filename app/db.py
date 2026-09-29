@@ -360,7 +360,7 @@ def storage_is_reachable():
     reads sqlite_master so the file header is actually read, not just stat'd.
     Deliberately no schema or row checks: the question is "can this instance
     reach its data", and anything heavier turns a probe that runs every few
-    seconds into load. Same helper in all four Render apps — change one,
+    seconds into load. Same helper in all five family apps — change one,
     change all."""
     try:
         conn = sqlite3.connect(f"{DB_PATH.as_uri()}?mode=rw", uri=True, timeout=2)

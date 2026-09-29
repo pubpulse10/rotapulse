@@ -20,7 +20,7 @@ re-deciding something already recorded here.
   being down must never restart this app. Never `sqlite3.connect()` the real path without `mode=rw`
   here: a missing file would be created empty and the check would pass. Because a set Health Check
   Path also gates deploys, a change that breaks `/healthz` fails the deploy and Render keeps the
-  previous one. Same endpoint and helper in pubpulse-hub, PricePulse, RotaPulse and TaskPulse —
+  previous one. Same endpoint and helper in pubpulse-hub, PricePulse, RotaPulse, TaskPulse and DiaryPulse —
   change one, change all. Tripwire: `tests/test_health.py`.
 
 - **`create_app()` calls `db.init_schema()`, and must keep doing so.** That call is the only thing that makes
