@@ -234,6 +234,19 @@ def create_app():
             "User-agent: *\nDisallow: /\n", mimetype="text/plain"
         )
 
+    @app.route("/healthz")
+    def healthz():
+        """Liveness probe for Render's Health Check Path: 200 when this instance
+        can reach its database on the persistent disk, 503 when it can't, so
+        Render stops routing to it and restarts it. Separate from /health, which
+        answers "which commit is live" and stays 200 whatever the disk is doing.
+
+        Unauthenticated for the same reason as /health, and says even less: a
+        status word and nothing else — no path, no error text, no config."""
+        if db.storage_is_reachable():
+            return {"status": "ok"}, 200
+        return {"status": "unavailable"}, 503
+
     @app.route("/health")
     def health():
         """Deploy verification: reports the commit this instance is actually

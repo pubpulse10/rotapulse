@@ -16,6 +16,7 @@ same unenforced pub_id-convention TaskPulse's own venues.pub_id already
 uses, never a real cross-database foreign key. See person.pub_id below.
 """
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -346,6 +347,30 @@ def get_connection():
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
+
+
+def storage_is_reachable():
+    """True when the database file on the persistent disk can be opened and
+    read, and the data directory can still be written to. Backs /healthz,
+    which Render polls as the service's Health Check Path to find and restart
+    an instance that has lost its disk (docs: CLAUDE.md, "Health checks").
+
+    Opens read-write WITHOUT create (mode=rw), so an unmounted or emptied disk
+    fails the check instead of quietly getting a fresh empty database, and
+    reads sqlite_master so the file header is actually read, not just stat'd.
+    Deliberately no schema or row checks: the question is "can this instance
+    reach its data", and anything heavier turns a probe that runs every few
+    seconds into load. Same helper in all four Render apps — change one,
+    change all."""
+    try:
+        conn = sqlite3.connect(f"{DB_PATH.as_uri()}?mode=rw", uri=True, timeout=2)
+        try:
+            conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        finally:
+            conn.close()
+    except (sqlite3.Error, OSError, ValueError):
+        return False
+    return os.access(DB_PATH.parent, os.W_OK)
 
 
 def _add_column_if_missing(conn, table, column, coltype):

@@ -7,6 +7,22 @@ re-deciding something already recorded here.
 
 ## Invariants — do not break these
 
+- **`/healthz` is Render's Health Check Path, and it must stay cheap, public and honest
+  (29 September 2026).** `GET /healthz` returns 200 `{"status": "ok"}` when
+  `db.storage_is_reachable()` can open the database on the persistent disk (read-write, never
+  create — `mode=rw`), read `sqlite_master`, and write to `data/`; otherwise 503
+  `{"status": "unavailable"}`. The `rotapulse` service in Render has Health Check Path `/healthz`, so an
+  instance that loses its disk is taken out of rotation and restarted instead of serving errors
+  until someone notices. It is **not** `/health`: that one answers "which commit is live" and is 200
+  whatever the disk is doing, so pointing Render at it would detect nothing. Rules: no auth or
+  session; no body beyond the status word (no paths, error text or config); no schema, row or
+  third-party checks (Brevo, Stripe, R2, the Hub) — Render polls every few seconds, and a sibling
+  being down must never restart this app. Never `sqlite3.connect()` the real path without `mode=rw`
+  here: a missing file would be created empty and the check would pass. Because a set Health Check
+  Path also gates deploys, a change that breaks `/healthz` fails the deploy and Render keeps the
+  previous one. Same endpoint and helper in pubpulse-hub, PricePulse, RotaPulse and TaskPulse —
+  change one, change all. Tripwire: `tests/test_health.py`.
+
 - **`create_app()` calls `db.init_schema()`, and must keep doing so.** That call is the only thing that makes
   a migration reach the live database. Every migration lives in `init_schema()` (`CREATE TABLE IF NOT EXISTS`
   + `_add_column_if_missing`), it is additive-only and idempotent, and nothing else in the running app runs

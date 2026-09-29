@@ -32,3 +32,27 @@ def test_health_leaks_no_configuration(client):
     """Unauthenticated, so it must stay minimal. If someone adds environment,
     database or version detail here, this fails on purpose."""
     assert set(client.get("/health").get_json()) == {"app", "commit", "status"}
+
+
+def test_healthz_is_ok_without_a_session(client):
+    """Render's Health Check Path. Must answer with no session, or every
+    instance looks unhealthy and gets restarted in a loop."""
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"status": "ok"}
+
+
+def test_healthz_is_503_when_the_database_is_gone(client, tmp_path, monkeypatch):
+    """A lost or unmounted disk must fail the check — not quietly create a
+    fresh empty database and report healthy."""
+    from app import db as db_module
+    missing = tmp_path / "unmounted" / "gone.db"
+    monkeypatch.setattr(db_module, "DB_PATH", missing)
+    resp = client.get("/healthz")
+    assert resp.status_code == 503
+    assert resp.get_json() == {"status": "unavailable"}
+    assert not missing.exists()
+
+
+def test_healthz_leaks_nothing(client):
+    assert set(client.get("/healthz").get_json()) == {"status"}
