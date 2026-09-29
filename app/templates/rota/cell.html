@@ -88,10 +88,14 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="link-button">Mark as open (needs cover)</button>
         </form>
+        {% if s['clock_in_at'] or s['clock_out_at'] %}
+          <span class="hint">Can't be deleted — clock-in/out hours are recorded, and they'd come out of Payroll.</span>
+        {% else %}
         <form method="post" action="{{ url_for('rota_grid.delete_shift', shift_id=s['id']) }}" style="display:inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="link-button">Delete</button>
         </form>
+        {% endif %}
       </div>
     {% endfor %}
   </div>

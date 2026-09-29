@@ -667,19 +667,36 @@ def move_shift(shift_id):
 @rota_bp.route("/shift/<int:shift_id>/delete", methods=["POST"])
 @require_permission("app_admin", "rota_admin")
 def delete_shift(shift_id):
-    """Deletes a shift and everything else in the schema that references
-    it by foreign key (attendance, any open-shift notification log
-    entries, any shift-swap requests) — a shift being deletable at all
-    means all of those are allowed to go with it; none of them make sense
-    to keep pointing at a shift that no longer exists."""
+    """Deletes a shift and the rows that reference it by foreign key (open-
+    shift notifications, swap requests, the missed-clock-in log), which
+    make no sense pointing at a shift that no longer exists.
+
+    A shift with an attendance row is REFUSED, same rule as clear_week:
+    recorded clock-in/out hours are payroll evidence, attendance can't
+    outlive its shift, and payroll reads hours through the shift, so
+    deleting it would silently drop worked hours from Payroll.
+
+    The venue check comes first. The child deletes are keyed by shift_id
+    alone, so before this check an admin of one venue could post another
+    venue's shift id and wipe its attendance even though the shift itself
+    survived."""
     db = get_db()
     row = db.execute("SELECT shift_date FROM shift WHERE id = ? AND venue_id = ?", (shift_id, flask.g.venue["id"])).fetchone()
-    db.execute("DELETE FROM attendance WHERE shift_id = ?", (shift_id,))
+    if row is None:
+        flask.abort(404)
+    if db.execute("SELECT 1 FROM attendance WHERE shift_id = ?", (shift_id,)).fetchone():
+        flask.flash(
+            "This shift has clock-in/out hours recorded, so it can't be deleted — "
+            "deleting it would take those hours out of Payroll.",
+            "error",
+        )
+        return flask.redirect(flask.url_for("rota_grid.week", week=row["shift_date"]))
     db.execute("DELETE FROM shift_open_notification WHERE shift_id = ?", (shift_id,))
     db.execute("DELETE FROM shift_swap_request WHERE shift_id = ?", (shift_id,))
+    db.execute("DELETE FROM shift_notification_log WHERE shift_id = ?", (shift_id,))
     db.execute("DELETE FROM shift WHERE id = ? AND venue_id = ?", (shift_id, flask.g.venue["id"]))
     db.commit()
-    return flask.redirect(flask.url_for("rota_grid.week", week=row["shift_date"] if row else None))
+    return flask.redirect(flask.url_for("rota_grid.week", week=row["shift_date"]))
 
 
 @rota_bp.route("/day-off-override/create", methods=["POST"])

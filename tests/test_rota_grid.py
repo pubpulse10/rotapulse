@@ -918,3 +918,91 @@ def test_leave_queue_omits_leave_that_has_already_finished(app, client, venue):
     # the finished leave was actually omitted from that section.
     assert f'action="/v/{venue["slug"]}/rota/leave/{leave_id}/decline"'.encode() not in resp.data
     assert b"Nobody's on approved leave right now" in resp.data
+
+
+def _shift_with_hours(app, venue_id, person_id):
+    with app.app_context():
+        conn = db_module.get_db()
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, '2026-08-04', '09:00', '17:00', 'scheduled')",
+            (venue_id, person_id),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at, clock_out_at) VALUES (?, '2026-08-04T09:00:00', '2026-08-04T17:00:00')",
+            (shift_id,),
+        )
+        conn.commit()
+    return shift_id
+
+
+def test_deleting_a_shift_with_recorded_hours_is_refused(app, client, venue):
+    """Same rule as Clear week: Delete used to take the attendance with it,
+    so the worked hours vanished from Payroll."""
+    login_as_pub(client, venue["pub_id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="DeleteSurvivor")
+    shift_id = _shift_with_hours(app, venue["id"], person_id)
+
+    export_url = f"/v/{venue['slug']}/payroll/export.csv?start=2026-08-03&end=2026-08-09"
+    before = client.get(export_url).data.decode()
+    assert "DeleteSurvivor,8.00,12.50,100.00" in before
+
+    resp = client.post(f"/v/{venue['slug']}/rota/shift/{shift_id}/delete", follow_redirects=True)
+    assert resp.status_code == 200
+    assert "clock-in/out hours recorded, so it can&#39;t be deleted" in resp.get_data(as_text=True)
+
+    with app.app_context():
+        conn = db_module.get_db()
+        assert conn.execute("SELECT 1 FROM shift WHERE id = ?", (shift_id,)).fetchone()
+        assert conn.execute("SELECT 1 FROM attendance WHERE shift_id = ?", (shift_id,)).fetchone()
+    assert client.get(export_url).data.decode() == before
+
+
+def test_the_shift_panel_hides_delete_once_hours_are_recorded(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    worked, _m, _e = create_active_staff(app, venue["id"], name="Worked")
+    shift_id = _shift_with_hours(app, venue["id"], worked)
+
+    page = client.get(f"/v/{venue['slug']}/rota/cell/{worked}/2026-08-04").get_data(as_text=True)
+    assert f"/rota/shift/{shift_id}/delete" not in page
+    assert "Can't be deleted — clock-in/out hours are recorded" in page
+
+
+def test_deleting_a_shift_with_a_missed_clock_in_alert_does_not_crash(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="NoShow")
+    with app.app_context():
+        conn = db_module.get_db()
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, '2026-08-04', '09:00', '17:00', 'scheduled')",
+            (venue["id"], person_id),
+        ).lastrowid
+        conn.execute("INSERT INTO shift_notification_log (shift_id, notification_type) VALUES (?, 'missed_clock_in')", (shift_id,))
+        conn.commit()
+
+    resp = client.post(f"/v/{venue['slug']}/rota/shift/{shift_id}/delete", follow_redirects=True)
+    assert resp.status_code == 200
+    with app.app_context():
+        conn = db_module.get_db()
+        assert conn.execute("SELECT 1 FROM shift WHERE id = ?", (shift_id,)).fetchone() is None
+
+
+def test_a_shift_from_another_venue_cannot_be_deleted_or_stripped(app, client, venue):
+    """The child deletes are keyed by shift id alone, so the venue check has
+    to come before them or another venue's attendance could be wiped."""
+    with app.app_context():
+        conn = db_module.get_db()
+        other_venue_id = conn.execute(
+            "INSERT INTO venue (pub_id, name, slug) VALUES (?, 'Other Pub', 'otherpub')",
+            (venue["pub_id"] + 1000,),
+        ).lastrowid
+        conn.commit()
+    person_id, _m, _e = create_active_staff(app, other_venue_id, name="Elsewhere")
+    shift_id = _shift_with_hours(app, other_venue_id, person_id)
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(f"/v/{venue['slug']}/rota/shift/{shift_id}/delete")
+    assert resp.status_code == 404
+    with app.app_context():
+        conn = db_module.get_db()
+        assert conn.execute("SELECT 1 FROM shift WHERE id = ?", (shift_id,)).fetchone()
+        assert conn.execute("SELECT 1 FROM attendance WHERE shift_id = ?", (shift_id,)).fetchone()
