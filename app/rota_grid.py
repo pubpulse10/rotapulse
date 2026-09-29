@@ -304,25 +304,49 @@ def clear_week():
     week — a fast reset when a week needs rebuilding from scratch. Scoped
     to shifts only, same as copy_week: leave requests, day-off overrides,
     and event tags are untouched, since those aren't part of "the rota" in
-    the same throwaway-and-rebuild sense a shift is. Any attendance
-    records tied to a cleared shift go with it — there's no plan left to
-    have clocked in against."""
+    the same throwaway-and-rebuild sense a shift is.
+
+    Shifts with an attendance row are KEPT, not cleared. Recorded clock-in/
+    out hours are payroll evidence, and attendance can't outlive its shift:
+    attendance.shift_id is NOT NULL with an FK to shift, and payroll gets
+    the person, venue and date through that shift. So clearing the shift
+    would mean losing the hours — the flash says how many were kept and
+    why. The other FK children (swap requests, open-shift notifications,
+    missed-clock-in log) go with their shift, same as delete_shift, or the
+    shift DELETE would fail on the foreign key."""
     db = get_db()
     venue_id = flask.g.venue["id"]
     week_start = _monday_of(date.fromisoformat(flask.request.form["week"]))
     week_end = week_start + timedelta(days=6)
 
-    db.execute(
-        """DELETE FROM attendance WHERE shift_id IN
-           (SELECT id FROM shift WHERE venue_id = ? AND shift_date BETWEEN ? AND ?)""",
+    shift_ids = [
+        r["id"]
+        for r in db.execute(
+            """SELECT id FROM shift WHERE venue_id = ? AND shift_date BETWEEN ? AND ?
+               AND id NOT IN (SELECT shift_id FROM attendance)""",
+            (venue_id, week_start.isoformat(), week_end.isoformat()),
+        ).fetchall()
+    ]
+    kept = db.execute(
+        """SELECT COUNT(*) FROM shift WHERE venue_id = ? AND shift_date BETWEEN ? AND ?
+           AND id IN (SELECT shift_id FROM attendance)""",
         (venue_id, week_start.isoformat(), week_end.isoformat()),
-    )
-    cur = db.execute(
-        "DELETE FROM shift WHERE venue_id = ? AND shift_date BETWEEN ? AND ?",
-        (venue_id, week_start.isoformat(), week_end.isoformat()),
-    )
+    ).fetchone()[0]
+
+    for shift_id in shift_ids:
+        db.execute("DELETE FROM shift_open_notification WHERE shift_id = ?", (shift_id,))
+        db.execute("DELETE FROM shift_swap_request WHERE shift_id = ?", (shift_id,))
+        db.execute("DELETE FROM shift_notification_log WHERE shift_id = ?", (shift_id,))
+        db.execute("DELETE FROM shift WHERE id = ? AND venue_id = ?", (shift_id, venue_id))
     db.commit()
-    flask.flash(f"Cleared {cur.rowcount} shift(s) from the week of {week_start.day} {week_start.strftime('%B %Y')}.")
+
+    message = f"Cleared {len(shift_ids)} shift(s) from the week of {week_start.day} {week_start.strftime('%B %Y')}."
+    if kept:
+        message += (
+            f" Kept {kept} shift(s) that already have clock-in/out hours recorded,"
+            " so those hours stay in Payroll."
+        )
+    flask.flash(message)
     return flask.redirect(flask.url_for("rota_grid.week", week=week_start.isoformat()))
 
 
@@ -1143,7 +1167,7 @@ def leave_history():
         "rota/leave_history.html", staff=staff, chosen=chosen, history=history,
         holiday=holiday, rows=range(BACKFILL_ROWS),
         leave_types=[(key, label) for key, label, _r, _a in LEAVE_TYPES],
-        leave_type_labels=LEAVE_TYPE_LABELS,
+        leave_type_labels=LEAVE_TYPE_LABELS, today=uk_today().isoformat(),
     )
 
 

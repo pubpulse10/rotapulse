@@ -4,7 +4,9 @@
 <div class="panel">
   <h1>One person's leave history</h1>
   <p class="hint">Everything recorded for one member of staff, and a way to type in leave they took
-    before you started using RotaPulse. Nothing here emails or texts them.</p>
+    before you started using RotaPulse. Recording leave here, or removing leave that has already
+    finished, sends them nothing. Removing leave that is still to come, or that they are on today,
+    texts or emails them to say it has been cancelled and they are back on the rota.</p>
 
   <form method="get">
     <label for="person_id">Staff member</label>
@@ -104,9 +106,15 @@
         {% endif %}
         {% if r['note'] %}<span class="hint">{{ r['note'] }}</span>{% endif %}
         {# The leave queue only lists current and upcoming leave, so without
-           this there is no way to take back a past record entered by mistake. #}
+           this there is no way to take back a past record entered by mistake.
+           Same cut-off as leave.notify_decision: only FINISHED leave is removed
+           silently, so the confirm says which one this is. #}
         <form method="post" action="{{ url_for('rota_grid.decline_leave', leave_id=r['id']) }}" style="display:inline"
-              onsubmit="return confirm('Remove this leave record?');">
+              {% if r['end_date'] < today %}
+              onsubmit="return confirm('Remove this leave record? It has already finished, so they will not be told.');"
+              {% else %}
+              onsubmit="return confirm('Remove this leave? They will get a text or email saying it has been cancelled and they are back on the rota.');"
+              {% endif %}>
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="link-button">Remove</button>
         </form>

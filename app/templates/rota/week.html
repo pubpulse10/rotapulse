@@ -28,7 +28,7 @@
     {% endif %}
     <button type="button" class="btn-secondary" onclick="document.getElementById('copy-week-dialog').showModal()">Copy Week</button>
     <form method="post" action="{{ url_for('rota_grid.clear_week') }}"
-          onsubmit="return confirm('This will clear all shifts from this week. Are you sure?');">
+          onsubmit="return confirm('This will delete every shift this week, including open shifts. Any shift with clock-in/out hours already recorded will be kept, so those hours stay in Payroll. Are you sure?');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="week" value="{{ week_start.isoformat() }}">
       <button type="submit" class="btn-secondary">Clear week</button>

@@ -229,6 +229,32 @@ def test_cancelling_leave_that_has_not_happened_yet_still_tells_them(app, client
     assert len(sent) == 1
 
 
+def test_the_page_does_not_claim_removing_leave_is_silent(app, client, venue):
+    """It used to say "Nothing here emails or texts them", while Remove on
+    current or upcoming leave does exactly that (the test above)."""
+    person_id, _m = _staff(app, venue)
+    login_as_pub(client, venue["pub_id"])
+
+    resp = client.get(f"/v/{venue['slug']}/rota/leave/history?person_id={person_id}")
+
+    assert b"Nothing here emails or texts them" not in resp.data
+    assert b"texts or emails them to say it has been cancelled" in resp.data
+
+
+def test_each_remove_button_warns_only_when_they_will_be_told(app, client, venue):
+    person_id, _m = _staff(app, venue)
+    ahead = uk_today() + timedelta(days=30)
+    login_as_pub(client, venue["pub_id"])
+    _post(client, venue, person_id, [("2026-02-09", "2026-02-13")])
+    resp = client.get(f"/v/{venue['slug']}/rota/leave/history?person_id={person_id}")
+    assert b"It has already finished, so they will not be told." in resp.data
+    assert b"They will get a text or email" not in resp.data
+
+    _post(client, venue, person_id, [(ahead.isoformat(), ahead.isoformat())])
+    resp = client.get(f"/v/{venue['slug']}/rota/leave/history?person_id={person_id}")
+    assert b"They will get a text or email saying it has been cancelled" in resp.data
+
+
 def test_somebody_who_has_left_can_still_have_their_history_entered(app, client, venue):
     """They took leave in February whether or not they work here in
     September, and the year's figures are wrong without it."""

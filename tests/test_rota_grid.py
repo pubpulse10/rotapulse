@@ -551,32 +551,109 @@ def test_clear_week_deletes_shifts_in_that_week_only(app, client, venue):
         assert [r["shift_date"] for r in remaining] == ["2026-08-10"]
 
 
-def test_clear_week_also_clears_open_shifts_and_attendance(app, client, venue):
+def test_clear_week_clears_open_shifts_but_keeps_shifts_with_attendance(app, client, venue):
+    """Recorded clock-in/out hours are payroll evidence. Clear week used to
+    delete them along with their shift, so the hours silently vanished from
+    Payroll — shifts with attendance are now kept and the flash says so."""
     login_as_pub(client, venue["pub_id"])
     person_id, _m, _e = create_active_staff(app, venue["id"], name="ClearWithAttendance")
 
     with app.app_context():
         conn = db_module.get_db()
-        scheduled_id = conn.execute(
+        worked_id = conn.execute(
             "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, '2026-08-04', '09:00', '17:00', 'scheduled')",
             (venue["id"], person_id),
         ).lastrowid
         conn.execute(
             "INSERT INTO attendance (shift_id, clock_in_at, clock_out_at) VALUES (?, '2026-08-04T09:00:00', '2026-08-04T17:00:00')",
-            (scheduled_id,),
+            (worked_id,),
         )
-        conn.execute(
+        unworked_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, '2026-08-06', '09:00', '17:00', 'scheduled')",
+            (venue["id"], person_id),
+        ).lastrowid
+        open_id = conn.execute(
             "INSERT INTO shift (venue_id, shift_date, start_time, end_time, status) VALUES (?, '2026-08-05', '18:00', '23:00', 'open')",
             (venue["id"],),
-        )
+        ).lastrowid
         conn.commit()
 
-    client.post(f"/v/{venue['slug']}/rota/clear-week", data={"week": "2026-08-03"})
+    resp = client.post(f"/v/{venue['slug']}/rota/clear-week", data={"week": "2026-08-03"}, follow_redirects=True)
+    assert b"Cleared 2 shift(s)" in resp.data
+    assert b"Kept 1 shift(s) that already have clock-in/out hours recorded" in resp.data
 
     with app.app_context():
         conn = db_module.get_db()
-        assert conn.execute("SELECT 1 FROM shift WHERE venue_id = ?", (venue["id"],)).fetchone() is None
-        assert conn.execute("SELECT 1 FROM attendance WHERE shift_id = ?", (scheduled_id,)).fetchone() is None
+        remaining = [r["id"] for r in conn.execute("SELECT id FROM shift WHERE venue_id = ?", (venue["id"],)).fetchall()]
+        assert remaining == [worked_id]
+        assert unworked_id not in remaining and open_id not in remaining
+        attendance = conn.execute("SELECT * FROM attendance WHERE shift_id = ?", (worked_id,)).fetchone()
+        assert attendance is not None
+        assert attendance["clock_in_at"] == "2026-08-04T09:00:00"
+        assert attendance["clock_out_at"] == "2026-08-04T17:00:00"
+
+
+def test_clear_week_leaves_recorded_hours_in_payroll(app, client, venue):
+    """End-to-end version of the above: the hours a Payroll export shows for
+    the week are the same before and after Clear week."""
+    login_as_pub(client, venue["pub_id"])
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="PayrollSurvivor")
+
+    with app.app_context():
+        conn = db_module.get_db()
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, '2026-08-04', '09:00', '17:00', 'scheduled')",
+            (venue["id"], person_id),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at, clock_out_at) VALUES (?, '2026-08-04T09:00:00', '2026-08-04T17:00:00')",
+            (shift_id,),
+        )
+        conn.commit()
+
+    export_url = f"/v/{venue['slug']}/payroll/export.csv?start=2026-08-03&end=2026-08-09"
+    before = client.get(export_url).data.decode()
+    # 8 hours at create_active_staff's fixed £12.50/hr
+    assert "PayrollSurvivor,8.00,12.50,100.00" in before
+
+    client.post(f"/v/{venue['slug']}/rota/clear-week", data={"week": "2026-08-03"})
+
+    after = client.get(export_url).data.decode()
+    assert after == before
+
+
+def test_clear_week_clears_shifts_with_swap_requests_and_notification_logs(app, client, venue):
+    """Those tables reference shift by foreign key (enforced), so they have
+    to go with a cleared shift or the DELETE fails."""
+    login_as_pub(client, venue["pub_id"])
+    person_a, _m, _e = create_active_staff(app, venue["id"], name="SwapFrom")
+    person_b, _m, _e = create_active_staff(app, venue["id"], name="SwapTo")
+
+    with app.app_context():
+        conn = db_module.get_db()
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, '2026-08-04', '09:00', '17:00', 'scheduled')",
+            (venue["id"], person_a),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO shift_swap_request (shift_id, from_person_id, to_person_id) VALUES (?, ?, ?)",
+            (shift_id, person_a, person_b),
+        )
+        conn.execute("INSERT INTO shift_open_notification (shift_id) VALUES (?)", (shift_id,))
+        conn.execute(
+            "INSERT INTO shift_notification_log (shift_id, notification_type) VALUES (?, 'missed_clock_in')",
+            (shift_id,),
+        )
+        conn.commit()
+
+    resp = client.post(f"/v/{venue['slug']}/rota/clear-week", data={"week": "2026-08-03"}, follow_redirects=True)
+    assert resp.status_code == 200
+    assert b"Cleared 1 shift(s)" in resp.data
+
+    with app.app_context():
+        conn = db_module.get_db()
+        assert conn.execute("SELECT 1 FROM shift WHERE id = ?", (shift_id,)).fetchone() is None
+        assert conn.execute("SELECT 1 FROM shift_swap_request WHERE shift_id = ?", (shift_id,)).fetchone() is None
 
 
 def test_clear_week_requires_admin_permission(client, venue):
@@ -604,6 +681,8 @@ def test_week_grid_offers_a_clear_week_form_directly_on_the_page(app, client, ve
     assert b"Clear week" in resp.data
     assert f'action="/v/{venue["slug"]}/rota/clear-week"'.encode() in resp.data
     assert b'name="week" value="2026-08-03"' in resp.data
+    # The confirm box must say recorded hours are kept, not that "all shifts" go.
+    assert b"clock-in/out hours already recorded will be kept" in resp.data
 
 
 def test_week_grid_offers_a_copy_week_form_directly_on_the_page(app, client, venue):
