@@ -11,6 +11,11 @@
     <input type="date" id="end" name="end" value="{{ end_date }}">
     <button type="submit" class="btn-secondary">Update</button>
   </form>
+  {% if pay_day %}<p>Pay day for this period: <strong>{{ pay_day|uk_date }}</strong></p>{% endif %}
+  {% if no_anchor %}
+    <p class="hint">No anchor date is set for your pay periods, so they are counted Monday to Sunday.
+      {% if 'app_admin' in g.permission_levels %}If yours start on another day, set the anchor date in <a href="{{ url_for('admin_config.settings') }}">Settings</a>.{% else %}If yours start on another day, ask the owner to set the anchor date in Settings.{% endif %}</p>
+  {% endif %}
 
   {# Real report, 2026-09-15: the totals silently left out any shift missing a
      clock time, so they could look complete while being short. Everything the
@@ -127,7 +132,7 @@
     <a class="btn-secondary" href="{{ url_for('payroll.export_pdf', start=start_date, end=end_date) }}">Export PDF</a>
   </p>
   {% if pending_hours %}
-    <p class="hint">{{ pending_hours }} of the hours below are still awaiting admin approval (unplanned shifts or early starts) — figures may change. <a href="{{ url_for('rota_grid.approvals_queue') }}">Review approvals</a>.</p>
+    <p class="hint">{{ pending_hours }} of the hours below are still awaiting admin approval (unplanned shifts or early starts) — figures may change. <a href="{{ url_for('rota_grid.approvals_queue') }}">Review clock-in approvals</a>.</p>
   {% endif %}
 
   {% if paid_leave %}

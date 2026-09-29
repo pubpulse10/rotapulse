@@ -377,6 +377,36 @@ def test_cancelling_already_approved_leave_says_cancelled_not_declined(app, clie
     assert "back on the rota" in sent["email"][0][2]
 
 
+def test_a_second_remove_is_a_no_op_and_tells_nobody(app, client, venue, sent):
+    """Double-clicking Remove on the leave history page posts twice. The
+    second post used to find the record already declined, treat it as a
+    pending request being turned down, and text "has not been approved"."""
+    person_id, _m = _staff(app, venue)
+    login_as_pub(client, venue["pub_id"])
+    client.post(f"/v/{venue['slug']}/rota/leave/create", data={
+        "person_id": person_id, "start_date": FUTURE_WEEK_START, "end_date": FUTURE_WEEK_END,
+    }, follow_redirects=True)
+    leave_id = _leave_rows(app, person_id)[0]["id"]
+
+    client.post(f"/v/{venue['slug']}/rota/leave/{leave_id}/decline")
+    assert len(sent["email"]) == 1
+    decided_at = _leave_rows(app, person_id)[0]["decided_at"]
+
+    response = client.post(f"/v/{venue['slug']}/rota/leave/{leave_id}/decline", follow_redirects=True)
+
+    assert len(sent["email"]) == 1 and not sent["sms"]
+    assert b"already been removed or declined" in response.data
+    row = _leave_rows(app, person_id)[0]
+    assert row["status"] == "declined" and row["decided_at"] == decided_at
+
+
+def test_removing_leave_that_does_not_exist_is_a_no_op(app, client, venue, sent):
+    login_as_pub(client, venue["pub_id"])
+    response = client.post(f"/v/{venue['slug']}/rota/leave/999999/decline", follow_redirects=True)
+    assert b"already been removed or declined" in response.data
+    assert not sent["email"] and not sent["sms"]
+
+
 def test_the_message_stays_inside_gsm_7(app, client, venue, sent):
     """The same words go out by SMS. One character outside GSM-7 doubles the
     segment count of the whole text (commit 6edf40d)."""
@@ -443,3 +473,36 @@ def test_the_cell_panel_names_the_type_and_the_note(app, client, venue):
 
     assert b"Maternity" in resp.data
     assert b"Back in the spring" in resp.data
+
+
+def test_a_second_approve_is_a_no_op_and_tells_nobody(app, client, venue, sent):
+    """Double-clicking Approve used to re-approve and send "approved" again."""
+    person_id, _m = _staff(app, venue)
+    login_as_person(client, person_id)
+    _request_leave(client, venue)
+    leave_id = _leave_rows(app, person_id)[0]["id"]
+
+    login_as_pub(client, venue["pub_id"])
+    client.post(f"/v/{venue['slug']}/rota/leave/{leave_id}/approve")
+    sent_after_first = (len(sent["email"]), len(sent["sms"]))
+    decided_at = _leave_rows(app, person_id)[0]["decided_at"]
+
+    response = client.post(f"/v/{venue['slug']}/rota/leave/{leave_id}/approve", follow_redirects=True)
+
+    assert (len(sent["email"]), len(sent["sms"])) == sent_after_first
+    assert b"already been dealt with" in response.data
+    row = _leave_rows(app, person_id)[0]
+    assert row["status"] == "approved" and row["decided_at"] == decided_at
+
+
+def test_approve_cannot_bring_back_leave_that_was_removed(app, client, venue, sent):
+    person_id, _m = _staff(app, venue)
+    login_as_person(client, person_id)
+    _request_leave(client, venue)
+    leave_id = _leave_rows(app, person_id)[0]["id"]
+
+    login_as_pub(client, venue["pub_id"])
+    client.post(f"/v/{venue['slug']}/rota/leave/{leave_id}/decline")
+    client.post(f"/v/{venue['slug']}/rota/leave/{leave_id}/approve")
+
+    assert _leave_rows(app, person_id)[0]["status"] == "declined"

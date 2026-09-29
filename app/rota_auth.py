@@ -51,7 +51,7 @@ def inactive_access_message(statuses):
         return (
             "Your profile is complete, but your account still needs approving before you "
             "can log in. Ask your manager to approve you — it's under Staff, "
-            "\"View pending approvals\"."
+            "\"New staff awaiting approval\"."
         )
     if "invited" in statuses:
         return "Finish setting up your account using the invite link you were sent, then log in."

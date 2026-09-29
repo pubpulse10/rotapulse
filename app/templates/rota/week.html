@@ -14,7 +14,7 @@
   <a class="btn-secondary" href="{{ url_for('rota_grid.week', week=prev_week) }}">&laquo; Prev week</a>
   <a class="btn-secondary" href="{{ url_for('rota_grid.week', week=next_week) }}">Next week &raquo;</a>
   <a class="btn-secondary" href="{{ url_for('rota_grid.swaps') }}">Swap requests</a>
-  <a class="btn-secondary" href="{{ url_for('rota_grid.approvals_queue') }}">Approvals{% if pending_approval_count %} ({{ pending_approval_count }}){% endif %}</a>
+  <a class="btn-secondary" href="{{ url_for('rota_grid.approvals_queue') }}">Clock-in approvals{% if pending_approval_count %} ({{ pending_approval_count }}){% endif %}</a>
   {% if is_support_session %}
     <span class="hint">Read-only support view — notify/copy/clear are disabled</span>
   {% else %}

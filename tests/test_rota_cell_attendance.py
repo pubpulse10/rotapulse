@@ -241,3 +241,36 @@ def test_cell_panel_has_editable_clock_time_inputs(app, client, venue):
     assert resp.status_code == 200
     assert f'action="/v/{venue["slug"]}/rota/shift/{shift_id}/attendance"'.encode() in resp.data
     assert b"Save clock times" in resp.data
+
+SHIFT_DATE = date.today().isoformat()
+
+
+def _shift_with_photo(app, venue_id, person_id, approval_status=None):
+    with app.app_context():
+        conn = db_module.get_db()
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, ?, '09:00', '17:00', 'scheduled')",
+            (venue_id, person_id, SHIFT_DATE),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO attendance (shift_id, clock_in_at, photo_url, approval_status) VALUES (?, ?, 'clockin-abc.jpg', ?)",
+            (shift_id, f"{SHIFT_DATE} 09:02:00", approval_status),
+        )
+        conn.commit()
+
+
+def test_the_clock_in_photo_shows_on_the_shift_panel(app, client, venue):
+    """The staff clock-in screen offers a photo, but no admin screen showed it."""
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Snap Shot")
+    _shift_with_photo(app, venue["id"], person_id)
+    login_as_pub(client, venue["pub_id"])
+    body = client.get(f"/v/{venue['slug']}/rota/cell/{person_id}/{SHIFT_DATE}").get_data(as_text=True)
+    assert f"/v/{venue['slug']}/media/attendance-photo/clockin-abc.jpg" in body
+
+
+def test_the_clock_in_photo_shows_on_clock_in_approvals(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Snap Shot")
+    _shift_with_photo(app, venue["id"], person_id, approval_status="pending")
+    login_as_pub(client, venue["pub_id"])
+    body = client.get(f"/v/{venue['slug']}/rota/approvals").get_data(as_text=True)
+    assert f"/v/{venue['slug']}/media/attendance-photo/clockin-abc.jpg" in body

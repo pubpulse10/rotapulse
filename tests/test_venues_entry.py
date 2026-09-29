@@ -54,3 +54,17 @@ def test_root_uses_remembered_slug_cookie_once_the_session_is_gone(app, client, 
     assert resp.status_code == 302
     assert f"/v/{venue['slug']}/login" in resp.headers["Location"]
     assert "pricepulse" not in resp.headers["Location"].lower()
+
+
+
+def test_setup_page_says_a_card_comes_first_and_reads_the_trial_length(client, monkeypatch):
+    """It used to promise "30 free days before a subscription is needed",
+    but nothing works until a card has been added at Checkout."""
+    from app import config
+
+    monkeypatch.setattr(config, "ROTAPULSE_TRIAL_DAYS", 14)
+    login_as_pub(client, 987654)  # a pub with no venue yet
+    body = client.get("/setup").get_data(as_text=True)
+    assert "choose a plan and add a card" in body
+    assert "The first 14 days are free" in body
+    assert "before a subscription is needed" not in body

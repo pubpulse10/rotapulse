@@ -34,6 +34,7 @@ def _identity(role, *, name, email=None, place=None, logout_url,
               logout_post=False, manage_url=None):
     """One identity dict, in the shape templates/_whoami.html expects."""
     label, blurb = ROLES[role]
+    blurb = ROLE_BLURBS_HERE.get(role, blurb)
     return {
         "role": role,
         "role_label": label,
@@ -50,10 +51,23 @@ def _identity(role, *, name, email=None, place=None, logout_url,
     }
 
 
+# ROLES' blurbs are written for the family as a whole, and "full use of this
+# app" isn't true of a RotaPulse manager: Settings (job roles, notifications,
+# pay-period setup), pay rates, who is a manager and erasing a leaver's data
+# are all owner-only here (app_admin). So the chip says what THIS app lets
+# each role do. Only the blurb is overridden; keys and labels stay shared.
+ROLE_BLURBS_HERE = {
+    "owner": "Everything in RotaPulse, including Settings, pay rates, who is a manager, and billing.",
+    "manager": "Runs the rota, leave, clock-ins, staff invites and payroll. Only the owner can open "
+               "Settings, change pay rates or who is a manager, erase a leaver's data, or see billing.",
+    "staff": "Your own shifts, clock-ins, leave and swaps. No settings, other people's details or billing.",
+}
+
 # RotaPulse's own permission levels, highest first. app_admin is the owner
 # (it gates venue configuration, owner-only in V1); rota_admin is what a
-# Hub-invited manager is granted; staff is everyone else.
-_LEVEL_ROLES = (("app_admin", "owner"), ("rota_admin", "manager"), ("staff", "staff"))
+# Hub-invited manager is granted; staff is everyone else. Also the source of
+# the Owner / Manager / Staff words on the Staff page (admin_config).
+LEVEL_ROLES = (("app_admin", "owner"), ("rota_admin", "manager"), ("staff", "staff"))
 
 
 def current_identity():
@@ -72,7 +86,7 @@ def current_identity():
 
     # Someone can hold more than one grant, so take the highest rather than
     # an arbitrary member of the set.
-    role = next((r for level, r in _LEVEL_ROLES if level in levels), None)
+    role = next((r for level, r in LEVEL_ROLES if level in levels), None)
     if role is None:
         return None
 

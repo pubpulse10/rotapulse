@@ -17,7 +17,8 @@ exactly when it's inactive.
 
 import flask
 
-from app.db import get_db, get_venue_by_slug
+from app import config
+from app.db import get_db, get_rota_subscription, get_venue_by_slug
 
 
 def register_venue_scope(blueprint):
@@ -51,4 +52,21 @@ def register_venue_gate(blueprint):
         if venue is None:
             return  # a non-slug route on this blueprint, if any
         if current_venue_plan(venue["id"]) != "active":
-            return flask.render_template("locked.html", venue=venue)
+            # The locked screen used to say "the free trial has ended" to
+            # everyone -- including a brand-new venue that never started one
+            # (a card is needed before anything works), and staff arriving at
+            # the login page, who can do nothing about it. This runs before
+            # register_identity, so the owner is recognised the way rota_auth
+            # does it: the shared session's pub_id is this venue's, and it
+            # isn't a staff session (a Hub-staff session carries the owner's
+            # pub_id too).
+            sub = get_rota_subscription(get_db(), venue["id"])
+            pub_id = flask.session.get("pub_id")
+            is_owner = (pub_id is not None and pub_id == venue["pub_id"]
+                        and not flask.session.get("person_id")
+                        and not flask.session.get("rotapulse_person_id"))
+            return flask.render_template(
+                "locked.html", venue=venue, is_owner=is_owner,
+                ever_subscribed=bool(sub and (sub["stripe_customer_id"] or sub["stripe_subscription_id"])),
+                trial_days=config.ROTAPULSE_TRIAL_DAYS,
+            )

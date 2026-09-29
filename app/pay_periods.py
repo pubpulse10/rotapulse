@@ -11,6 +11,13 @@ month.
 import calendar
 from datetime import date, timedelta
 
+# Where weekly / every-N-weeks periods are counted from when the venue never
+# set an anchor date -- which is every venue, until someone does: the column
+# has no default. Falling back to the day being asked about (as this used to)
+# made the "current" period start TODAY, and move every day. Any fixed Monday
+# gives Monday-to-Sunday weeks, and fortnights that stay put.
+DEFAULT_ANCHOR = date(2024, 1, 1)  # a Monday
+
 
 def _month_end_day_for(year: int, month: int, configured_day: int) -> int:
     last_day = calendar.monthrange(year, month)[1]
@@ -42,7 +49,7 @@ def period_containing(settings_row, on_date: date) -> tuple[date, date]:
     # weekly / every_n_weeks — both driven off an anchor date + interval
     interval_weeks = settings_row["pay_period_interval_weeks"] or 1
     anchor_str = settings_row["pay_period_anchor_date"]
-    anchor = date.fromisoformat(anchor_str) if anchor_str else on_date
+    anchor = date.fromisoformat(anchor_str) if anchor_str else DEFAULT_ANCHOR
     interval_days = interval_weeks * 7
     days_since_anchor = (on_date - anchor).days
     periods_elapsed = days_since_anchor // interval_days

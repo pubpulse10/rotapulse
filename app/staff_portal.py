@@ -13,12 +13,13 @@ import flask
 
 from app.db import get_db
 from app.geo_distance import distance_metres
-from app.leave import (LEAVE_TYPES, PORTIONS, STAFF_REQUESTABLE_TYPES, blocked_dates_for,
+from app.date_format import format_uk_date
+from app.leave import (LEAVE_TYPES, leave_type_for_colleagues, PORTIONS, STAFF_REQUESTABLE_TYPES, blocked_dates_for,
                        describe_blocked_dates, position, upcoming_blocks_for)
 from app.media import save_attendance_photo
 from app.notification_settings import notify_admins
 from app.rota_auth import register_identity, require_permission
-from app.rota_grid import WEEKDAY_KEYS, _billable_staff, _is_on_approved_leave, _monday_of, _week_dates
+from app.rota_grid import WEEKDAY_KEYS, _approved_leave_on, _billable_staff, _monday_of, _week_dates
 from app.uk_time import planned_datetime, uk_now, uk_now_iso, uk_today
 from app.venue_scope import register_venue_gate, register_venue_scope
 
@@ -129,8 +130,8 @@ def full_rota():
             # a genuine shift invisible behind a stale leave state.
             if shifts_by_person_date.get((member["person_id"], d_str)):
                 cell = {"state": "shift", "shifts": shifts_by_person_date[(member["person_id"], d_str)]}
-            elif _is_on_approved_leave(db, member["person_id"], d_str):
-                cell = {"state": "leave"}
+            elif (leave_row := _approved_leave_on(db, member["person_id"], d_str)) is not None:
+                cell = {"state": "leave", "leave_type": leave_type_for_colleagues(leave_row["leave_type"])}
             elif (member["person_id"], d_str) in override_set:
                 cell = {"state": "day_off"}
             elif not availability.get(WEEKDAY_KEYS[d.weekday()], True):
@@ -463,7 +464,8 @@ def leave():
         notify_admins(
             db, venue, "leave_request",
             f"Leave request — {venue['name']}",
-            f"{person['name']} has requested {type_label.lower()} from {start_date} to {end_date} at {venue['name']}.",
+            f"{person['name']} has requested {type_label.lower()} from {format_uk_date(start_date)} "
+            f"to {format_uk_date(end_date)} at {venue['name']}.",
         )
         flask.flash("Leave request submitted — awaiting approval.")
         return flask.redirect(flask.url_for("staff_portal.leave"))

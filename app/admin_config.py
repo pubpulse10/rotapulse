@@ -23,6 +23,7 @@ from app.notifications import send_email, send_sms
 from app.roles import active_roles, all_roles, role_usage, staff_holding_role
 from app.rota_auth import register_identity, require_permission
 from app.venue_scope import register_venue_gate, register_venue_scope
+from app.whoami import LEVEL_ROLES, ROLES
 
 admin_bp = flask.Blueprint("admin_config", __name__, url_prefix="/v/<slug>/admin")
 register_venue_scope(admin_bp)
@@ -465,10 +466,16 @@ def _display_status(membership_status, access_status):
         return "Left"
     return {
         "invited": "Invited",
-        "pending_approval": "Pending approval",
+        "pending_approval": "Awaiting approval",
         "active": "Active",
         "revoked": "Revoked",
     }.get(access_status, access_status)
+
+
+# The same three words the nav chip uses (app/whoami.py). The stored levels
+# (app_admin / rota_admin / staff) are internal and never shown as they are.
+PERMISSION_LABELS = {level: ROLES[role][0] for level, role in LEVEL_ROLES}
+_PERMISSION_RANK = {"staff": 1, "rota_admin": 2, "app_admin": 3}
 
 
 @admin_bp.route("/staff")
@@ -495,10 +502,21 @@ def staff_list():
            ORDER BY person.name""",
         (venue_id,),
     ).fetchall()
+    # The owner holds two app_access rows (app_admin + rota_admin, written by
+    # venues.setup()), so the join above lists them twice. Keep one row per
+    # person, the highest level, which is also what the nav chip calls them.
     staff = []
+    by_membership = {}
     for row in rows:
         entry = dict(row)
         entry["display_status"] = _display_status(row["membership_status"], row["access_status"])
+        entry["permission_label"] = PERMISSION_LABELS.get(row["permission_level"], row["permission_level"])
+        seen = by_membership.get(row["membership_id"])
+        if seen is not None:
+            if _PERMISSION_RANK.get(row["permission_level"], 0) > _PERMISSION_RANK.get(seen["permission_level"], 0):
+                seen.update(entry)
+            continue
+        by_membership[row["membership_id"]] = entry
         staff.append(entry)
     # For the "invite someone new" form, so it can't start a new person off
     # in a role the venue has retired.

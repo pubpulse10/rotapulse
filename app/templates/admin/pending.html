@@ -1,10 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Pending approval — RotaPulse{% endblock %}
+{% block title %}New staff awaiting approval — RotaPulse{% endblock %}
 {% block content %}
 <div class="panel">
-  <h1>Pending approval</h1>
+  <h1>New staff awaiting approval</h1>
+  <p class="hint">People who have finished setting up their account from your invite. They can't log in until you approve them.</p>
   {% if not pending %}
-    <p class="hint">No one is waiting for approval.</p>
+    <p class="hint">No new staff are waiting for approval.</p>
   {% endif %}
   {% for row in pending %}
     <div class="staff-list-item">

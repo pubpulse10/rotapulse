@@ -7,7 +7,7 @@ whoever actually runs payroll.
 
 import csv
 import io
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from xml.sax.saxutils import escape
 
@@ -233,12 +233,26 @@ def report():
         period_start, period_end = period_containing(settings, uk_today())
         start_date, end_date = period_start.isoformat(), period_end.isoformat()
 
+    # Pay day (Settings' "days after the period ends") is only meaningful when
+    # the dates on screen ARE a pay period, not an arbitrary range typed in.
+    pay_day = None
+    if settings is not None and settings["pay_day_offset"] is not None:
+        try:
+            p_start, p_end = period_containing(settings, date.fromisoformat(end_date))
+        except ValueError:
+            p_start = p_end = None
+        if p_end is not None and (p_start.isoformat(), p_end.isoformat()) == (start_date, end_date):
+            pay_day = p_end + timedelta(days=settings["pay_day_offset"])
+    no_anchor = bool(settings is not None and settings["pay_period_type"] != "monthly"
+                     and not settings["pay_period_anchor_date"])
+
     by_person, pending_hours = _report_rows(db, venue["id"], start_date, end_date)
     attention = _needs_attention(db, venue["id"], start_date, end_date, by_person, uk_now())
     return flask.render_template(
         "payroll/report.html", by_person=by_person, pending_hours=pending_hours,
         attention=attention, summary=_summary(by_person), start_date=start_date, end_date=end_date,
         paid_leave=paid_leave_in_period(db, venue["id"], start_date, end_date),
+        pay_day=pay_day, no_anchor=no_anchor,
     )
 
 

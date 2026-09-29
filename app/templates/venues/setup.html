@@ -3,7 +3,7 @@
 {% block content %}
 <div class="panel narrow">
   <h1>Set up your venue</h1>
-  <p class="hint">You'll get {{ trial_days }} free days before a subscription is needed.</p>
+  <p class="hint">After this you'll choose a plan and add a card — RotaPulse opens once that's done. The first {{ trial_days }} days are free, and you won't be charged until they're over.</p>
   <form method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label for="venue_name">Venue name</label>

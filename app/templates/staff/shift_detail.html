@@ -27,6 +27,7 @@
         <input type="hidden" name="lng" id="clock-in-lng">
         <label for="clock-in-photo">Photo (optional)</label>
         <input type="file" id="clock-in-photo" name="photo" accept="image/*" capture="user">
+        <p class="hint">Only the owner and managers can see it, next to this shift.</p>
         <button type="submit" class="btn-primary btn-large" onclick="return captureLocation('clock-in-form', this)">Clock in</button>
       </form>
     {% endif %}

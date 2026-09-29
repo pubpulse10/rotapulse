@@ -152,6 +152,19 @@ def month():
     total_predicted_cost = sum(w["predicted_cost"] for w in weeks)
     total_actual_cost = sum(w["actual_cost"] for w in weeks)
 
+    def _pct_over_weeks_with_turnover(turnover_key, cost_key):
+        """The month's % of turnover, counting only weeks that have a
+        turnover figure. Dividing the whole month's staff cost by the
+        turnover of just the weeks somebody had filled in treated every
+        blank week as £0 taken, and inflated the % -- badly, early in a
+        month, when most weeks are still blank."""
+        counted = [w for w in weeks if w[turnover_key]]
+        pct = _pct(sum(w[cost_key] for w in counted), sum(w[turnover_key] for w in counted))
+        return pct, len(counted)
+
+    predicted_pct, predicted_weeks_counted = _pct_over_weeks_with_turnover("predicted_turnover", "predicted_cost")
+    actual_pct, actual_weeks_counted = _pct_over_weeks_with_turnover("actual_turnover", "actual_cost")
+
     return flask.render_template(
         "dashboard/month.html",
         venue=venue,
@@ -163,8 +176,10 @@ def month():
         total_actual_turnover=total_actual_turnover,
         total_predicted_cost=total_predicted_cost,
         total_actual_cost=total_actual_cost,
-        total_predicted_pct=_pct(total_predicted_cost, total_predicted_turnover),
-        total_actual_pct=_pct(total_actual_cost, total_actual_turnover),
+        total_predicted_pct=predicted_pct,
+        total_actual_pct=actual_pct,
+        predicted_weeks_counted=predicted_weeks_counted,
+        actual_weeks_counted=actual_weeks_counted,
         prev_month=prev_month_first.strftime("%Y-%m"),
         next_month=next_month_first.strftime("%Y-%m"),
     )

@@ -23,7 +23,7 @@
     <input type="date" id="start_date" name="start_date" value="{{ detail['start_date'] if detail else '' }}">
     <p class="hint">When they started working here — also powers the anniversary reminder on the cost dashboard.</p>
 
-    <label for="role_id">Role</label>
+    <label for="role_id">Job role</label>
     <select id="role_id" name="role_id">
       <option value="">—</option>
       {% for role in roles %}
@@ -39,7 +39,7 @@
         <label for="permission_level">Permission</label>
         <select id="permission_level" name="permission_level">
           <option value="staff" {{ 'selected' if editable_access['permission_level'] == 'staff' }}>Staff</option>
-          <option value="rota_admin" {{ 'selected' if editable_access['permission_level'] == 'rota_admin' }}>Rota admin</option>
+          <option value="rota_admin" {{ 'selected' if editable_access['permission_level'] == 'rota_admin' }}>Manager</option>
         </select>
       {% endif %}
     {% else %}

@@ -74,3 +74,28 @@ def test_full_rota_prev_next_week_links_navigate(app, client, venue):
     assert resp.status_code == 200
     assert b"Prev week" in resp.data
     assert b"Next week" in resp.data
+
+
+def test_full_rota_names_the_kind_of_leave_not_always_hol(app, client, venue):
+    """Every leave type, sick included, used to show as "Hol"."""
+    viewer_id, _m1, _e1 = create_active_staff(app, venue["id"], name="Viewer4")
+    off_sick_id, _m2, _e2 = create_active_staff(app, venue["id"], name="Unwell Person")
+    on_holiday_id, _m3, _e3 = create_active_staff(app, venue["id"], name="On Holiday")
+    monday = _monday_of(date.today()).isoformat()
+    with app.app_context():
+        conn = db_module.get_db()
+        for person_id, leave_type in ((off_sick_id, "sick"), (on_holiday_id, "paid")):
+            conn.execute(
+                """INSERT INTO leave_request (person_id, venue_id, start_date, end_date, leave_type, status)
+                   VALUES (?, ?, ?, ?, ?, 'approved')""",
+                (person_id, venue["id"], monday, monday, leave_type),
+            )
+        conn.commit()
+
+    login_as_person(client, viewer_id)
+    resp = client.get(f"/v/{venue['slug']}/staff/rota")
+    assert resp.status_code == 200
+    assert resp.data.count(b">Hol</span>") == 1
+    # Sickness is health data: colleagues see "Off", never the reason.
+    assert b"Sick" not in resp.data
+    assert resp.data.count(b">Off</span>") == 1

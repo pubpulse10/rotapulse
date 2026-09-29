@@ -165,6 +165,44 @@ def test_month_view_totals_sum_across_weeks(app, client, venue):
     assert b"2000.00" in resp.data  # 1000 + 1000 across the two weeks entered
 
 
+def _scheduled_shift(app, venue_id, person_id, shift_date):
+    """8 hours at the test pay rate of £12.50 = £100 predicted cost."""
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) VALUES (?, ?, ?, '09:00', '17:00', 'scheduled')",
+            (venue_id, person_id, shift_date),
+        )
+        conn.commit()
+
+
+def test_month_percent_ignores_weeks_with_no_turnover_entered(app, client, venue):
+    """A blank week used to count as £0 taken while its staff cost still
+    counted, which inflated the month's % of turnover."""
+    person_id, _m, _e = create_active_staff(app, venue["id"])
+    _scheduled_shift(app, venue["id"], person_id, "2026-08-03")  # week with turnover
+    _scheduled_shift(app, venue["id"], person_id, "2026-08-10")  # week left blank
+    login_as_pub(client, venue["pub_id"])
+    client.post(f"/v/{venue['slug']}/dashboard/turnover",
+                data={"week_start_date": "2026-08-03", "predicted_amount": "1000"})
+
+    body = client.get(f"/v/{venue['slug']}/dashboard/month?month=2026-08").get_data(as_text=True)
+
+    assert "10.0%" in body  # £100 / £1000, not £200 / £1000
+    assert "20.0%" not in body
+    assert "based on 1 of 5 weeks with turnover entered" in body
+
+
+def test_month_percent_is_a_dash_when_no_week_has_turnover(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"])
+    _scheduled_shift(app, venue["id"], person_id, "2026-08-03")
+    login_as_pub(client, venue["pub_id"])
+    body = client.get(f"/v/{venue['slug']}/dashboard/month?month=2026-08").get_data(as_text=True)
+    assert "based on" not in body
+    totals = body.split("% of turnover</th></tr>")[1].split("</table>")[0]
+    assert "%" not in totals and totals.count("—") == 2
+
+
 def test_admin_can_set_a_start_date(app, client, venue):
     login_as_pub(client, venue["pub_id"])
     _person_id, membership_id, _email = create_active_staff(app, venue["id"], name="Started Today")

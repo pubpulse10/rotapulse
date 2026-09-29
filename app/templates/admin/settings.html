@@ -24,7 +24,7 @@
     <input type="number" id="pay_period_interval_weeks" name="pay_period_interval_weeks" min="1"
            value="{{ settings['pay_period_interval_weeks'] if settings else 1 }}">
 
-    <label for="pay_period_anchor_date">Anchor date — a start date any weekly/every-N-weeks period boundary is calculated from</label>
+    <label for="pay_period_anchor_date">Anchor date — the first day of any one pay period (weekly/every-N-weeks). If blank, periods run Monday to Sunday.</label>
     <input type="date" id="pay_period_anchor_date" name="pay_period_anchor_date"
            value="{{ settings['pay_period_anchor_date'] if settings else '' }}">
 
@@ -32,7 +32,7 @@
     <input type="number" id="pay_period_month_end_day" name="pay_period_month_end_day" min="1" max="31"
            value="{{ settings['pay_period_month_end_day'] if settings else '' }}">
 
-    <label for="pay_day_offset">Pay day offset (days after period end, label only)</label>
+    <label for="pay_day_offset">Pay day — how many days after the period ends staff are paid (shown on the Payroll report)</label>
     <input type="number" id="pay_day_offset" name="pay_day_offset" min="0"
            value="{{ settings['pay_day_offset'] if settings else '' }}">
 
@@ -86,7 +86,7 @@
 
 <div class="panel">
   <h2>Roles</h2>
-  <p class="hint">Add, rename, or remove the job roles staff can be assigned to (e.g. Bar staff, Kitchen, Manager).</p>
+  <p class="hint">Add, rename, or remove the job roles staff can be assigned to (e.g. Bar staff, Kitchen, Cellar).</p>
   <a class="btn-secondary" href="{{ url_for('admin_config.roles') }}">Manage roles</a>
 </div>
 

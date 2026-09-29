@@ -152,3 +152,58 @@ def test_weekly_period_boundaries_from_anchor():
     start, end = period_containing(settings_row, date(2026, 1, 20))
     assert start == date(2026, 1, 19)
     assert end == date(2026, 1, 25)
+
+
+
+def test_weekly_period_with_no_anchor_runs_monday_to_sunday_not_from_today():
+    """Every venue starts with no anchor date. The current period used to
+    start on whatever day the report was opened."""
+    settings_row = {
+        "pay_period_type": "weekly",
+        "pay_period_interval_weeks": 1,
+        "pay_period_anchor_date": None,
+        "pay_period_month_end_day": None,
+    }
+    for day in (date(2026, 9, 30), date(2026, 10, 2)):  # a Wednesday, a Friday
+        start, end = period_containing(settings_row, day)
+        assert (start, end) == (date(2026, 9, 28), date(2026, 10, 4))
+
+
+def test_fortnightly_period_with_no_anchor_stays_put_from_day_to_day():
+    settings_row = {
+        "pay_period_type": "every_n_weeks",
+        "pay_period_interval_weeks": 2,
+        "pay_period_anchor_date": None,
+        "pay_period_month_end_day": None,
+    }
+    first = period_containing(settings_row, date(2026, 9, 28))
+    assert first[0].weekday() == 0 and (first[1] - first[0]).days == 13
+    assert period_containing(settings_row, first[1]) == first
+
+
+def _set_pay_settings(app, venue_id, **values):
+    with app.app_context():
+        conn = db_module.get_db()
+        for column, value in values.items():
+            conn.execute(f"UPDATE venue_settings SET {column} = ? WHERE venue_id = ?", (value, venue_id))
+        conn.commit()
+
+
+def test_payroll_shows_pay_day_for_a_real_pay_period(app, client, venue):
+    _set_pay_settings(app, venue["id"], pay_period_type="weekly", pay_period_interval_weeks=1,
+                      pay_period_anchor_date="2026-01-05", pay_day_offset=5)
+    login_as_pub(client, venue["pub_id"])
+
+    body = client.get(f"/v/{venue['slug']}/payroll/?start=2026-09-21&end=2026-09-27").get_data(as_text=True)
+    assert "Pay day for this period: <strong>2 October 2026</strong>" in body
+    assert "No anchor date is set" not in body
+
+    # Not a pay period, so no pay day is claimed for it.
+    body = client.get(f"/v/{venue['slug']}/payroll/?start=2026-09-22&end=2026-09-27").get_data(as_text=True)
+    assert "Pay day for this period" not in body
+
+
+def test_payroll_says_when_no_anchor_date_is_set(app, client, venue):
+    login_as_pub(client, venue["pub_id"])
+    body = client.get(f"/v/{venue['slug']}/payroll/").get_data(as_text=True)
+    assert "No anchor date is set for your pay periods" in body

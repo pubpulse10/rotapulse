@@ -11,7 +11,7 @@
 
 <div class="panel">
   <h2>Turnover this week</h2>
-  <p class="hint">One figure covers the whole week — for day-by-day editing across a month, use the Month view.</p>
+  <p class="hint">One figure covers the whole week. To fill in every week of a month on one screen, use the Month view.</p>
   <form method="post" action="{{ url_for('dashboard.update_weekly_turnover') }}" style="display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="week_start_date" value="{{ summary['week_start'].isoformat() }}">

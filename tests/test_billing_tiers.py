@@ -494,7 +494,36 @@ def test_gated_route_locks_a_legacy_trial_venue(app, client, venue):
     login_as_pub(client, venue["pub_id"])
     resp = client.get(f"/v/{venue['slug']}/dashboard/")
     assert resp.status_code == 200
+    # Never been through Checkout, so it isn't a lapsed subscription and must
+    # not be described as one.
+    assert b"isn't set up yet" in resp.data
+    assert b"trial has ended" not in resp.data
+
+
+def test_locked_screen_for_a_lapsed_subscription_says_so(app, client, venue):
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute(
+            "UPDATE rota_subscription SET plan='inactive', stripe_customer_id='cus_old', "
+            "subscription_status='canceled' WHERE venue_id=?",
+            (venue["id"],),
+        )
+        conn.commit()
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/dashboard/")
     assert b"is locked" in resp.data
+    assert b"has ended, or a payment didn't go through" in resp.data
+
+
+def test_locked_screen_tells_staff_to_let_the_owner_know(app, client, venue):
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute("UPDATE rota_subscription SET plan='inactive' WHERE venue_id=?", (venue["id"],))
+        conn.commit()
+    resp = client.get(f"/v/{venue['slug']}/login")
+    assert b"isn't available at" in resp.data
+    assert b"let the owner know" in resp.data
+    assert b"Go to subscription" not in resp.data and b"Choose a plan" not in resp.data
 
 
 # --- /billing/success ----------------------------------------------------

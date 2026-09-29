@@ -2,8 +2,19 @@
 {% block title %}RotaPulse — subscription needed{% endblock %}
 {% block content %}
 <div class="panel narrow">
-  <h1>{{ venue['name'] }} is locked</h1>
-  <p class="hint">The free trial has ended (or the subscription has lapsed) for this venue. Subscribe to keep using RotaPulse.</p>
-  <a class="btn-primary" href="{{ url_for('billing.subscription') }}">Go to subscription</a>
+  {% if not is_owner %}
+    {# Staff and managers can't subscribe, and the subscription page would
+       only send them to a login screen. #}
+    <h1>RotaPulse isn't available at {{ venue['name'] }} right now</h1>
+    <p class="hint">The venue's RotaPulse subscription isn't active, so nobody can log in or clock in for now. Please let the owner know.</p>
+  {% elif not ever_subscribed %}
+    <h1>{{ venue['name'] }} isn't set up yet</h1>
+    <p class="hint">To start using RotaPulse, choose a plan and add a card. The first {{ trial_days }} days are free, and you won't be charged until they're over.</p>
+    <a class="btn-primary" href="{{ url_for('billing.subscription') }}">Choose a plan</a>
+  {% else %}
+    <h1>{{ venue['name'] }} is locked</h1>
+    <p class="hint">The RotaPulse subscription for this venue has ended, or a payment didn't go through. Subscribe again, or update your card, to carry on using RotaPulse.</p>
+    <a class="btn-primary" href="{{ url_for('billing.subscription') }}">Go to subscription</a>
+  {% endif %}
 </div>
 {% endblock %}

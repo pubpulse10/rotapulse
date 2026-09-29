@@ -41,7 +41,7 @@ def test_waiting_for_approval_is_explained_not_silently_bounced(app, client, ven
     resp = _log_in(client, venue, email)
     assert resp.status_code == 200
     assert b"needs approving" in resp.data
-    assert b"View pending approvals" in resp.data
+    assert b"New staff awaiting approval" in resp.data
     # The old symptom: the generic wrong-password message, or nothing at all.
     assert b"Invalid email/mobile or password" not in resp.data
     with client.session_transaction() as session:

@@ -4,19 +4,19 @@
 <div class="panel">
   <h1>Staff</h1>
   <p>
-    <a href="{{ url_for('admin_config.pending_approval') }}">View pending approvals</a>
+    <a href="{{ url_for('admin_config.pending_approval') }}">New staff awaiting approval</a>
     {% if pending_staff_approvals %}
       <span class="badge badge-over-target">{{ pending_staff_approvals }} waiting</span>
       — they can't log in until you approve them.
     {% endif %}
   </p>
   <table>
-    <tr><th>Name</th><th>Role</th><th>Permission</th><th>Status</th><th>Pay rate</th><th></th><th></th></tr>
+    <tr><th>Name</th><th>Job role</th><th>Permission</th><th>Status</th><th>Pay rate</th><th></th><th></th></tr>
     {% for member in staff %}
       <tr>
         <td>{{ member['name'] }}</td>
         <td>{{ member['role_name'] or '—' }}</td>
-        <td>{{ member['permission_level'] }}</td>
+        <td>{{ member['permission_label'] }}</td>
         <td>
           {{ member['display_status'] }}
           {% if member['access_status'] == 'invited' and member['invite_delivery_status'] == 'failed' %}
@@ -50,11 +50,15 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="link-button">Reinstate</button>
             </form>
+            {# Erasing is owner-only (admin_config.erase_staff), so a manager
+               pressing it only ever got bounced to a login page. #}
+            {% if 'app_admin' in g.permission_levels %}
             <form method="post" action="{{ url_for('admin_config.erase_staff', membership_id=member['membership_id']) }}"
                   onsubmit="return confirm('Erase this person\'s sensitive personal data? This cannot be undone.');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="link-button">Erase data</button>
             </form>
+            {% endif %}
           {% endif %}
         </td>
       </tr>
@@ -66,7 +70,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label for="name">Name</label>
     <input type="text" id="name" name="name" required>
-    <label for="role_id">Role</label>
+    <label for="role_id">Job role</label>
     <select id="role_id" name="role_id">
       <option value="">—</option>
       {% for role in roles %}<option value="{{ role['id'] }}">{{ role['name'] }}</option>{% endfor %}
@@ -74,7 +78,7 @@
     <label for="permission_level">Permission</label>
     <select id="permission_level" name="permission_level">
       <option value="staff">Staff</option>
-      <option value="rota_admin">Rota admin</option>
+      <option value="rota_admin">Manager</option>
     </select>
     <label for="email">Email</label>
     <input type="email" id="email" name="email">

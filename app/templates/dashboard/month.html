@@ -17,16 +17,17 @@
       <td>Predicted</td>
       <td>£{{ '%.2f'|format(total_predicted_cost) }}</td>
       <td>£{{ '%.2f'|format(total_predicted_turnover) }}</td>
-      <td>{{ total_predicted_pct ~ '%' if total_predicted_pct is not none else '—' }}</td>
+      <td>{{ total_predicted_pct ~ '%' if total_predicted_pct is not none else '—' }}{% if total_predicted_pct is not none and predicted_weeks_counted < weeks|length %}<br><span class="hint">based on {{ predicted_weeks_counted }} of {{ weeks|length }} weeks with turnover entered</span>{% endif %}</td>
     </tr>
     <tr>
       <td>Actual</td>
       <td>£{{ '%.2f'|format(total_actual_cost) }}</td>
       <td>£{{ '%.2f'|format(total_actual_turnover) }}</td>
-      <td>{{ total_actual_pct ~ '%' if total_actual_pct is not none else '—' }}</td>
+      <td>{{ total_actual_pct ~ '%' if total_actual_pct is not none else '—' }}{% if total_actual_pct is not none and actual_weeks_counted < weeks|length %}<br><span class="hint">based on {{ actual_weeks_counted }} of {{ weeks|length }} weeks with turnover entered</span>{% endif %}</td>
     </tr>
   </table>
   {% if target_pct %}<p class="hint">Target: {{ target_pct }}% of turnover.</p>{% endif %}
+  <p class="hint">The % of turnover counts only weeks that have a turnover figure, so a week you haven't filled in yet doesn't push it up.</p>
 </div>
 
 <div class="panel">

@@ -65,6 +65,11 @@
             {% endif %}
           </p>
         {% endif %}
+        {% if s['photo_url'] %}
+          {# Served by media.attendance_photo: admin-only, and only for a shift at this venue. #}
+          <img src="{{ url_for('media.attendance_photo', stored_filename=s['photo_url']) }}"
+               alt="Photo taken when clocking in" style="display:block; max-width:160px; border-radius:6px; margin:4px 0;">
+        {% endif %}
         <form method="post" action="{{ url_for('rota_grid.edit_attendance', shift_id=s['id']) }}" style="display:flex; gap:8px; align-items:flex-end;">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div><label>Clocked in</label><input type="time" name="clock_in_time" value="{{ s['clock_in_at']|uk_time }}"></div>

@@ -428,7 +428,8 @@ def cell(person_id, on_date):
     shifts = db.execute(
         """SELECT shift.*, attendance.clock_in_at, attendance.clock_out_at,
                   attendance.variance_flag, attendance.clock_in_location_confirmed,
-                  attendance.clock_out_location_confirmed, attendance.approval_status
+                  attendance.clock_out_location_confirmed, attendance.approval_status,
+                  attendance.photo_url
            FROM shift
            LEFT JOIN attendance ON attendance.shift_id = shift.id
            WHERE shift.venue_id = ? AND shift.person_id = ? AND shift.shift_date = ?""",
@@ -911,7 +912,7 @@ def swaps():
 def approvals_queue():
     db = get_db()
     rows = db.execute(
-        """SELECT shift.*, attendance.clock_in_at, attendance.clock_out_at, person.name
+        """SELECT shift.*, attendance.clock_in_at, attendance.clock_out_at, attendance.photo_url, person.name
            FROM attendance
            JOIN shift ON shift.id = attendance.shift_id
            JOIN person ON person.id = shift.person_id
@@ -1063,11 +1064,20 @@ def create_leave():
 @rota_bp.route("/leave/<int:leave_id>/approve", methods=["POST"])
 @require_permission("app_admin", "rota_admin")
 def approve_leave(leave_id):
+    """Only a still-pending request is approved. The queue only lists pending
+    ones, so anything else is a double-click or a stale page, and acting on
+    it would text the person "approved" a second time (or re-approve leave
+    that had since been declined or removed)."""
     db = get_db()
-    db.execute(
-        "UPDATE leave_request SET status = 'approved', decided_at = datetime('now'), decided_by_person_id = ? WHERE id = ? AND venue_id = ?",
+    cur = db.execute(
+        """UPDATE leave_request SET status = 'approved', decided_at = datetime('now'), decided_by_person_id = ?
+           WHERE id = ? AND venue_id = ? AND status = 'pending'""",
         (flask.g.person["id"] if flask.g.person else None, leave_id, flask.g.venue["id"]),
     )
+    if cur.rowcount == 0:
+        db.commit()
+        flask.flash("That request has already been dealt with, so nothing was changed.")
+        return flask.redirect(flask.url_for("rota_grid.leave_queue"))
     # What the booking is worth is settled here, at approval, and not touched
     # again (app/leave.py::freeze_counts).
     freeze_counts(db, leave_id)
@@ -1095,12 +1105,21 @@ def decline_leave(leave_id):
     existing = db.execute(
         "SELECT status FROM leave_request WHERE id = ? AND venue_id = ?", (leave_id, flask.g.venue["id"])
     ).fetchone()
+    back = flask.request.referrer or flask.url_for("rota_grid.leave_queue")
+    # A double-click on Remove, or a second tab still showing the old page,
+    # posts again for a record that is already declined (or gone). Treating
+    # that as a fresh decline would text the person "has not been approved"
+    # about leave they were never refused, so only pending and approved
+    # records are acted on; anything else is a quiet no-op.
+    if existing is None or existing["status"] not in ("pending", "approved"):
+        flask.flash("That leave has already been removed or declined, so nothing was changed.")
+        return flask.redirect(back)
     db.execute(
         "UPDATE leave_request SET status = 'declined', decided_at = datetime('now'), decided_by_person_id = ? WHERE id = ? AND venue_id = ?",
         (flask.g.person["id"] if flask.g.person else None, leave_id, flask.g.venue["id"]),
     )
     db.commit()
-    was_approved = bool(existing and existing["status"] == "approved")
+    was_approved = existing["status"] == "approved"
     row = db.execute(
         "SELECT * FROM leave_request WHERE id = ? AND venue_id = ?", (leave_id, flask.g.venue["id"])
     ).fetchone()
@@ -1113,7 +1132,7 @@ def decline_leave(leave_id):
         flask.flash("Leave cancelled.")
     else:
         flask.flash("Leave request declined.")
-    return flask.redirect(flask.request.referrer or flask.url_for("rota_grid.leave_queue"))
+    return flask.redirect(back)
 
 
 # ---------- Past leave: entering a history, and seeing what is there ----------
@@ -1314,9 +1333,9 @@ def create_leave_block():
                    (cur.lastrowid, role_id))
     db.commit()
     if chosen:
-        # Somebody with no role set is not in the group, so they are NOT
-        # caught -- said plainly here rather than discovered later.
-        flask.flash("Dates blocked for the groups you ticked. Staff with no group set can still "
+        # Somebody with no role set does not hold any of the ticked roles, so
+        # they are NOT caught -- said plainly here rather than discovered later.
+        flask.flash("Dates blocked for the job roles you ticked. Staff with no job role set can still "
                     "request these dates.")
     else:
         flask.flash("Dates blocked for everyone at this venue.")

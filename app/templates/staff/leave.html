@@ -84,7 +84,9 @@
         </select>
       </div>
     </div>
-    <p class="hint">For a single day off, set the first day to a half day.</p>
+    {# A booking that starts and ends on the same date loses half a day at
+       most, whichever of the two is set (leave.count_days). #}
+    <p class="hint">For one day off, choose the same date in From and To. For half a day, do the same and set First day to Half day.</p>
     <button type="submit" class="btn-primary">Submit request</button>
   </form>
 
@@ -93,7 +95,7 @@
     <div class="day-list-item">
       {{ r['start_date']|uk_date }}{% if r['start_portion'] == 'half' %} (from midday){% endif %}
       to {{ r['end_date']|uk_date }}{% if r['end_portion'] == 'half' %} (until midday){% endif %}
-      — {{ r['status'] }}
+      — {{ r['status']|capitalize }}
       <span class="leave-badge leave-badge-{{ r['leave_type'] or 'paid' }}">{{ (r['leave_type'] or 'paid')|leave_label }}</span>
       {% if r['status'] == 'approved' and r['days_counted'] is not none %}
         <span class="hint">{{ '%g'|format(r['days_counted']) }} day{{ '' if r['days_counted'] == 1 else 's' }}</span>

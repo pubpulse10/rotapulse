@@ -56,7 +56,7 @@
                   {% endfor %}
                 </div>
               {% elif cell['state'] == 'leave' %}
-                <span class="day-pill day-pill-leave">Hol</span>
+                <span class="day-pill day-pill-leave" title="{{ 'Off' if cell['leave_type'] == 'off' else cell['leave_type']|leave_label }}">{{ cell['leave_type']|leave_short }}</span>
               {% elif cell['state'] == 'day_off' %}
                 <span class="day-pill day-pill-off">Off</span>
               {% endif %}

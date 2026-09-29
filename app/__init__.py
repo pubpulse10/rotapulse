@@ -9,7 +9,7 @@ from flask_wtf.csrf import CSRFError
 
 from app import config, db
 from app.date_format import format_uk_date, format_uk_datetime, format_uk_time, variance_label
-from app.leave import LEAVE_TYPE_LABELS
+from app.leave import LEAVE_TYPE_LABELS, LEAVE_TYPE_SHORT
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -83,6 +83,7 @@ def create_app():
     app.jinja_env.filters["uk_time"] = format_uk_time
     app.jinja_env.filters["variance_label"] = variance_label
     app.jinja_env.filters["leave_label"] = lambda key: LEAVE_TYPE_LABELS.get(key or "paid", "Leave")
+    app.jinja_env.filters["leave_short"] = lambda key: LEAVE_TYPE_SHORT.get(key or "paid", "Off")
 
     @app.context_processor
     def inject_support_readonly():

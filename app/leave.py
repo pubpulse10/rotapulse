@@ -46,6 +46,21 @@ LEAVE_TYPES = [
 ]
 LEAVE_TYPE_KEYS = {key for key, _label, _requestable, _allowance in LEAVE_TYPES}
 LEAVE_TYPE_LABELS = {key: label for key, label, _requestable, _allowance in LEAVE_TYPES}
+# What fits in a rota cell on the staff Full rota, where "Hol" used to stand
+# in for every type -- including sick.
+LEAVE_TYPE_SHORT = {"paid": "Hol", "unpaid": "Unpaid", "sick": "Sick", "maternity": "Mat", "lieu": "Lieu"}
+
+# Leave types a colleague must not be able to read off the staff Full rota.
+# Sickness and maternity are health data (UK GDPR special category): the
+# owner and managers see the real type on the admin grid, but every other
+# member of staff just sees that the person is off.
+PRIVATE_LEAVE_TYPES = {"sick", "maternity"}
+
+
+def leave_type_for_colleagues(leave_type):
+    """The leave type as shown to other staff: the real one, or "off"."""
+    leave_type = leave_type or "paid"
+    return "off" if leave_type in PRIVATE_LEAVE_TYPES else leave_type
 # Sick, maternity and lieu are admin-recorded: nobody requests being ill in
 # advance, and the other two are decisions the landlord makes, not requests.
 STAFF_REQUESTABLE_TYPES = {key for key, _l, requestable, _a in LEAVE_TYPES if requestable}
