@@ -58,6 +58,22 @@
 
   {% if holiday %}
     <h2>Holiday</h2>
+    {% set leave_off = detail and detail['leave_off'] %}
+    <div class="checkbox-row">
+      <input type="checkbox" id="leave_off" name="leave_off" {{ 'checked' if leave_off }}>
+      <label for="leave_off">Leave doesn't apply to them</label>
+    </div>
+    <p class="hint">Tick for casual staff who just help out now and then. They won't see Leave in their own
+      RotaPulse, and they're left out of holiday balances and "Add leave for everyone". You can still add leave
+      for them yourself from the Leave screen.</p>
+  {% if leave_off %}
+    {# Nothing to show, but the figures are carried through the save so that
+       unticking the box later brings back what was there. #}
+    <input type="hidden" name="allowance_days" value="{{ detail['allowance_days'] if detail['allowance_days'] is not none else '' }}">
+    <input type="hidden" name="carried_over_days" value="{{ '%g'|format(carried_over) if carried_over else '' }}">
+    <input type="hidden" name="usual_daily_hours" value="{{ detail['usual_daily_hours'] if detail['usual_daily_hours'] is not none else '' }}">
+    {% if detail['holiday_pay_rolled_up'] %}<input type="hidden" name="holiday_pay_rolled_up" value="1">{% endif %}
+  {% else %}
     {% if not holiday['countable'] %}
       <p class="hint">Tick the days they normally work, below, and their holiday can be counted. Until then it can't be:
         a day of holiday means one of <em>their</em> working days.</p>
@@ -116,6 +132,7 @@
       <label for="holiday_pay_rolled_up">Holiday pay is rolled up into their hourly rate</label>
     </div>
     <p class="hint">Tick if they already get holiday pay on every payslip, so payroll isn't prompted to pay it twice.</p>
+  {% endif %}
   {% endif %}
 
     <h2>Which days can they normally work?</h2>

@@ -456,6 +456,11 @@ def init_schema(conn=None):
         # every payslip. For those people the payroll report must not prompt
         # for holiday pay as well, or they get paid twice.
         _add_column_if_missing(conn, "rota_staff_detail", "holiday_pay_rolled_up", "INTEGER NOT NULL DEFAULT 0")
+        # Customer request, 2026-10-01: casual staff who just help out now and
+        # then have no leave to book, and seeing a Leave page made them ask
+        # about it. Set, the person has no Leave page and is left out of
+        # holiday balances and "Add leave for everyone" (app/leave.py::leave_applies).
+        _add_column_if_missing(conn, "rota_staff_detail", "leave_off", "INTEGER NOT NULL DEFAULT 0")
         # Carry-over is entered by hand, never rolled over automatically: the
         # figure the landlord agrees often differs from the raw remainder (The
         # Cock shuts the first week of January and makes staff use theirs up).

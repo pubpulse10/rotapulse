@@ -404,6 +404,35 @@ Three things settled during the build:
 
 ---
 
+## Leave switched off for one person
+
+Added 1 October 2026, from a customer: most of their staff are contracted and use leave,
+but the ones who just help out from time to time have none to book, and seeing a Leave
+page made them ask about it.
+
+`rota_staff_detail.leave_off`, ticked on the staff record as **Leave doesn't apply to
+them**. One helper decides it everywhere: `app/leave.py::leave_applies`.
+
+- **The person** has no Leave button on My shifts, and the Leave page (GET and POST)
+  sends them back there.
+- **Holiday balances** leave them out: no row in "Holiday position this year", and no
+  below-statutory warning to chase.
+- **"Add leave for everyone"** skips them. A shutdown must not hand paid leave to somebody
+  who has none.
+- **The landlord is not handcuffed.** They can still be given leave by hand from the Leave
+  screen, it still shows on the rota, and it is still reported in "Taken between".
+- **Nothing is deleted.** Their allowance, carry-over and usual daily hours are carried
+  through the save as hidden fields, so unticking the box brings back what was there.
+
+Not the same thing as `holiday_pay_rolled_up`, which keeps the time-off tracking and only
+drops the payroll prompt. Somebody can be either, both or neither.
+
+**It is a display switch, not a statement about entitlement.** Casual and zero-hours
+workers generally do accrue statutory holiday (usually paid rolled-up for irregular
+hours); the app does not decide that either way. See the note on the law below.
+
+---
+
 ## Open questions
 
 - **Sick records and data protection.** Sick leave is health information, which carries

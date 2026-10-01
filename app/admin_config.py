@@ -619,8 +619,8 @@ def edit_staff(membership_id):
         hours_per_day = form.get("usual_daily_hours", type=float)
         db.execute(
             """INSERT INTO rota_staff_detail (venue_membership_id, hourly_pay_rate, home_address, availability,
-                   start_date, allowance_days, usual_daily_hours, holiday_pay_rolled_up)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   start_date, allowance_days, usual_daily_hours, holiday_pay_rolled_up, leave_off)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(venue_membership_id) DO UPDATE SET
                hourly_pay_rate = excluded.hourly_pay_rate,
                home_address = excluded.home_address,
@@ -628,11 +628,13 @@ def edit_staff(membership_id):
                start_date = excluded.start_date,
                allowance_days = excluded.allowance_days,
                usual_daily_hours = excluded.usual_daily_hours,
-               holiday_pay_rolled_up = excluded.holiday_pay_rolled_up""",
+               holiday_pay_rolled_up = excluded.holiday_pay_rolled_up,
+               leave_off = excluded.leave_off""",
             (
                 membership_id, pay_rate, form.get("home_address", "").strip() or None,
                 json.dumps(availability), form.get("start_date") or None,
                 allowance_days, hours_per_day, 1 if form.get("holiday_pay_rolled_up") else 0,
+                1 if form.get("leave_off") else 0,
             ),
         )
 

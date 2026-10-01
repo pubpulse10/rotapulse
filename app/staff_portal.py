@@ -14,7 +14,7 @@ import flask
 from app.db import get_db
 from app.geo_distance import distance_metres
 from app.date_format import format_uk_date
-from app.leave import (LEAVE_TYPES, leave_type_for_colleagues, PORTIONS, STAFF_REQUESTABLE_TYPES, blocked_dates_for,
+from app.leave import (LEAVE_TYPES, leave_applies, leave_type_for_colleagues, PORTIONS, STAFF_REQUESTABLE_TYPES, blocked_dates_for,
                        describe_blocked_dates, position, upcoming_blocks_for)
 from app.media import save_attendance_photo
 from app.notification_settings import notify_admins
@@ -70,8 +70,18 @@ def home():
     # that's the shift to use instead.
     has_open_shift_today = any(s["shift_date"] <= today.isoformat() and not s["clock_out_at"] for s in shifts)
     return flask.render_template(
-        "staff/home.html", shifts=shifts, today=today.isoformat(), has_open_shift_today=has_open_shift_today
+        "staff/home.html", shifts=shifts, today=today.isoformat(), has_open_shift_today=has_open_shift_today,
+        show_leave=leave_applies(_own_staff_detail(db, flask.g.person["id"], flask.g.venue["id"])),
     )
+
+
+def _own_staff_detail(db, person_id, venue_id):
+    return db.execute(
+        """SELECT rota_staff_detail.* FROM rota_staff_detail
+           JOIN venue_membership ON venue_membership.id = rota_staff_detail.venue_membership_id
+           WHERE venue_membership.person_id = ? AND venue_membership.venue_id = ?""",
+        (person_id, venue_id),
+    ).fetchone()
 
 
 @staff_bp.route("/rota")
@@ -424,6 +434,13 @@ def leave():
     db = get_db()
     person = flask.g.person
     venue = flask.g.venue
+
+    # Leave switched off for this person (casual staff). The button is gone
+    # from My shifts, but a bookmark or a typed address still lands here, and
+    # so does a form post -- so the guard is on the route, not just the link.
+    if not leave_applies(_own_staff_detail(db, person["id"], venue["id"])):
+        flask.flash("Leave isn't set up for you here. Have a word with your manager if you need time off.")
+        return flask.redirect(flask.url_for("staff_portal.home"))
 
     if flask.request.method == "POST":
         form = flask.request.form

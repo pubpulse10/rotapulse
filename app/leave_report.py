@@ -25,7 +25,7 @@ import flask
 
 from app.date_format import format_uk_date
 from app.db import get_db
-from app.leave import (LEAVE_TYPES, holiday_year_bounds, leave_days_in_window, position)
+from app.leave import (LEAVE_TYPES, leave_applies, holiday_year_bounds, leave_days_in_window, position)
 from app.rota_auth import register_identity, require_permission
 from app.uk_time import uk_today
 from app.venue_scope import register_venue_gate, register_venue_scope
@@ -76,6 +76,16 @@ def _gather(db, venue_id, start_date: str, end_date: str, today=None):
             for key in TYPE_KEYS
         }
         counted = [days for days in by_type.values() if days is not None]
+        # Leave switched off (casual staff): no holiday position at all, and
+        # no row above either -- unless an admin recorded leave for them in
+        # this period by hand, which still happened and still gets reported.
+        if not leave_applies(detail):
+            if sum(counted):
+                period.append({
+                    "name": member["name"], "membership_id": member["membership_id"],
+                    "by_type": by_type, "total": round(sum(counted), 2), "countable": True,
+                })
+            continue
         period.append({
             "name": member["name"],
             "membership_id": member["membership_id"],

@@ -81,6 +81,23 @@ BLOCK_NOTE_MAX = 20
 USUAL_HOURS_LOOKBACK_WEEKS = 12
 
 
+def leave_applies(detail) -> bool:
+    """False for somebody the landlord has switched leave off for.
+
+    Casual staff who help out now and then: they get no Leave page, and are
+    left out of holiday balances and "Add leave for everyone". An admin can
+    still record leave for them by hand -- the switch hides the feature from
+    the person, it does not handcuff the landlord.
+
+    No staff record at all means leave applies, as it always did. The column
+    check is for the gap between a deploy and the schema migration being run
+    by hand: a missing column must not take every staff home page down.
+    """
+    if detail is None or "leave_off" not in detail.keys():
+        return True
+    return not detail["leave_off"]
+
+
 def _current_holiday_year_start(year_start_mmdd: str, today: date) -> date:
     """Falls back to 1 Jan for anything that isn't a clean MM-DD, rather
     than raising. The settings form now saves this via two validated

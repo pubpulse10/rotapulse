@@ -22,7 +22,8 @@ from app.date_format import format_uk_date
 from app.db import get_db
 from app.leave import (BLOCK_NOTE_MAX, LEAVE_TYPE_KEYS, LEAVE_TYPE_LABELS, LEAVE_TYPES,
                        PORTIONS, blocked_dates_for, blocks_by_date, blocks_in_range,
-                       describe_blocked_dates, freeze_counts, notify_decision, position)
+                       describe_blocked_dates, freeze_counts, leave_applies, notify_decision,
+                       position)
 from app.notifications import send_email, send_sms
 from app.roles import active_roles
 from app.rota_auth import register_identity, require_permission
@@ -1391,6 +1392,12 @@ def create_bulk_leave():
 
     added, skipped = 0, []
     for member in _billable_staff(db, venue_id):
+        # Casual staff with leave switched off are not part of "everyone":
+        # a shutdown must not hand paid leave to somebody who has none.
+        detail = db.execute("SELECT * FROM rota_staff_detail WHERE venue_membership_id = ?",
+                            (member["membership_id"],)).fetchone()
+        if not leave_applies(detail):
+            continue
         clash = db.execute(
             """SELECT 1 FROM leave_request
                WHERE person_id = ? AND venue_id = ? AND status IN ('pending', 'approved')
