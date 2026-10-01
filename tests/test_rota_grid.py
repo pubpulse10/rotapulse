@@ -55,10 +55,38 @@ def test_a_late_start_is_flagged_on_the_grid(app, client, venue):
     assert "Clocked in at 09:25, due at 09:00" in html
 
 
+def test_late_means_more_than_ten_minutes(app, client, venue):
+    """Owner's call, 2026-10-01: down from 15. The grid and the shift panel
+    use the same figure, so they cannot disagree."""
+    from datetime import date
+    from tests.conftest import login_as_pub
+
+    person_id = _shift_with_clock_in(app, venue, "Eleven Late", "09:11")
+    login_as_pub(client, venue["pub_id"])
+
+    assert "shift-chip-late" in client.get(f"/v/{venue['slug']}/rota/").data.decode("utf-8")
+    panel = client.get(f"/v/{venue['slug']}/rota/cell/{person_id}/{date.today().isoformat()}")
+    assert b">Late</span>" in panel.data
+
+
+def test_early_and_a_late_clock_out_still_need_fifteen_minutes():
+    from app.date_format import LATE_START_MINUTES, variance_label
+
+    assert LATE_START_MINUTES == 10
+    # Twelve minutes early: not worth a badge, as before.
+    assert variance_label("2026-10-01T08:48:00", "09:00", "2026-10-01",
+                          late_after_minutes=LATE_START_MINUTES) is None
+    assert variance_label("2026-10-01T08:40:00", "09:00", "2026-10-01",
+                          late_after_minutes=LATE_START_MINUTES) == "Early"
+    # A clock-out twelve minutes over is not flagged; the panel does not pass
+    # the tighter figure for the end of a shift.
+    assert variance_label("2026-10-01T17:12:00", "17:00", "2026-10-01", "09:00") is None
+
+
 def test_on_time_early_and_not_clocked_in_are_not_flagged(app, client, venue):
     from tests.conftest import login_as_pub
 
-    _shift_with_clock_in(app, venue, "On Time", "09:10")     # inside the 15 minutes
+    _shift_with_clock_in(app, venue, "On Time", "09:10")     # exactly 10 is not "more than 10"
     _shift_with_clock_in(app, venue, "Early Bird", "08:30")
     _shift_with_clock_in(app, venue, "Not In Yet", None)
     login_as_pub(client, venue["pub_id"])

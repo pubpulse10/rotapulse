@@ -147,11 +147,11 @@
                    to conflict with, so they keep a plain <a>. #}
                 <div class="rota-cell-fill">
                   {% for s in cell['shifts'] %}
-                    {# Late = clocked in more than 15 minutes after the
-                       planned start, the same rule and the same word as the
-                       shift panel (variance_label). Admin grid only: the
+                    {# Late = clocked in more than LATE_START_MINUTES after
+                       the planned start, the same rule and the same word as
+                       the shift panel (variance_label). Admin grid only: the
                        staff Full rota never shows who was late. #}
-                    {% set late = s['clock_in_at']|variance_label(s['start_time'], s['shift_date']) == 'Late' %}
+                    {% set late = s['clock_in_at']|variance_label(s['start_time'], s['shift_date'], late_after_minutes=LATE_START_MINUTES) == 'Late' %}
                     <span class="shift-chip{{ ' shift-chip-late' if late }}" data-shift-id="{{ s['id'] }}"
                           data-href="{{ url_for('rota_grid.cell', person_id=row['member']['person_id'], on_date=d_str) }}"
                           tabindex="0" role="link">

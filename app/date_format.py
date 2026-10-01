@@ -56,7 +56,14 @@ def format_uk_time(value) -> str:
     return value.strftime("%H:%M")
 
 
-def variance_label(actual_at, planned_hhmm, shift_date=None, start_hhmm=None, threshold_minutes=15) -> str | None:
+# How long after the planned start a clock-in counts as Late, on the rota grid
+# and the shift panel. Owner's call, 2026-10-01: 15 minutes let too much go
+# unremarked. Early, and a late clock-OUT, stay on the 15-minute threshold.
+LATE_START_MINUTES = 10
+
+
+def variance_label(actual_at, planned_hhmm, shift_date=None, start_hhmm=None, threshold_minutes=15,
+                   late_after_minutes=None) -> str | None:
     """"Early" or "Late" relative to a planned HH:MM, or None if either
     value is missing or the difference is within threshold_minutes (kept
     in sync with staff_portal.VARIANCE_THRESHOLD_MINUTES — same "not worth
@@ -87,6 +94,10 @@ def variance_label(actual_at, planned_hhmm, shift_date=None, start_hhmm=None, th
     else:
         planned = actual_at.replace(hour=int(planned_hhmm[:2]), minute=int(planned_hhmm[3:5]), second=0, microsecond=0)
     diff_minutes = (actual_at - planned).total_seconds() / 60
-    if abs(diff_minutes) <= threshold_minutes:
-        return None
-    return "Early" if diff_minutes < 0 else "Late"
+    # late_after_minutes: a separate, usually tighter, cutoff for Late only.
+    late_after = threshold_minutes if late_after_minutes is None else late_after_minutes
+    if diff_minutes > late_after:
+        return "Late"
+    if diff_minutes < -threshold_minutes:
+        return "Early"
+    return None
