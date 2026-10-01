@@ -19,6 +19,69 @@ def test_week_grid_shows_shift_cell(app, client, venue):
     assert b"09:00" in resp.data
 
 
+def _shift_with_clock_in(app, venue, name, clock_in_hhmm):
+    from datetime import date
+    from app import db as db_module
+    from tests.conftest import create_active_staff
+
+    person_id, _m, _e = create_active_staff(app, venue["id"], name=name)
+    today = date.today().isoformat()
+    with app.app_context():
+        conn = db_module.get_db()
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) "
+            "VALUES (?, ?, ?, '09:00', '17:00', 'scheduled')",
+            (venue["id"], person_id, today),
+        ).lastrowid
+        if clock_in_hhmm:
+            conn.execute("INSERT INTO attendance (shift_id, clock_in_at) VALUES (?, ?)",
+                         (shift_id, f"{today}T{clock_in_hhmm}:00"))
+        conn.commit()
+    return person_id
+
+
+def test_a_late_start_is_flagged_on_the_grid(app, client, venue):
+    """Customer request, 2026-10-01: a late start could only be seen by
+    opening each shift in turn."""
+    from tests.conftest import login_as_pub
+
+    _shift_with_clock_in(app, venue, "Late Starter", "09:25")
+    login_as_pub(client, venue["pub_id"])
+
+    html = client.get(f"/v/{venue['slug']}/rota/").data.decode("utf-8")
+
+    assert "shift-chip shift-chip-late" in html
+    assert ">Late</span>" in html
+    assert "Clocked in at 09:25, due at 09:00" in html
+
+
+def test_on_time_early_and_not_clocked_in_are_not_flagged(app, client, venue):
+    from tests.conftest import login_as_pub
+
+    _shift_with_clock_in(app, venue, "On Time", "09:10")     # inside the 15 minutes
+    _shift_with_clock_in(app, venue, "Early Bird", "08:30")
+    _shift_with_clock_in(app, venue, "Not In Yet", None)
+    login_as_pub(client, venue["pub_id"])
+
+    html = client.get(f"/v/{venue['slug']}/rota/").data.decode("utf-8")
+
+    assert "shift-chip-late" not in html
+    assert ">Late</span>" not in html
+
+
+def test_the_staff_full_rota_never_shows_who_was_late(app, client, venue):
+    from tests.conftest import login_as_person
+
+    person_id = _shift_with_clock_in(app, venue, "Late Starter", "09:25")
+    login_as_person(client, person_id)
+
+    html = client.get(f"/v/{venue['slug']}/staff/rota").data.decode("utf-8")
+
+    assert "09:00" in html
+    assert "Late</span>" not in html
+    assert "shift-chip-late" not in html
+
+
 def test_avatar_is_pinned_to_the_staff_name_not_each_shift_chip(app, client, venue):
     """Real request, 2026-08-18: the photo used to render inside every
     individual shift chip. Now it should appear once, next to the staff

@@ -131,7 +131,9 @@ def week():
 
     staff = _billable_staff(db, venue["id"])
     shift_rows = db.execute(
-        """SELECT shift.*, attendance.approval_status FROM shift
+        # clock_in_at is for the Late flag on the chip (week.html): a late
+        # start used to be visible only by opening each shift in turn.
+        """SELECT shift.*, attendance.approval_status, attendance.clock_in_at FROM shift
            LEFT JOIN attendance ON attendance.shift_id = shift.id
            WHERE shift.venue_id = ? AND shift.shift_date BETWEEN ? AND ? AND shift.status = 'scheduled'""",
         (venue["id"], date_strs[0], date_strs[-1]),

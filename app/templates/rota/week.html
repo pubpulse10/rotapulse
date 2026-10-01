@@ -147,10 +147,16 @@
                    to conflict with, so they keep a plain <a>. #}
                 <div class="rota-cell-fill">
                   {% for s in cell['shifts'] %}
-                    <span class="shift-chip" data-shift-id="{{ s['id'] }}"
+                    {# Late = clocked in more than 15 minutes after the
+                       planned start, the same rule and the same word as the
+                       shift panel (variance_label). Admin grid only: the
+                       staff Full rota never shows who was late. #}
+                    {% set late = s['clock_in_at']|variance_label(s['start_time'], s['shift_date']) == 'Late' %}
+                    <span class="shift-chip{{ ' shift-chip-late' if late }}" data-shift-id="{{ s['id'] }}"
                           data-href="{{ url_for('rota_grid.cell', person_id=row['member']['person_id'], on_date=d_str) }}"
                           tabindex="0" role="link">
                       {{ s['start_time'] }}-{{ s['end_time'] }}
+                      {% if late %}<span class="badge badge-over-target" title="Clocked in at {{ s['clock_in_at']|uk_time }}, due at {{ s['start_time'] }}">Late</span>{% endif %}
                       {% if s['approval_status'] == 'pending' %}<span class="badge badge-unnotified" title="Needs approval">!</span>{% endif %}
                     </span>
                   {% endfor %}
