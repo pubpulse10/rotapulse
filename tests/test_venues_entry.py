@@ -68,3 +68,38 @@ def test_setup_page_says_a_card_comes_first_and_reads_the_trial_length(client, m
     assert "choose a plan and add a card" in body
     assert "The first 14 days are free" in body
     assert "before a subscription is needed" not in body
+
+
+def _hub_login(app, client, venue, level, hub_person_id=4242):
+    """A person invited through the Hub, signed in on the shared cookie: the
+    pub's id AND the Hub's person id (pubpulse-hub app/main.py::login)."""
+    from app import db as db_module
+
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Hub Person", permission_level=level)
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute("UPDATE person SET hub_person_id = ? WHERE id = ?", (hub_person_id, person_id))
+        conn.commit()
+    with client.session_transaction() as sess:
+        sess["pub_id"] = venue["pub_id"]
+        sess["person_id"] = hub_person_id
+
+
+def test_root_sends_a_hub_staff_person_to_the_staff_portal(app, client, venue):
+    """Reported 4 October 2026 (The Cock): "Open RotaPulse" from the Hub at
+    Staff level went to the admin-only rota grid, was refused, and landed on
+    the local login form saying their access wasn't active."""
+    _hub_login(app, client, venue, "staff")
+
+    resp = client.get("/")
+    assert resp.status_code == 302
+    assert f"/v/{venue['slug']}/staff/" in resp.headers["Location"]
+    assert client.get(resp.headers["Location"]).status_code == 200
+
+
+def test_root_still_sends_a_hub_manager_to_the_rota_grid(app, client, venue):
+    _hub_login(app, client, venue, "rota_admin")
+
+    resp = client.get("/")
+    assert resp.status_code == 302
+    assert f"/v/{venue['slug']}/rota/" in resp.headers["Location"]

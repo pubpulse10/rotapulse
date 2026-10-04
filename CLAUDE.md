@@ -174,6 +174,12 @@ typed password matches the OWNER's, the Hub's login falls through to the owner l
 needs its own email address. And a Manager sees pay rates read-only by design; only Staff
 does not.
 
+Found the same afternoon, once that login really was Staff: `venues.entry()` sent every
+session carrying a `pub_id` to the admin-only rota grid. A Hub person carries the pub's id
+too, so "Open RotaPulse" at Staff level was refused and landed on the local login form under
+"Your access to this venue isn't active". `entry()` now sends a Hub person whose only active
+level is staff to the staff portal (`tests/test_venues_entry.py`).
+
 `tests/test_owner_app_admin_survives.py`.
 
 ### 2026-09-21 — The approval step has to announce itself, at both ends

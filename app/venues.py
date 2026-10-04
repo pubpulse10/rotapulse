@@ -58,12 +58,40 @@ def _unique_slug(db, base_slug):
     return slug
 
 
+def _is_hub_staff_only(db, venue_id, hub_person_id):
+    """True for a Hub person whose only active RotaPulse access here is
+    staff-level. The same lookup rota_auth makes, owner's row excluded."""
+    if hub_person_id is None:
+        return False
+    levels = {
+        row["permission_level"]
+        for row in db.execute(
+            """SELECT app_access.permission_level FROM app_access
+               JOIN venue_membership ON venue_membership.id = app_access.venue_membership_id
+               JOIN person ON person.id = venue_membership.person_id
+               WHERE person.hub_person_id = ? AND person.pub_id IS NULL
+               AND venue_membership.venue_id = ? AND venue_membership.status = 'active'
+               AND app_access.status = 'active'
+               AND app_access.app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+            (hub_person_id, venue_id),
+        ).fetchall()
+    }
+    return levels == {"staff"}
+
+
 @venues_bp.route("/")
 def entry():
     pub_id = flask.session.get("pub_id")
     if pub_id is not None:
         venue = _venue_for_pub(get_db(), pub_id)
         if venue:
+            # A Hub-invited person carries the pub's id too, and the rota grid
+            # is admin-only. Sent there at Staff level they were refused and
+            # dropped on the local login form under "Your access to this venue
+            # isn't active" — which it was (The Cock, 4 October 2026). Their
+            # own page is the staff portal.
+            if _is_hub_staff_only(get_db(), venue["id"], flask.session.get("person_id")):
+                return flask.redirect(flask.url_for("staff_portal.home", slug=venue["slug"]))
             return flask.redirect(flask.url_for("rota_grid.week", slug=venue["slug"]))
         return flask.redirect(flask.url_for("venues.setup"))
 
