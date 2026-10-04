@@ -97,7 +97,18 @@ def _link_or_create_person(db, hub_person_id, name, email):
     reconciliation. Only matches a still-unlinked person (hub_person_id IS
     NULL), so this can never steal/overwrite a different person's existing
     Hub link."""
-    person = db.execute("SELECT id FROM person WHERE hub_person_id = ?", (hub_person_id,)).fetchone()
+    person = db.execute("SELECT id, pub_id FROM person WHERE hub_person_id = ?", (hub_person_id,)).fetchone()
+    if person is not None and person["pub_id"] is not None:
+        # The Hub id is sitting on the venue OWNER's row — stamped there by the
+        # email match before it learned to skip owners (25 September 2026).
+        # Ignoring the push, as that fix did, protected the owner but left the
+        # Hub person welded to them: signed in as the owner, and every role
+        # change or Re-sync from the Hub skipped while reporting success
+        # (The Cock, 4 October 2026). Take the stamp off and carry on, so this
+        # person gets a staff row of their own at the level the Hub holds. The
+        # owner's row and access are otherwise untouched.
+        db.execute("UPDATE person SET hub_person_id = NULL WHERE id = ?", (person["id"],))
+        person = None
     if person is not None:
         return person["id"]
 
@@ -162,11 +173,11 @@ def access():
 
     # The venue owner is not staff, and their access is not a grant: it comes
     # from owning the PubPulse account, and venues.setup() writes app_admin +
-    # rota_admin once. Nothing pushed from the Hub may rewrite it. This catches
-    # a person row that an earlier version of _link_or_create_person already
-    # attached to the owner by email — renaming them and demoting them to
-    # whatever the Hub calls them would be worse than ignoring the push, and
-    # the owner already has more access than any grant could give.
+    # rota_admin once. Nothing pushed from the Hub may rewrite it.
+    # _link_or_create_person never returns an owner's row any more (it detaches
+    # a Hub id it finds on one and makes the person a row of their own), so
+    # this is the backstop: renaming the landlord and demoting them to whatever
+    # the Hub calls somebody else must stay impossible whatever happens above.
     owner_row = db.execute("SELECT pub_id FROM person WHERE id = ?", (person_id,)).fetchone()
     if owner_row is not None and owner_row["pub_id"] is not None:
         return jsonify({"ok": True, "skipped": "venue owner"})

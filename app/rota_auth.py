@@ -89,12 +89,21 @@ def register_identity(blueprint):
         # Hub-invited staff (shared login): session['person_id'] is the Hub's
         # person id, materialised locally on person.hub_person_id by the
         # /internal/access push. Resolve within THIS venue via its membership.
+        #
+        # `pub_id IS NULL`: a Hub person is staff, and must never resolve to
+        # the venue OWNER's row. Before 25 September 2026 the push could stamp
+        # a Hub id onto that row (same email as the landlord), and the fix then
+        # left the stamp where it was — so that Hub login went on signing in as
+        # the owner, pay rates and all, and no role change in the Hub could
+        # reach it (The Cock, 4 October 2026). Better no access than the
+        # owner's: the next push gives them a row of their own.
         hub_person_id = flask.session.get("person_id")
         if person is None and hub_person_id is not None:
             person = db.execute(
                 """SELECT person.* FROM person
                    JOIN venue_membership ON venue_membership.person_id = person.id
-                   WHERE person.hub_person_id = ? AND venue_membership.venue_id = ?""",
+                   WHERE person.hub_person_id = ? AND venue_membership.venue_id = ?
+                   AND person.pub_id IS NULL""",
                 (hub_person_id, venue["id"]),
             ).fetchone()
 

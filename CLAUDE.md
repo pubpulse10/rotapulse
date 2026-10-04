@@ -35,8 +35,11 @@ re-deciding something already recorded here.
 - **`app_admin` belongs to the venue owner, and nothing outside `venues.setup()` may create or
   destroy it.** It is not a grant somebody made: it follows from owning the PubPulse account,
   and `setup()` writes `app_admin` + `rota_admin` once. `app/internal.py`'s Hub push must never
-  write it, never delete it, and must ignore a push aimed at the owner's own person row
-  entirely (their `person.pub_id` is set; a staff person's never is). `rota_auth` rebuilds the
+  write it, never delete it, and must never rewrite the owner's own person row
+  (their `person.pub_id` is set; a staff person's never is). The reverse holds too: **a Hub
+  person must never resolve to the owner's row.** `rota_auth`'s Hub-session lookup carries
+  `AND person.pub_id IS NULL`, and a push that finds its Hub id on an owner's row takes it off
+  and gives the person a row of their own (4 October 2026). `rota_auth` rebuilds the
   pair whenever a session that resolved to the owner by `pub_id` turns out to be missing
   `app_admin`, so a venue that has already lost it repairs itself on the next page view.
   Losing it is nearly silent — rota_admin still runs the whole day-to-day app, so all the owner
@@ -136,6 +139,40 @@ would wipe a rate rather than keep it.
 
 Payroll reads the current rate live, so correcting the rate and re-running the report for the
 period is the whole fix — there is no frozen historical figure to back-correct.
+
+`tests/test_owner_app_admin_survives.py`.
+
+### 2026-10-04 — A shared staff login that signed in as the owner
+
+Reported at The Cock: a shared staff login, invited through the Hub under the landlord's own
+account email, showed "Owner" in RotaPulse with pay rates visible. Demoting it to Manager on
+the Hub's Staff & access page and pressing Re-sync access changed nothing, and the Hub said
+the access was up to date.
+
+This is the other half of the 25 September entry above. Change 2 there ignored a push that
+resolved to an owner's row, which protected the owner and **left the Hub id stamped on that
+row**. So the Hub person's session (`session['person_id']`) went on resolving to the owner's
+person, with `app_admin`, and every later push for them was skipped while answering 200.
+
+Two changes:
+
+1. `rota_auth`'s Hub-session lookup adds `AND person.pub_id IS NULL`. A Hub person can never
+   be the owner, whatever is stamped where. Until the next push they have no access at all,
+   which is the right way round for a login that was showing pay rates.
+2. `_link_or_create_person` detaches a Hub id it finds on an owner's row and carries on, so
+   the person gets a staff row of their own at the level the Hub holds. Re-sync access is
+   therefore the repair, and so is any role change. The `skipped: venue owner` return stays
+   as a backstop.
+
+Not repaired: the earlier bug may have overwritten the owner's `person.name`/`email` with the
+Hub person's. Nothing records what they were, so the owner corrects the name on their own
+staff record.
+
+Not a code matter, but the same report: when a Hub person shares the owner's email and the
+typed password matches the OWNER's, the Hub's login falls through to the owner login
+(pubpulse-hub `app/main.py::login`) and that is a genuine owner session. A shared staff login
+needs its own email address. And a Manager sees pay rates read-only by design; only Staff
+does not.
 
 `tests/test_owner_app_admin_survives.py`.
 

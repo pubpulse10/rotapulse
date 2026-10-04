@@ -71,15 +71,29 @@ def test_a_hub_person_sharing_the_owners_email_does_not_adopt_the_owner(app, cli
         assert owner["pub_id"] == venue["pub_id"]
 
 
-def test_a_push_for_a_person_row_already_attached_to_the_owner_is_ignored(app, client, venue, monkeypatch):
+def _stamp_hub_id_on_owner(app, venue, hub_person_id):
+    """What the pre-25-September email match left behind."""
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute("UPDATE person SET hub_person_id = ? WHERE id = ?",
+                     (hub_person_id, venue["owner_person_id"]))
+        conn.commit()
+
+
+def _login_as_hub_person(client, pub_id, hub_person_id):
+    """A Hub staff login: the pub's id AND the Hub's person id on the shared
+    cookie (pubpulse-hub app/main.py::login)."""
+    with client.session_transaction() as sess:
+        sess["pub_id"] = pub_id
+        sess["person_id"] = hub_person_id
+        sess.pop("rotapulse_person_id", None)
+
+
+def test_a_push_for_a_person_row_already_attached_to_the_owner_leaves_the_owner_alone(app, client, venue, monkeypatch):
     """Repair case: an earlier version already stamped the Hub id onto the
     owner's row, so the email guard alone can't catch it on the next push."""
     _internal_secret(monkeypatch)
-    with app.app_context():
-        conn = db_module.get_db()
-        conn.execute("UPDATE person SET hub_person_id = 4242 WHERE id = ?",
-                     (venue["owner_person_id"],))
-        conn.commit()
+    _stamp_hub_id_on_owner(app, venue, 4242)
 
     client.post(
         "/internal/access",
@@ -95,6 +109,96 @@ def test_a_push_for_a_person_row_already_attached_to_the_owner_is_ignored(app, c
                              (venue["owner_person_id"],)).fetchone()
         assert owner["name"] == "Owner Person"      # not renamed from the Hub
         assert owner["email"] == "owner@example.com"
+        assert owner["pub_id"] == venue["pub_id"]
+
+
+# --------------------------------------------------------------------------
+# ...and the Hub person must not BE the owner either
+#
+# Reported 4 October 2026 (The Cock): a shared staff login, invited through the
+# Hub under the landlord's own email address, signed in to RotaPulse as Owner —
+# pay rates on show — and demoting it to Manager and pressing Re-sync changed
+# nothing. Ignoring the push protected the owner and left the Hub id on their
+# row, so that login kept resolving to it.
+# --------------------------------------------------------------------------
+
+
+def test_a_hub_login_stamped_on_the_owners_row_does_not_sign_in_as_the_owner(app, client, venue):
+    _stamp_hub_id_on_owner(app, venue, 4242)
+    _login_as_hub_person(client, venue["pub_id"], 4242)
+
+    resp = client.get(f"/v/{venue['slug']}/admin/staff")
+
+    assert resp.status_code == 302
+    assert b"Pay rate" not in resp.data
+
+
+def test_the_next_push_gives_that_hub_person_a_row_of_their_own(app, client, venue, monkeypatch):
+    """Re-sync is the repair: the stamp comes off the owner and the Hub person
+    lands on a staff row at the level the Hub holds."""
+    _internal_secret(monkeypatch)
+    _stamp_hub_id_on_owner(app, venue, 4242)
+
+    resp = client.post(
+        "/internal/access",
+        json={"pub_id": venue["pub_id"], "person_id": 4242, "name": "Shared Login",
+              "email": "owner@example.com", "level": "staff", "status": "active"},
+        headers=_headers(),
+    )
+    assert resp.get_json() == {"ok": True}
+
+    with app.app_context():
+        conn = db_module.get_db()
+        owner = conn.execute("SELECT * FROM person WHERE id = ?",
+                             (venue["owner_person_id"],)).fetchone()
+        assert owner["hub_person_id"] is None
+        rows = conn.execute(
+            """SELECT person.id, person.pub_id, app_access.permission_level
+               FROM person
+               JOIN venue_membership ON venue_membership.person_id = person.id
+               JOIN app_access ON app_access.venue_membership_id = venue_membership.id
+               WHERE person.hub_person_id = 4242 AND app_access.status = 'active'""",
+        ).fetchall()
+    assert [(r["pub_id"], r["permission_level"]) for r in rows] == [(None, "staff")]
+    assert rows[0]["id"] != venue["owner_person_id"]
+
+
+def test_and_that_person_is_then_staff_not_owner(app, client, venue, monkeypatch):
+    """The reported symptom, end to end."""
+    _internal_secret(monkeypatch)
+    _stamp_hub_id_on_owner(app, venue, 4242)
+    client.post(
+        "/internal/access",
+        json={"pub_id": venue["pub_id"], "person_id": 4242, "name": "Shared Login",
+              "email": "owner@example.com", "level": "staff", "status": "active"},
+        headers=_headers(),
+    )
+    _login_as_hub_person(client, venue["pub_id"], 4242)
+
+    home = client.get(f"/v/{venue['slug']}/staff/")
+    assert home.status_code == 200
+    assert b"pp-id-staff" in home.data       # the chip says Staff
+    assert b"pp-id-owner" not in home.data
+
+    staff_page = client.get(f"/v/{venue['slug']}/admin/staff")
+    assert staff_page.status_code == 302     # no admin screens, no pay rates
+
+
+def test_the_owner_still_signs_in_as_the_owner_afterwards(app, client, venue, monkeypatch):
+    _internal_secret(monkeypatch)
+    _stamp_hub_id_on_owner(app, venue, 4242)
+    client.post(
+        "/internal/access",
+        json={"pub_id": venue["pub_id"], "person_id": 4242, "name": "Shared Login",
+              "email": "owner@example.com", "level": "staff", "status": "active"},
+        headers=_headers(),
+    )
+
+    login_as_pub(client, venue["pub_id"])
+    resp = client.get(f"/v/{venue['slug']}/admin/staff")
+
+    assert resp.status_code == 200
+    assert _levels(app, venue["owner_membership_id"]) == {"app_admin", "rota_admin"}
 
 
 def test_the_push_still_works_normally_for_real_staff(app, client, venue, monkeypatch):
