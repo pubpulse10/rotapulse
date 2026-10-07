@@ -605,6 +605,14 @@ def _activate_from_checkout(db, venue_id, customer_id, subscription_id):
         # call needed to also grab the renewal date + status off the same object.
         period_end = _period_end_iso(stripe_sub)
         sub_status = getattr(stripe_sub, "status", None) or "active"
+        # A Checkout Session stays "complete" for ever, so its return URL can
+        # be replayed, and its webhook retried, long after the subscription it
+        # started was cancelled. Only a subscription that is running NOW
+        # activates anything: this used to write the paid plan regardless,
+        # which let a cancelled subscriber switch themselves back on for free
+        # by revisiting the link (found 2026-10-07).
+        if sub_status not in ("active", "trialing"):
+            return
 
     db.execute(
         """UPDATE rota_subscription

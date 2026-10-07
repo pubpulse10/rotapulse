@@ -479,3 +479,28 @@ def test_a_first_time_customer_is_not_looked_up_before_checkout(
     assert resp.status_code == 303
     assert pricepulse.calls == []
     assert stripe_calls.calls == [("checkout", None)]
+
+
+def test_the_return_page_does_not_revive_a_cancelled_subscription(app, client, venue, monkeypatch):
+    # A Checkout Session stays "complete" for ever, and its id sits in the
+    # landlord's browser history. Replaying the return URL after cancelling
+    # used to write plan='active' straight back, with no webhook left to
+    # correct it (found 2026-10-07).
+    _set_subscription(app, venue["id"], plan="inactive")
+    monkeypatch.setattr(
+        billing_module.stripe.checkout.Session, "retrieve",
+        lambda session_id: SimpleNamespace(
+            client_reference_id=str(venue["id"]),
+            metadata=SimpleNamespace(pubpulse_app="rotapulse"),
+            customer="cus_old", subscription="sub_old",
+            status="complete", payment_status="no_payment_required",
+        ),
+    )
+    monkeypatch.setattr(
+        billing_module.stripe.Subscription, "retrieve",
+        lambda subscription_id: SimpleNamespace(status="canceled", items=None),
+    )
+
+    client.get(f"/v/{venue['slug']}/billing/success?session_id=cs_test_old")
+
+    assert _subscription_row(app, venue["id"])["plan"] == "inactive"
