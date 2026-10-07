@@ -23,3 +23,12 @@ def _client_ip():
 
 
 limiter = Limiter(key_func=_client_ip, default_limits=[])
+
+
+def by_venue():
+    """Rate-limit key for messages a venue causes us to send: the venue, not
+    the address the request came from. An invite or an open-shift alert is our
+    email or our text, to a recipient the venue chose. With no ceiling per
+    venue, a trial account could send without limit from our sender and our
+    SMS number (found 2026-10-07)."""
+    return "venue-messages:%s" % (request.view_args or {}).get("slug")

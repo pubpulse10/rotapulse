@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 import flask
 
 from app import config
+from app.extensions import by_venue, limiter
 from app.billing import enforce_band
 from app.consent import erase_person_sensitive_data
 from app.db import get_app_id, get_db
@@ -684,6 +685,7 @@ def edit_staff(membership_id):
 
 
 @admin_bp.route("/staff/create", methods=["POST"])
+@limiter.limit("30 per hour; 100 per day", key_func=by_venue)
 @require_permission("app_admin", "rota_admin")
 def create_staff():
     db = get_db()
@@ -766,6 +768,7 @@ def _record_delivery_status(db, access_id, delivery_status):
 
 
 @admin_bp.route("/staff/<int:access_id>/resend-invite", methods=["POST"])
+@limiter.limit("30 per hour; 100 per day", key_func=by_venue)
 @require_permission("app_admin", "rota_admin")
 def resend_invite(access_id):
     """For someone stuck at 'invited' — most often because the original

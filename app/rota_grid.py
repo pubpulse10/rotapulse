@@ -17,6 +17,7 @@ from datetime import date, timedelta
 
 import flask
 
+from app.extensions import by_venue, limiter
 from app.costs import predicted_cost
 from app.date_format import format_uk_date
 from app.db import get_db
@@ -788,6 +789,7 @@ def open_shift(shift_id):
 
 
 @rota_bp.route("/shift/<int:shift_id>/notify", methods=["POST"])
+@limiter.limit("12 per hour; 40 per day", key_func=by_venue)
 @require_permission("app_admin", "rota_admin")
 def notify_open_shift(shift_id):
     db = get_db()
