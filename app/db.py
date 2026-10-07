@@ -593,6 +593,36 @@ def delete_venue_by_pub_id(conn, pub_id):
                     if c.rowcount:
                         deleted[child] = c.rowcount
 
+    # Everything below here was being left behind (found 2026-10-07): rows that
+    # hang off a shift, a membership or a setting rather than the venue, and
+    # the people themselves — names, addresses, dates of birth, mobiles,
+    # password hashes, clock-in locations and photos. Collected now, while the
+    # rows that say whose they are still exist.
+    people, files = [], []
+    if "person" in tables and "venue_membership" in tables:
+        people = [r["person_id"] for r in conn.execute(
+            f"SELECT DISTINCT person_id FROM venue_membership WHERE venue_id IN ({ph})", ids)]
+    if "attendance" in tables and "shift" in tables:
+        files += [("attendance_photo", r["photo_url"]) for r in conn.execute(
+            f"""SELECT attendance.photo_url FROM attendance JOIN shift ON shift.id = attendance.shift_id
+                WHERE shift.venue_id IN ({ph}) AND attendance.photo_url IS NOT NULL""", ids)]
+
+    for child, parent, key in (
+        ("attendance", "shift", "shift_id"),
+        ("shift_swap_request", "shift", "shift_id"),
+        ("shift_open_notification", "shift", "shift_id"),
+        ("shift_notification_log", "shift", "shift_id"),
+        ("leave_carry_over", "venue_membership", "venue_membership_id"),
+        ("leave_block_role", "leave_block", "leave_block_id"),
+        ("notification_recipient", "notification_setting", "notification_setting_id"),
+    ):
+        if child in tables and parent in tables:
+            c = conn.execute(
+                f"DELETE FROM {child} WHERE {key} IN "
+                f"(SELECT id FROM {parent} WHERE venue_id IN ({ph}))", ids)
+            if c.rowcount:
+                deleted[child] = deleted.get(child, 0) + c.rowcount
+
     for t in tables:
         if t == vt:
             continue
@@ -600,8 +630,39 @@ def delete_venue_by_pub_id(conn, pub_id):
         if "venue_id" in colnames:
             c = conn.execute(f"DELETE FROM {t} WHERE venue_id IN ({ph})", ids)
             if c.rowcount:
-                deleted[t] = c.rowcount
+                deleted[t] = deleted.get(t, 0) + c.rowcount
+
+    # The people, now their memberships here are gone — but only those with no
+    # membership left at any other venue, who are somebody else's staff too.
+    if people:
+        pph = ",".join("?" * len(people))
+        gone = [r["id"] for r in conn.execute(
+            f"""SELECT id FROM person WHERE id IN ({pph})
+                AND id NOT IN (SELECT person_id FROM venue_membership)""", people)]
+        if gone:
+            gph = ",".join("?" * len(gone))
+            files += [("avatar", r["avatar_url"]) for r in conn.execute(
+                f"SELECT avatar_url FROM person WHERE id IN ({gph}) AND avatar_url IS NOT NULL", gone)]
+            for child in ("rota_password_reset_token", "notification_recipient"):
+                if child in tables:
+                    conn.execute(f"DELETE FROM {child} WHERE person_id IN ({gph})", gone)
+            c = conn.execute(f"DELETE FROM person WHERE id IN ({gph})", gone)
+            deleted["person"] = c.rowcount
+
     c = conn.execute(f"DELETE FROM {vt} WHERE id IN ({ph})", ids)
     deleted[vt] = c.rowcount
     conn.commit()
+
+    # Files last, once the rows are really gone. Best-effort: a file that
+    # outlives its row belongs to nobody and can be reached by nobody.
+    if files:
+        from app.media import delete_file
+        removed = 0
+        for kind, name in files:
+            try:
+                delete_file(kind, name)
+                removed += 1
+            except Exception:  # noqa: BLE001 - never fail the delete over a file
+                pass
+        deleted["files"] = removed
     return deleted
