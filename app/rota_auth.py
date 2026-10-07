@@ -98,7 +98,12 @@ def register_identity(blueprint):
         # reach it (The Cock, 4 October 2026). Better no access than the
         # owner's: the next push gives them a row of their own.
         hub_person_id = flask.session.get("person_id")
-        if person is None and hub_person_id is not None:
+        # ...and only at a venue of the pub this Hub login belongs to. The Hub
+        # writes the person's own pub into the session beside their id; without
+        # this, a Hub person who also had a row at another pub's venue resolved
+        # there as well (found 2026-10-07).
+        if (person is None and hub_person_id is not None
+                and flask.session.get("pub_id") == venue["pub_id"]):
             person = db.execute(
                 """SELECT person.* FROM person
                    JOIN venue_membership ON venue_membership.person_id = person.id

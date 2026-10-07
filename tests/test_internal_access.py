@@ -52,6 +52,11 @@ def test_access_links_to_an_existing_locally_invited_person_by_email(app, client
             "INSERT INTO person (name, email) VALUES (?, ?)", ("Lianne Fairweather", "lianne@example.com")
         )
         local_person_id = cur.lastrowid
+        # create_staff always gives the person a membership at its own venue;
+        # the email match only looks among this venue's people.
+        conn.execute(
+            "INSERT INTO venue_membership (person_id, venue_id, status) VALUES (?, ?, 'active')",
+            (local_person_id, venue["id"]))
         conn.commit()
 
     resp = client.post(
@@ -80,6 +85,9 @@ def test_access_matches_email_case_insensitively(app, client, venue, monkeypatch
             "INSERT INTO person (name, email) VALUES (?, ?)", ("Casey", "casey@example.com")
         )
         local_person_id = cur.lastrowid
+        conn.execute(
+            "INSERT INTO venue_membership (person_id, venue_id, status) VALUES (?, ?, 'active')",
+            (local_person_id, venue["id"]))
         conn.commit()
 
     resp = client.post(
@@ -131,3 +139,42 @@ def test_access_does_not_link_a_person_already_linked_to_a_different_hub_id(app,
         assert ids_by_hub[111] is not None
         assert ids_by_hub[222] is not None
         assert ids_by_hub[111] != ids_by_hub[222]
+
+
+def test_access_does_not_adopt_another_venues_person_by_email(app, client, venue, monkeypatch):
+    """person is one table for every venue. Matching on the address alone let
+    a push for one pub adopt another pub's staff member, mobile and date of
+    birth included, and made that Hub login resolve at the other pub too
+    (found 2026-10-07)."""
+    from app import config
+
+    monkeypatch.setattr(config, "INTERNAL_API_SECRET", "test-secret")
+    with app.app_context():
+        conn = db_module.get_db()
+        other = conn.execute(
+            "INSERT INTO venue (pub_id, name, slug) VALUES (999, 'Other Venue', 'othervenue')").lastrowid
+        victim = conn.execute(
+            "INSERT INTO person (name, email, mobile) VALUES ('Vera Victim', 'vera@example.com', '07700900123')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO venue_membership (person_id, venue_id, status) VALUES (?, ?, 'active')",
+            (victim, other))
+        conn.commit()
+
+    resp = client.post(
+        "/internal/access",
+        json={"pub_id": venue["pub_id"], "person_id": 556, "name": "Someone Else",
+              "email": "vera@example.com", "level": "manager", "status": "active"},
+        headers=_headers(),
+    )
+    assert resp.status_code == 200
+
+    with app.app_context():
+        conn = db_module.get_db()
+        row = conn.execute("SELECT * FROM person WHERE id = ?", (victim,)).fetchone()
+        assert row["hub_person_id"] is None and row["name"] == "Vera Victim"
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM venue_membership WHERE person_id = ? AND venue_id = ?",
+            (victim, venue["id"])).fetchone()["n"] == 0
+        pushed = conn.execute("SELECT * FROM person WHERE hub_person_id = 556").fetchone()
+        assert pushed is not None and pushed["mobile"] is None

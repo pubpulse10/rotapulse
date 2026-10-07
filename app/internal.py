@@ -86,7 +86,7 @@ def run_shift_notifications():
     })
 
 
-def _link_or_create_person(db, hub_person_id, name, email):
+def _link_or_create_person(db, hub_person_id, name, email, venue_id):
     """Resolves the Hub-pushed person to a local row — by hub_person_id if
     already linked, else by email against a person RotaPulse's OWN invite
     flow (app/admin_config.py::create_staff) already created locally with
@@ -118,9 +118,17 @@ def _link_or_create_person(db, hub_person_id, name, email):
         # a Hub person invited under the same address as the landlord adopted
         # the owner's record — and the grant write below then replaced the
         # owner's app_admin with a single staff-tier row (25 September 2026).
+        #
+        # And only someone already at THIS venue. person is one table for
+        # every venue, and matching on the address alone let a push for pub A
+        # adopt pub B's staff member: pub A's admins then saw their mobile and
+        # date of birth, and that Hub login resolved at pub B too (found
+        # 2026-10-07). It also kept rows orphaned by a deleted venue adoptable.
         person = db.execute(
-            "SELECT id FROM person WHERE hub_person_id IS NULL AND pub_id IS NULL AND email = ?",
-            (email,),
+            """SELECT id FROM person
+               WHERE hub_person_id IS NULL AND pub_id IS NULL AND email = ?
+                 AND id IN (SELECT person_id FROM venue_membership WHERE venue_id = ?)""",
+            (email, venue_id),
         ).fetchone()
         if person is not None:
             db.execute("UPDATE person SET hub_person_id = ? WHERE id = ?", (hub_person_id, person["id"]))
@@ -169,7 +177,7 @@ def access():
     aa_status = "active" if data.get("status") == "active" else "revoked"
 
     # pub_id stays NULL on this person row (that's owner-only).
-    person_id = _link_or_create_person(db, hub_person_id, name, email)
+    person_id = _link_or_create_person(db, hub_person_id, name, email, venue_id)
 
     # The venue owner is not staff, and their access is not a grant: it comes
     # from owning the PubPulse account, and venues.setup() writes app_admin +
