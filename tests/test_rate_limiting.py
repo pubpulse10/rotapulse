@@ -22,3 +22,27 @@ def test_login_rate_limit_trips_after_too_many_attempts(app, client, venue):
         assert resp.status_code == 429
     finally:
         limiter.enabled = False
+
+
+def test_attempts_are_counted_against_the_account_not_only_the_address(app, client, venue):
+    """The per-address limit rests on a header we cannot prove the edge always
+    overwrites (2026-10-07). A dozen attempts on one login lock it for a while,
+    wherever they come from; another login is unaffected."""
+    def wrong(identifier, n):
+        return client.post(
+            f"/v/{venue['slug']}/login",
+            data={"identifier": identifier, "password": "wrong"},
+            headers={"CF-Connecting-IP": f"203.0.113.{n}"},
+        ).status_code
+
+    limiter.enabled = True
+    try:
+        limiter.reset()
+        statuses = [wrong("target@example.com", n) for n in range(13)]
+        other = wrong("someone-else@example.com", 12)
+    finally:
+        limiter.reset()
+        limiter.enabled = False
+
+    assert statuses[:12] == [200] * 12 and statuses[12] == 429
+    assert other == 200

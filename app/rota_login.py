@@ -27,7 +27,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from app import config
 from app.db import get_db
-from app.extensions import limiter
+from app.extensions import LOGIN_ACCOUNT_LIMIT, limiter, login_account_key
 from app.notifications import send_email, send_sms
 from app.rota_auth import access_statuses, inactive_access_message
 from app.venue_scope import register_venue_gate, register_venue_scope
@@ -72,6 +72,7 @@ def _find_person_by_identifier(db, venue_id, identifier):
 
 @login_bp.route("/login", methods=["GET", "POST"])
 @limiter.limit("10 per minute; 100 per hour", methods=["POST"])
+@limiter.limit(LOGIN_ACCOUNT_LIMIT, key_func=login_account_key("identifier"), methods=["POST"])
 def login():
     venue = flask.g.venue
     if flask.request.method == "POST":

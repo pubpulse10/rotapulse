@@ -32,3 +32,25 @@ def by_venue():
     venue, a trial account could send without limit from our sender and our
     SMS number (found 2026-10-07)."""
     return "venue-messages:%s" % (request.view_args or {}).get("slug")
+
+
+def login_account_key(field="email"):
+    """Rate-limit key for one account's login, whatever address the attempts
+    come from. The per-address limit above rests on a header (CF-Connecting-IP)
+    that we cannot prove the edge always overwrites, and a guesser with many
+    addresses passes it anyway; this one counts attempts against the
+    account being tried (added 2026-10-07). Falls back to the address when no
+    account was named."""
+    def key():
+        account = (request.form.get(field) or "").strip().lower()[:254]
+        scope = (request.view_args or {}).get("slug") or ""
+        return "login-account:%s:%s" % (scope, account or _client_ip())
+    return key
+
+
+# A dozen attempts on one account in fifteen minutes, right or wrong (counting
+# only failures needs the response, and that hook proved unreliable under the
+# test suite's many app instances). Nobody signs in a dozen times in a quarter
+# of an hour. Short on purpose: anyone can trip it for an address they know,
+# so it must clear quickly.
+LOGIN_ACCOUNT_LIMIT = "12 per 15 minutes"
