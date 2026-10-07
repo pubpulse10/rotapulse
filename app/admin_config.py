@@ -935,9 +935,28 @@ def _send_approval_message(venue, slug, invite_method, email, mobile):
 @require_permission("app_admin", "rota_admin")
 def mark_left(membership_id):
     db = get_db()
+    venue_id = flask.g.venue["id"]
+    # The membership must be THIS venue's before anything is written. The
+    # app_access update below is keyed on the membership id alone, and it used
+    # to run whatever the first update matched — so any venue's manager could
+    # revoke any other venue's staff by walking the ids, and nobody at the
+    # other venue could undo it (found 2026-10-07).
+    target = db.execute(
+        """SELECT person.pub_id AS owner_pub_id FROM venue_membership
+           JOIN person ON person.id = venue_membership.person_id
+           WHERE venue_membership.id = ? AND venue_membership.venue_id = ?""",
+        (membership_id, venue_id),
+    ).fetchone()
+    if target is None:
+        flask.abort(404)
+    if target["owner_pub_id"] is not None:
+        # The account owner. Marked as left they have no way back in — not to
+        # RotaPulse, and not to the subscription that keeps charging them.
+        flask.flash("The account owner can't be marked as left.")
+        return flask.redirect(flask.url_for("admin_config.staff_list"))
     db.execute(
         "UPDATE venue_membership SET status = 'left' WHERE id = ? AND venue_id = ?",
-        (membership_id, flask.g.venue["id"]),
+        (membership_id, venue_id),
     )
     db.execute(
         """UPDATE app_access SET status = 'revoked'
@@ -945,7 +964,7 @@ def mark_left(membership_id):
         (membership_id,),
     )
     db.commit()
-    enforce_band(flask.g.venue["id"])
+    enforce_band(venue_id)
     flask.flash("Staff member marked as left — their access is revoked and they no longer count toward billing.")
     return flask.redirect(flask.url_for("admin_config.staff_list"))
 
