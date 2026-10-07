@@ -192,3 +192,40 @@ def test_variance_label_midnight_shift_clocked_out_an_hour_after_is_late():
 
 def test_variance_label_without_shift_date_keeps_old_behaviour():
     assert variance_label("2026-09-12 17:30:00", "17:00") == "Late"
+
+
+# ---------- Clock-out happens once (found 2026-10-07) ----------
+
+
+def _clock_out(app, shift_id):
+    with app.app_context():
+        return db_module.get_db().execute(
+            "SELECT clock_out_at FROM attendance WHERE shift_id = ?", (shift_id,)
+        ).fetchone()["clock_out_at"]
+
+
+def test_a_second_clock_out_does_not_move_the_time(app, client, venue):
+    """Payroll pays clock_out - clock_in. Re-posting used to overwrite the
+    clock-out with "now", so hours could be added after the fact."""
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Twice Over")
+    yesterday = _yesterday()
+    shift_id = _shift(app, venue["id"], person_id, yesterday,
+                      clock_in_at=f"{yesterday} 17:00:00", clock_out_at=f"{yesterday} 23:00:00")
+    login_as_person(client, person_id)
+
+    resp = client.post(f"/v/{venue['slug']}/staff/shift/{shift_id}/clock-out", data={}, follow_redirects=True)
+
+    assert b"already clocked out" in resp.data
+    assert _clock_out(app, shift_id) == f"{yesterday} 23:00:00"
+
+
+def test_a_days_old_shift_cannot_be_clocked_out_by_a_direct_post(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Forgot Long Ago")
+    old = (uk_today() - timedelta(days=3)).isoformat()
+    shift_id = _shift(app, venue["id"], person_id, old, clock_in_at=f"{old} 17:00:00")
+    login_as_person(client, person_id)
+
+    resp = client.post(f"/v/{venue['slug']}/staff/shift/{shift_id}/clock-out", data={}, follow_redirects=True)
+
+    assert b"too old to clock out" in resp.data
+    assert _clock_out(app, shift_id) is None

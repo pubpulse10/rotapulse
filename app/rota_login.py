@@ -48,6 +48,12 @@ def _safe_next(target: str | None) -> bool:
     the ?next= parameter to an attacker-controlled absolute URL."""
     if not target or not target.startswith("/"):
         return False
+    # Browsers delete tabs and newlines from a URL before reading it, so
+    # "/<tab>/evil.example" arrives as "//evil.example" — another site — while
+    # the check below sees a harmless single slash (found 2026-10-07). No
+    # genuine return address contains a control character or a backslash.
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in target) or "\\" in target:
+        return False
     if target.startswith("//") or target.startswith("/\\"):
         return False
     return True

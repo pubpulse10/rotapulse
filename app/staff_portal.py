@@ -366,6 +366,27 @@ def clock_out(shift_id):
     if shift_row is None:
         flask.abort(404)
 
+    # Once, and only for a shift actually clocked into. Payroll pays
+    # clock_out - clock_in, and this used to overwrite clock_out_at with "now"
+    # on every post — so clocking out at 17:00 and posting again at 23:00 added
+    # six paid hours, on today's shift or any past one (found 2026-10-07). A
+    # genuine mistake is a manager's to correct, through Edit attendance.
+    attendance = db.execute(
+        "SELECT clock_in_at, clock_out_at FROM attendance WHERE shift_id = ?", (shift_id,)
+    ).fetchone()
+    if attendance is None or attendance["clock_in_at"] is None:
+        flask.flash("Clock in before clocking out.", "error")
+        return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=shift_id))
+    if attendance["clock_out_at"] is not None:
+        flask.flash("You've already clocked out of this shift. Ask a manager if the time needs changing.", "error")
+        return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=shift_id))
+    # My shifts only offers Clock out for today's shift and last night's; a
+    # direct post must not do what the page deliberately won't — book days of
+    # hours to payroll for a clock-out forgotten earlier in the week.
+    if shift_row["shift_date"] < (uk_now().date() - timedelta(days=1)).isoformat():
+        flask.flash("That shift is too old to clock out of here. Ask a manager to set the time.", "error")
+        return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=shift_id))
+
     form = flask.request.form
     lat = form.get("lat", type=float)
     lng = form.get("lng", type=float)

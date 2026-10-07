@@ -701,6 +701,11 @@ def create_staff():
         return flask.redirect(flask.url_for("admin_config.staff_list"))
     if permission_level not in ("staff", "rota_admin"):
         flask.abort(400)
+    # Only the owner decides who is a manager — the rule edit_staff already
+    # enforces. Without it here a manager could invite a second manager and
+    # approve the account themselves (found 2026-10-07).
+    if permission_level == "rota_admin" and "app_admin" not in flask.g.permission_levels:
+        flask.abort(403)
 
     person_cur = db.execute("INSERT INTO person (name, email, mobile) VALUES (?, ?, ?)", (name, email, mobile))
     person_id = person_cur.lastrowid
