@@ -251,6 +251,28 @@ textarea { min-height: 70px; resize: vertical; }
   margin-top: 10px;
 }
 .btn-danger:hover { background: #96291b; }
+/* Clock out must never look like Clock in (solid navy, same spot on the
+   page) — a second tap after clocking in used to clock people straight out. */
+.btn-clock-out {
+  display: inline-block;
+  background: var(--color-surface);
+  color: var(--color-error);
+  border: 2px solid var(--color-error);
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 10px;
+}
+.btn-clock-out:hover { background: #fdecea; }
+.clocked-in-status {
+  background: #e7f6ec;
+  color: var(--color-accent);
+  font-weight: 600;
+  padding: 12px 14px;
+  border-radius: 8px;
+  margin: 12px 0 0;
+}
+.clock-out-form { margin-top: 28px; }
 .link-button { background: none; border: none; color: var(--color-primary); text-decoration: underline; cursor: pointer; padding: 0; }
 
 table { width: 100%; border-collapse: collapse; }

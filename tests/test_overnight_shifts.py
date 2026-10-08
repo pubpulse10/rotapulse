@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 from app import db as db_module
 from app.date_format import variance_label
-from app.uk_time import planned_datetime, uk_today
+from app.uk_time import planned_datetime, uk_now, uk_today
 from tests.conftest import create_active_staff, login_as_person
 
 
@@ -229,3 +229,27 @@ def test_a_days_old_shift_cannot_be_clocked_out_by_a_direct_post(app, client, ve
 
     assert b"too old to clock out" in resp.data
     assert _clock_out(app, shift_id) is None
+
+
+# ---------- Clock-out confirmation (real report, 2026-10-08) ----------
+
+
+def test_clock_out_button_asks_first_and_does_not_look_like_clock_in(app, client, venue):
+    """Someone clocked in, then tapped Clock out straight afterwards by
+    accident, and couldn't get back in. The button now carries what the
+    confirmation needs (when, and how long ago) and its own styling."""
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Double Tap")
+    today = uk_today().isoformat()
+    clocked_in = uk_now() - timedelta(minutes=3)
+    shift_id = _shift(app, venue["id"], person_id, today, start_time="00:00", end_time="23:59",
+                      clock_in_at=clocked_in.strftime("%Y-%m-%d %H:%M:%S"))
+    login_as_person(client, person_id)
+
+    html = client.get(f"/v/{venue['slug']}/staff/shift/{shift_id}").data.decode()
+    assert "confirmClockOut(this) && captureLocation('clock-out-form', this)" in html
+    assert 'data-clocked-in-minutes="3"' in html
+    assert f'data-clocked-in-time="{clocked_in.strftime("%H:%M")}"' in html
+    assert 'data-just-clocked-in-minutes="15"' in html
+    assert 'class="btn-clock-out btn-large"' in html
+    # Clock in's own solid-navy style must not be on the Clock out button.
+    assert "btn-primary" not in html.split('id="clock-out-form"')[1].split("</form>")[0]

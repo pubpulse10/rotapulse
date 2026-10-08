@@ -7,7 +7,7 @@ member uses this same view for their own shifts).
 """
 
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import flask
 
@@ -174,6 +174,16 @@ def shift_detail(shift_id):
     if shift_row is None:
         flask.abort(404)
     attendance = db.execute("SELECT * FROM attendance WHERE shift_id = ?", (shift_id,)).fetchone()
+    # Real report, 2026-10-08: someone clocked in, then tapped Clock out
+    # straight afterwards by accident — and clock-out is once only (see
+    # clock_out() below), so they were stuck until a manager stepped in. The
+    # page now asks before clocking out, saying how long ago they clocked in.
+    # Worked out here rather than in the browser so it's UK time whatever the
+    # phone's own clock/timezone says; the page adds on how long it's been open.
+    minutes_clocked_in = None
+    if attendance and attendance["clock_in_at"] and not attendance["clock_out_at"]:
+        clocked_in_at = datetime.fromisoformat(attendance["clock_in_at"])
+        minutes_clocked_in = max(0, int((uk_now() - clocked_in_at).total_seconds() // 60))
     # Swap-target dropdown (spec §5.5): every other active staff member at
     # this venue, so nobody has to know/ask for a colleague's person ID.
     colleagues = db.execute(
@@ -190,7 +200,14 @@ def shift_detail(shift_id):
         attendance=attendance,
         today=uk_today().isoformat(),
         colleagues=colleagues,
+        minutes_clocked_in=minutes_clocked_in,
+        just_clocked_in_minutes=JUST_CLOCKED_IN_MINUTES,
     )
+
+
+# Clocking out this soon after clocking in gets the stronger "you've only
+# just clocked in" wording on the confirmation.
+JUST_CLOCKED_IN_MINUTES = 15
 
 
 @staff_bp.route("/shift/<int:shift_id>/clock-in", methods=["POST"])

@@ -32,12 +32,17 @@
       </form>
     {% endif %}
   {% elif not attendance['clock_out_at'] %}
-    <p class="hint">Clocked in at {{ attendance['clock_in_at'] | uk_datetime }}.</p>
-    <form id="clock-out-form" method="post" action="{{ url_for('staff_portal.clock_out', shift_id=shift['id']) }}">
+    <p class="clocked-in-status">You're clocked in — since {{ attendance['clock_in_at'] | uk_time }}.</p>
+    <form id="clock-out-form" class="clock-out-form" method="post" action="{{ url_for('staff_portal.clock_out', shift_id=shift['id']) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="lat" id="clock-out-lat">
       <input type="hidden" name="lng" id="clock-out-lng">
-      <button type="submit" class="btn-primary btn-large" onclick="return captureLocation('clock-out-form', this)">Clock out</button>
+      <p class="hint">Finished for the day? You can only clock out once.</p>
+      <button type="submit" class="btn-clock-out btn-large"
+              data-clocked-in-time="{{ attendance['clock_in_at'] | uk_time }}"
+              data-clocked-in-minutes="{{ minutes_clocked_in }}"
+              data-just-clocked-in-minutes="{{ just_clocked_in_minutes }}"
+              onclick="return confirmClockOut(this) && captureLocation('clock-out-form', this)">Clock out</button>
     </form>
   {% else %}
     <p class="hint">Clocked in {{ attendance['clock_in_at'] | uk_datetime }}, clocked out {{ attendance['clock_out_at'] | uk_datetime }}.</p>
@@ -97,6 +102,32 @@ function captureLocation(formId, button) {
     { timeout: 20000, enableHighAccuracy: true }
   );
   return false; // wait for the async geolocation callback to submit
+}
+
+// Real report, 2026-10-08: the page reloads after Clock in with Clock out
+// sitting right there, and a second tap clocked someone straight back out —
+// which can't be undone from here (clock-out is once only). Always ask, and
+// say so plainly when they've only just clocked in. The minutes come from the
+// server (UK time) plus however long this page has been open.
+const pageShownAt = Date.now();
+function confirmClockOut(button) {
+  const minutes = Number(button.dataset.clockedInMinutes) + Math.floor((Date.now() - pageShownAt) / 60000);
+  const at = button.dataset.clockedInTime;
+  let ago;
+  if (minutes < 1) {
+    ago = 'less than a minute ago';
+  } else if (minutes < 60) {
+    ago = minutes + (minutes === 1 ? ' minute ago' : ' minutes ago');
+  } else {
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    ago = hours + (hours === 1 ? ' hour' : ' hours') + (rest ? ' ' + rest + ' min' : '') + ' ago';
+  }
+  if (minutes < Number(button.dataset.justClockedInMinutes)) {
+    return confirm("You've only just clocked in — at " + at + ', ' + ago + '.\n\n' +
+      "Are you sure you want to clock out? You can't clock back in to this shift afterwards.");
+  }
+  return confirm('You clocked in at ' + at + ', ' + ago + '.\n\nClock out now?');
 }
 
 // Pressing Back to return here restores the page from the bfcache exactly as
