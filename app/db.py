@@ -242,6 +242,20 @@ CREATE TABLE IF NOT EXISTS week_notification (
 -- for the same week rejectable with a plain existence check, no separate
 -- status column needed.
 
+CREATE TABLE IF NOT EXISTS week_notification_sent (
+    venue_id INTEGER NOT NULL REFERENCES venue(id),
+    week_start_date TEXT NOT NULL,
+    person_id INTEGER NOT NULL,
+    shifts_text TEXT NOT NULL,
+    sent_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (venue_id, week_start_date, person_id)
+);
+-- What each person was last told their week looks like (2026-10-13). The
+-- week is "changed since notified" when somebody's shifts no longer match
+-- their row here, and only those people are messaged again
+-- (rota_grid.notify_week_changes). A week notified before this table
+-- existed has a week_notification row and no rows here.
+
 -- ---------- Attendance (spec §6) ----------
 
 CREATE TABLE IF NOT EXISTS attendance (

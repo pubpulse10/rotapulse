@@ -60,6 +60,28 @@ re-deciding something already recorded here.
 
 ## Decisions
 
+### 2026-10-13 — A notified week that changes can be re-sent, to the people affected only
+
+Customer report: after "Notify staff of this week's rota", a later change reached nobody and
+there was no way to send it again. The owner chose **changed since notified** over a plain
+"re-send to everyone".
+
+- **`week_notification_sent`** holds, per person per week, the shift lines they were last sent
+  (`rota_grid._rostered_week` builds the same text for the message and for the record). The week
+  is changed when somebody's current lines differ from their row, they have a row and no shifts,
+  or shifts and no row. Nothing is recorded on each shift edit, so every route that touches a
+  shift (create, edit, move, swap, claim, copy, clear) is covered without knowing about this.
+- **`notify_week` is still once only.** `notify_week_changes` messages only the changed people,
+  can repeat, and is rate-limited per venue like the open-shift alert.
+- **A week that is over is never offered a re-send**, and ad_hoc (unplanned clock-in) shifts are
+  left out of the comparison and the message.
+- **A leaver** whose shifts were removed is not messaged; their row is just cleared.
+- **A week notified before 13 October 2026** has no rows, so who changed is unknowable. While it
+  is still running it gets "Send this week's rota again" (everyone rostered), which starts
+  tracking it. The badge stays "Notified" for these, not "Changed".
+
+`tests/test_notify_week_changes.py`. Hub guide: `pubpulse-hub/knowledge/rotapulse.guide.md`.
+
 ### 2026-09-22 — Help & feedback: the widget is the Hub's, the identity is ours
 
 RotaPulse is the first app to carry the family's shared "Help & feedback" widget. Two

@@ -3,7 +3,9 @@
 {% block content %}
 <h1>
   {{ venue['name'] }} — week of {{ week_start.day }} {{ week_start.strftime('%B %Y') }}
-  {% if week_notification %}
+  {% if week_changes and not week_changes['untracked'] %}
+    <span class="badge badge-changed" title="Sent {{ week_notification['notified_at'] | uk_datetime }}. {{ week_changes['people'] | length }} staff now have different shifts from the ones they were sent.">Changed since notified</span>
+  {% elif week_notification %}
     <span class="badge badge-on-track" title="Sent {{ week_notification['notified_at'] | uk_datetime }}">Notified</span>
   {% else %}
     <span class="badge badge-unnotified">Unnotified</span>
@@ -24,6 +26,15 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="week" value="{{ week_start.isoformat() }}">
         <button type="submit" class="btn-primary">Notify staff of this week's rota</button>
+      </form>
+    {% elif week_changes %}
+      {% set change_count = week_changes['people'] | length %}
+      <form method="post" action="{{ url_for('rota_grid.notify_week_changes') }}"
+            data-confirm="{% if week_changes['untracked'] %}This week was sent before RotaPulse kept track of changes, so it can't tell who has changed. Text and email all {{ change_count }} rostered staff their shifts for this week again?{% else %}Text and email the {{ change_count }} staff whose shifts have changed since this week was sent? Nobody else will be messaged.{% endif %}"
+            onsubmit="return confirm(this.dataset.confirm);">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="week" value="{{ week_start.isoformat() }}">
+        <button type="submit" class="btn-primary">{% if week_changes['untracked'] %}Send this week's rota again{% else %}Notify {{ change_count }} staff of changes{% endif %}</button>
       </form>
     {% endif %}
     <button type="button" class="btn-secondary" onclick="document.getElementById('copy-week-dialog').showModal()">Copy Week</button>

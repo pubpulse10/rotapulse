@@ -129,6 +129,7 @@ def week():
         "SELECT * FROM week_notification WHERE venue_id = ? AND week_start_date = ?",
         (venue["id"], week_start.isoformat()),
     ).fetchone()
+    week_changes = _week_changes(db, venue["id"], week_start) if week_notification else None
 
     staff = _billable_staff(db, venue["id"])
     shift_rows = db.execute(
@@ -230,6 +231,7 @@ def week():
         monday_options=_monday_options(db, venue["id"], week_start),
         week_cost=week_cost,
         week_notification=week_notification,
+        week_changes=week_changes,
         pending_approval_count=pending_approval_count,
         prev_week=(week_start - timedelta(days=7)).isoformat(),
         next_week=(week_start + timedelta(days=7)).isoformat(),
@@ -376,40 +378,23 @@ def notify_week():
         flask.flash("This week has already been notified — it can't be sent again.", "error")
         return flask.redirect(flask.url_for("rota_grid.week", week=week_start.isoformat()))
 
-    shift_rows = db.execute(
-        """SELECT shift.shift_date, shift.start_time, shift.end_time, person.id AS person_id,
-                  person.name, person.email, person.mobile
-           FROM shift JOIN person ON person.id = shift.person_id
-           WHERE shift.venue_id = ? AND shift.status = 'scheduled'
-           AND shift.shift_date BETWEEN ? AND ?
-           ORDER BY person.name, shift.shift_date, shift.start_time""",
-        (venue["id"], week_start.isoformat(), week_end.isoformat()),
-    ).fetchall()
-
-    if not shift_rows:
+    rostered = _rostered_week(db, venue["id"], week_start)
+    if not rostered:
         flask.flash("No scheduled shifts to notify for this week.", "error")
         return flask.redirect(flask.url_for("rota_grid.week", week=week_start.isoformat()))
 
-    shifts_by_person = {}
-    for row in shift_rows:
-        shifts_by_person.setdefault(row["person_id"], {"row": row, "shifts": []})["shifts"].append(row)
-
     week_label = f"{week_start.day} {week_start.strftime('%B %Y')}"
     notified = 0
-    for entry in shifts_by_person.values():
-        person = entry["row"]
-        lines = [f"Your shifts for the week of {week_label}:"]
-        for s in entry["shifts"]:
-            shift_date = date.fromisoformat(s["shift_date"])
-            lines.append(f"{shift_date.strftime('%a')} {shift_date.day} {shift_date.strftime('%b')}: {s['start_time']}-{s['end_time']}")
-        message = "\n".join(lines)
-
+    for person_id, entry in rostered.items():
+        person = entry["person"]
+        message = f"Your shifts for the week of {week_label}:\n{entry['shifts_text']}"
         if person["email"]:
             send_email(person["email"], f"Your shifts for the week of {week_label}", message)
         if person["mobile"]:
             send_sms(person["mobile"], message)
         if person["email"] or person["mobile"]:
             notified += 1
+        _record_week_sent(db, venue["id"], week_start, person_id, entry["shifts_text"])
 
     db.execute(
         "INSERT INTO week_notification (venue_id, week_start_date, notified_by_person_id, recipient_count) VALUES (?, ?, ?, ?)",
@@ -418,6 +403,146 @@ def notify_week():
     db.commit()
     flask.flash(f"Notified {notified} staff member(s) about their shifts for the week of {week_label}.")
     return flask.redirect(flask.url_for("rota_grid.week", week=week_start.isoformat()))
+
+
+def _rostered_week(db, venue_id, week_start: date) -> dict:
+    """{person_id: {"person": row, "shifts_text": "Mon 3 Aug: 09:00-17:00\\n..."}}
+    for everyone with a planned shift that week. shifts_text is both what the
+    person is sent and what is kept in week_notification_sent to tell later
+    whether their week has changed, so the two can't drift apart. Unplanned
+    (ad_hoc) shifts are left out: one exists because the person clocked in, so
+    it is no news to them and must not make the week read as changed."""
+    rows = db.execute(
+        """SELECT shift.shift_date, shift.start_time, shift.end_time, person.id AS person_id,
+                  person.name, person.email, person.mobile
+           FROM shift JOIN person ON person.id = shift.person_id
+           WHERE shift.venue_id = ? AND shift.status = 'scheduled' AND shift.origin != 'ad_hoc'
+           AND shift.shift_date BETWEEN ? AND ?
+           ORDER BY person.name, shift.shift_date, shift.start_time""",
+        (venue_id, week_start.isoformat(), (week_start + timedelta(days=6)).isoformat()),
+    ).fetchall()
+    rostered = {}
+    for s in rows:
+        shift_date = date.fromisoformat(s["shift_date"])
+        line = f"{shift_date.strftime('%a')} {shift_date.day} {shift_date.strftime('%b')}: {s['start_time']}-{s['end_time']}"
+        rostered.setdefault(s["person_id"], {"person": s, "lines": []})["lines"].append(line)
+    return {pid: {"person": e["person"], "shifts_text": "\n".join(e["lines"])} for pid, e in rostered.items()}
+
+
+def _record_week_sent(db, venue_id, week_start: date, person_id, shifts_text):
+    db.execute(
+        """INSERT INTO week_notification_sent (venue_id, week_start_date, person_id, shifts_text)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT (venue_id, week_start_date, person_id)
+           DO UPDATE SET shifts_text = excluded.shifts_text, sent_at = datetime('now')""",
+        (venue_id, week_start.isoformat(), person_id, shifts_text),
+    )
+
+
+def _week_changes(db, venue_id, week_start: date) -> dict | None:
+    """Who needs telling again about an already-notified week, or None when
+    nobody does. {"people": [{"person_id", "person", "shifts_text"}], "untracked": bool}
+    -- shifts_text is "" for someone who was sent shifts and now has none.
+
+    None for a week that is over: correcting last week's rota is bookkeeping,
+    and texting staff about shifts they have already worked would be absurd.
+
+    "untracked" is a week notified before week_notification_sent existed.
+    There is no record of what anyone was sent, so it can't be said who has
+    changed; while the week is still running it can be sent to everyone
+    rostered once more, which also starts tracking it."""
+    if week_start + timedelta(days=6) < uk_today():
+        return None
+    rostered = _rostered_week(db, venue_id, week_start)
+    sent = {
+        row["person_id"]: row["shifts_text"]
+        for row in db.execute(
+            "SELECT person_id, shifts_text FROM week_notification_sent WHERE venue_id = ? AND week_start_date = ?",
+            (venue_id, week_start.isoformat()),
+        ).fetchall()
+    }
+    people = [
+        {"person_id": pid, "person": entry["person"], "shifts_text": entry["shifts_text"]}
+        for pid, entry in rostered.items() if sent.get(pid) != entry["shifts_text"]
+    ]
+    for pid in sent.keys() - rostered.keys():
+        # Somebody who has since left the venue is not told their shifts have
+        # gone; person stays None and their record is simply cleared.
+        person = db.execute(
+            """SELECT person.id AS person_id, person.name, person.email, person.mobile
+               FROM person JOIN venue_membership ON venue_membership.person_id = person.id
+               WHERE person.id = ? AND venue_membership.venue_id = ? AND venue_membership.status = 'active'""",
+            (pid, venue_id),
+        ).fetchone()
+        people.append({"person_id": pid, "person": person, "shifts_text": ""})
+    if not people:
+        return None
+    return {"people": people, "untracked": not sent}
+
+
+@rota_bp.route("/notify-week-changes", methods=["POST"])
+@limiter.limit("12 per hour; 40 per day", key_func=by_venue)
+@require_permission("app_admin", "rota_admin")
+def notify_week_changes():
+    """Customer report, 2026-10-13: once a week had been notified, a later
+    change to it reached nobody, and there was no way to send it again.
+    Messages only the people whose shifts differ from what they were last
+    sent, so the once-only rule's purpose (nobody is re-spammed) still holds."""
+    db = get_db()
+    venue = flask.g.venue
+    week_start = _monday_of(date.fromisoformat(flask.request.form["week"]))
+    back = flask.redirect(flask.url_for("rota_grid.week", week=week_start.isoformat()))
+
+    already_notified = db.execute(
+        "SELECT 1 FROM week_notification WHERE venue_id = ? AND week_start_date = ?",
+        (venue["id"], week_start.isoformat()),
+    ).fetchone()
+    if already_notified is None:
+        flask.flash("This week hasn't been sent to staff yet.", "error")
+        return back
+    changes = _week_changes(db, venue["id"], week_start)
+    if changes is None:
+        flask.flash("Nothing has changed since this week was sent, so nobody was messaged.", "error")
+        return back
+
+    week_label = f"{week_start.day} {week_start.strftime('%B %Y')}"
+    if changes["untracked"]:
+        subject = f"Your shifts for the week of {week_label}"
+        intro = f"{subject}:"
+    else:
+        subject = f"Your shifts for the week of {week_label} have changed"
+        intro = f"{subject}. They are now:"
+    notified = 0
+    for entry in changes["people"]:
+        person, shifts_text = entry["person"], entry["shifts_text"]
+        if shifts_text:
+            message = f"{intro}\n{shifts_text}"
+            _record_week_sent(db, venue["id"], week_start, entry["person_id"], shifts_text)
+        else:
+            message = f"{subject}. You are no longer on the rota that week."
+            db.execute(
+                "DELETE FROM week_notification_sent WHERE venue_id = ? AND week_start_date = ? AND person_id = ?",
+                (venue["id"], week_start.isoformat(), entry["person_id"]),
+            )
+        if person is None:
+            continue
+        if person["email"]:
+            send_email(person["email"], subject, message)
+        if person["mobile"]:
+            send_sms(person["mobile"], message)
+        if person["email"] or person["mobile"]:
+            notified += 1
+
+    db.execute(
+        "UPDATE week_notification SET notified_at = datetime('now') WHERE venue_id = ? AND week_start_date = ?",
+        (venue["id"], week_start.isoformat()),
+    )
+    db.commit()
+    if changes["untracked"]:
+        flask.flash(f"Sent {notified} staff member(s) their shifts for the week of {week_label} again.")
+    else:
+        flask.flash(f"Notified {notified} staff member(s) whose shifts changed for the week of {week_label}.")
+    return back
 
 
 @rota_bp.route("/cell/<int:person_id>/<on_date>")
