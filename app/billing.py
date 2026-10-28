@@ -849,3 +849,42 @@ def register_webhook(app):
         return "", 200
 
     return stripe_webhook
+
+
+def set_comp(db, venue_id, grant):
+    """Grant or revoke a complimentary subscription: full access with no
+    Stripe object behind it. Shared by the support picker's Comp button
+    (family_admin.comp) and PricePulse's all-apps button
+    (internal.venues_comp), so the two can't drift. Returns False when the
+    venue has no subscription row.
+
+    Revoking over a real Stripe subscription drops only the comp marker: its
+    webhook owns the plan, and revoking a comp must not cancel paid access.
+    The band machinery is untouched: enforce_band() no-ops without a
+    stripe_subscription_id, so a comped venue's staff count can change freely."""
+    sub = db.execute(
+        "SELECT stripe_subscription_id FROM rota_subscription WHERE venue_id = ?",
+        (venue_id,),
+    ).fetchone()
+    if sub is None:
+        return False
+    if grant:
+        db.execute(
+            "UPDATE rota_subscription SET plan = 'active', subscription_status = 'comp' "
+            "WHERE venue_id = ?",
+            (venue_id,),
+        )
+    elif sub["stripe_subscription_id"]:
+        db.execute(
+            "UPDATE rota_subscription SET subscription_status = NULL WHERE venue_id = ?",
+            (venue_id,),
+        )
+    else:
+        db.execute(
+            "UPDATE rota_subscription SET plan = 'inactive', subscription_status = NULL "
+            "WHERE venue_id = ?",
+            (venue_id,),
+        )
+    db.commit()
+    _push_entitlement(db, venue_id)
+    return True

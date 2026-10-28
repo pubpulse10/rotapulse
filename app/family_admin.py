@@ -13,7 +13,7 @@ and not in the venue admin area.
 
 import flask
 
-from app.billing import _push_entitlement
+from app.billing import set_comp
 from app.db import get_db
 
 family_admin_bp = flask.Blueprint("family_admin", __name__, url_prefix="/admin")
@@ -62,36 +62,8 @@ def comp(venue_id):
     """
     _require_family_admin()
     grant = flask.request.form.get("action") == "grant"
-    db = get_db()
-    sub = db.execute(
-        "SELECT stripe_subscription_id FROM rota_subscription WHERE venue_id = ?",
-        (venue_id,),
-    ).fetchone()
-    if sub is None:
+    if not set_comp(get_db(), venue_id, grant):
         flask.abort(404)
-
-    if grant:
-        db.execute(
-            "UPDATE rota_subscription SET plan = 'active', subscription_status = 'comp' "
-            "WHERE venue_id = ?",
-            (venue_id,),
-        )
-    elif sub["stripe_subscription_id"]:
-        # There's a real Stripe subscription underneath. Its webhook owns the
-        # plan, so drop only the comp marker — revoking a comp must not cancel
-        # someone's paid access as a side effect.
-        db.execute(
-            "UPDATE rota_subscription SET subscription_status = NULL WHERE venue_id = ?",
-            (venue_id,),
-        )
-    else:
-        db.execute(
-            "UPDATE rota_subscription SET plan = 'inactive', subscription_status = NULL "
-            "WHERE venue_id = ?",
-            (venue_id,),
-        )
-    db.commit()
-    _push_entitlement(db, venue_id)
     flask.flash(
         "Complimentary access granted." if grant else "Complimentary access removed."
     )

@@ -16,11 +16,12 @@ import hmac
 from flask import Blueprint, jsonify, request
 
 from app import config, notifications
-from app.billing import cancel_subscriptions_for_pub, enforce_band
+from app.billing import cancel_subscriptions_for_pub, enforce_band, set_comp
 from app.db import get_db, get_app_id, delete_venue_by_pub_id
 from app.extensions import limiter
 from app.notification_settings import check_missed_clock_ins, check_missed_clock_outs, remind_staff_to_clock_in
 from app.uk_time import uk_now
+from app.venues import create_venue
 
 internal_bp = Blueprint("internal", __name__, url_prefix="/internal")
 
@@ -250,6 +251,38 @@ def venues_delete():
     cancelled = cancel_subscriptions_for_pub(db, pub_id)
     deleted = delete_venue_by_pub_id(db, pub_id)
     return jsonify({"ok": True, "deleted": deleted, "cancelled": cancelled})
+
+
+@internal_bp.route("/venues/comp", methods=["POST"])
+@limiter.limit("60 per minute")
+def venues_comp():
+    """PricePulse's "Give free access to all apps" button. Granting creates
+    the pub's venue (and its owner, from the PricePulse account) first if it
+    has none, so the owner never has to visit the setup page; then every
+    venue the pub has is comped. Revoking never creates anything."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    pub_id = data.get("pub_id")
+    if pub_id is None:
+        return jsonify({"error": "pub_id is required"}), 400
+    grant = data.get("grant") is True
+
+    db = get_db()
+    venue_ids = [r["id"] for r in db.execute(
+        "SELECT id FROM venue WHERE pub_id = ? ORDER BY id", (pub_id,)
+    ).fetchall()]
+    created = False
+    if grant and not venue_ids:
+        owner_email = (data.get("owner_email") or "").strip() or None
+        venue_name = (data.get("venue_name") or "").strip() or "My venue"
+        owner_name = (data.get("owner_name") or "").strip() or owner_email or "Owner"
+        venue_ids = [create_venue(db, pub_id, venue_name, owner_name, owner_email)[0]]
+        created = True
+    for venue_id in venue_ids:
+        set_comp(db, venue_id, grant)
+    return jsonify({"ok": True, "venues": venue_ids, "created": created})
 
 
 @internal_bp.route("/mail-status", methods=["GET"])

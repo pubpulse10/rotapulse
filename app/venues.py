@@ -58,6 +58,50 @@ def _unique_slug(db, base_slug):
     return slug
 
 
+def create_venue(db, pub_id, venue_name, owner_name, owner_email, postcode=None):
+    """Create a venue for this pub, with its owner as a person holding
+    app_admin + rota_admin, and return (venue_id, slug). Used by the owner's
+    own setup form and by PricePulse's all-apps free-access button
+    (internal.venues_comp), which creates the venue so it can be comped.
+
+    New venues start LOCKED (no cardless trial) — the free trial is
+    Stripe-managed and only starts once the owner completes Checkout with a
+    card. current_venue_plan() reads this as 'inactive' until then."""
+    coords = geocode_postcode(postcode) if postcode else None
+    slug = _unique_slug(db, _slugify(venue_name))
+
+    cur = db.execute(
+        "INSERT INTO venue (pub_id, name, postcode, latitude, longitude, slug) VALUES (?, ?, ?, ?, ?, ?)",
+        (pub_id, venue_name, postcode or None, coords[0] if coords else None, coords[1] if coords else None, slug),
+    )
+    venue_id = cur.lastrowid
+    db.execute("INSERT INTO venue_settings (venue_id) VALUES (?)", (venue_id,))
+    db.execute(
+        "INSERT INTO rota_subscription (venue_id, plan, trial_ends_at) VALUES (?, 'inactive', NULL)",
+        (venue_id,),
+    )
+
+    owner_cur = db.execute(
+        "INSERT INTO person (name, email, pub_id) VALUES (?, ?, ?)",
+        (owner_name, owner_email, pub_id),
+    )
+    membership_cur = db.execute(
+        "INSERT INTO venue_membership (person_id, venue_id, status) VALUES (?, ?, 'active')",
+        (owner_cur.lastrowid, venue_id),
+    )
+    membership_id = membership_cur.lastrowid
+    app_id = get_app_id(db, "rotapulse")
+    for level in ("app_admin", "rota_admin"):
+        db.execute(
+            """INSERT INTO app_access
+               (venue_membership_id, app_id, permission_level, status, accepted_at, approved_at)
+               VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))""",
+            (membership_id, app_id, level),
+        )
+    db.commit()
+    return venue_id, slug
+
+
 def _is_hub_staff_only(db, venue_id, hub_person_id):
     """True for a Hub person whose only active RotaPulse access here is
     staff-level. The same lookup rota_auth makes, owner's row excluded."""
@@ -154,44 +198,8 @@ def setup():
             flask.flash("Enter your own name.", "error")
             return flask.render_template("venues/setup.html", trial_days=config.ROTAPULSE_TRIAL_DAYS)
 
-        coords = geocode_postcode(postcode) if postcode else None
-        slug = _unique_slug(db, _slugify(venue_name))
-
-        cur = db.execute(
-            "INSERT INTO venue (pub_id, name, postcode, latitude, longitude, slug) VALUES (?, ?, ?, ?, ?, ?)",
-            (pub_id, venue_name, postcode or None, coords[0] if coords else None, coords[1] if coords else None, slug),
-        )
-        venue_id = cur.lastrowid
-        db.execute("INSERT INTO venue_settings (venue_id) VALUES (?)", (venue_id,))
-
-        # New venues start LOCKED (no cardless trial) — the free trial is now
-        # Stripe-managed and only starts once the owner completes Checkout with
-        # a card. current_venue_plan() reads this as 'inactive' until then.
-        db.execute(
-            "INSERT INTO rota_subscription (venue_id, plan, trial_ends_at) VALUES (?, 'inactive', NULL)",
-            (venue_id,),
-        )
-
         landlord_email = flask.session.get("landlord_email")
-        owner_cur = db.execute(
-            "INSERT INTO person (name, email, pub_id) VALUES (?, ?, ?)",
-            (owner_name, landlord_email, pub_id),
-        )
-        person_id = owner_cur.lastrowid
-        membership_cur = db.execute(
-            "INSERT INTO venue_membership (person_id, venue_id, status) VALUES (?, ?, 'active')",
-            (person_id, venue_id),
-        )
-        membership_id = membership_cur.lastrowid
-        app_id = get_app_id(db, "rotapulse")
-        for level in ("app_admin", "rota_admin"):
-            db.execute(
-                """INSERT INTO app_access
-                   (venue_membership_id, app_id, permission_level, status, accepted_at, approved_at)
-                   VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))""",
-                (membership_id, app_id, level),
-            )
-        db.commit()
+        _, slug = create_venue(db, pub_id, venue_name, owner_name, landlord_email, postcode)
 
         subscribe_url = flask.url_for("billing.subscription", slug=slug, _external=True)
         if landlord_email:
