@@ -75,3 +75,34 @@ def test_swap_requires_peer_then_admin_approval(app, client, venue):
         swap = conn.execute("SELECT status FROM shift_swap_request WHERE id = ?", (swap_id,)).fetchone()
         assert swap["status"] == "approved"
         assert conn.execute("SELECT person_id FROM shift WHERE id = ?", (shift_id,)).fetchone()["person_id"] == to_id
+
+
+def test_requesting_a_swap_messages_the_colleague(app, client, venue, monkeypatch):
+    """Real report, 2026-10-29: the manager never got a swap to approve.
+    The admin message only fires once the colleague accepts, and the
+    colleague was never told a swap had been asked of them."""
+    from_id, _m1, _e1 = create_active_staff(app, venue["id"], name="From")
+    to_id, _m2, _e2 = create_active_staff(app, venue["id"], name="To")
+    shift_id = _create_shift_for(app, venue["id"], from_id)
+    with app.app_context():
+        conn = db_module.get_db()
+        conn.execute("UPDATE person SET mobile = '07700900123' WHERE id = ?", (to_id,))
+        conn.execute(
+            """UPDATE app_access SET invite_method = 'sms' WHERE venue_membership_id IN
+               (SELECT id FROM venue_membership WHERE person_id = ?)""",
+            (to_id,),
+        )
+        conn.commit()
+
+    sent = []
+    monkeypatch.setattr("app.staff_portal.send_sms", lambda to, body: sent.append((to, body)) or True)
+
+    login_as_person(client, from_id)
+    client.post(f"/v/{venue['slug']}/staff/shift/{shift_id}/swap/request", data={"to_person_id": to_id})
+
+    assert len(sent) == 1
+    to, body = sent[0]
+    assert to == "07700900123"
+    assert "From has asked you to take" in body
+    assert f"/v/{venue['slug']}/staff/swaps" in body
+    assert body.isascii()

@@ -18,6 +18,7 @@ from app.leave import (LEAVE_TYPES, leave_applies, leave_type_for_colleagues, PO
                        describe_blocked_dates, position, upcoming_blocks_for)
 from app.media import save_attendance_photo
 from app.notification_settings import notify_admins
+from app.notifications import send_email, send_sms
 from app.rota_auth import register_identity, require_permission
 from app.rota_grid import WEEKDAY_KEYS, _approved_leave_on, _billable_staff, _monday_of, _week_dates
 from app.uk_time import planned_datetime, uk_now, uk_now_iso, uk_today
@@ -639,6 +640,34 @@ def request_swap(shift_id):
         (shift_id, flask.g.person["id"], to_person_id),
     )
     db.commit()
+    # Without this the colleague never found out: the swap sat at
+    # pending_peer unless they happened to open Swap requests, so the
+    # admin's "needs approval" message (sent from accept_swap) never fired.
+    # Same channel preference as the leave-decision message. ASCII
+    # punctuation only, to keep the SMS to one GSM-7 segment.
+    venue = flask.g.venue
+    to_person = db.execute(
+        """SELECT person.name, person.email, person.mobile, app_access.invite_method
+           FROM person
+           JOIN venue_membership ON venue_membership.person_id = person.id
+               AND venue_membership.venue_id = ?
+           LEFT JOIN app_access ON app_access.venue_membership_id = venue_membership.id
+           WHERE person.id = ?
+           LIMIT 1""",
+        (venue["id"], to_person_id),
+    ).fetchone()
+    swaps_url = flask.url_for("staff_portal.my_swaps", slug=flask.g.slug, _external=True)
+    message = (
+        f"Hi {to_person['name']}, {flask.g.person['name']} has asked you to take their "
+        f"{format_uk_date(shift_row['shift_date'])} {shift_row['start_time']}-{shift_row['end_time']} "
+        f"shift at {venue['name']}. Accept or decline here: {swaps_url}"
+    )
+    if to_person["invite_method"] == "sms" and to_person["mobile"]:
+        send_sms(to_person["mobile"], message)
+    elif to_person["email"]:
+        send_email(to_person["email"], f"Shift swap request - {venue['name']}", message)
+    elif to_person["mobile"]:
+        send_sms(to_person["mobile"], message)
     flask.flash("Swap requested — waiting for them to accept.")
     return flask.redirect(flask.url_for("staff_portal.shift_detail", shift_id=shift_id))
 
