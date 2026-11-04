@@ -110,8 +110,9 @@ STRIPE_PRICE_STAFF_TIERED = os.environ.get("STRIPE_PRICE_STAFF_TIERED")  # legac
 # Fixed staff bands (the pick-a-band model): one flat monthly Stripe price per
 # band. Index 0..4 line up with STAFF_TIERS' five bands (1-5, 6-10, 11-17,
 # 18-25, 26-50). Replaces the old STRIPE_PRICE_STAFF_TIERED volume price.
-# BAND5 must be set on Render BEFORE a deploy that reads it: the subscribe
-# button is disabled unless every slot here has a price.
+# A slot left unset (BAND5 until its £68 Price is created) is shown as
+# "contact us" and lowers the staff cap to the highest priced band — see
+# billing.effective_max_staff. Bands 1-4 keep working regardless.
 STRIPE_PRICE_ROTA_BANDS = [
     os.environ.get("STRIPE_PRICE_ROTA_BAND1"),
     os.environ.get("STRIPE_PRICE_ROTA_BAND2"),
@@ -167,9 +168,8 @@ STAFF_TIERS = [
 ]
 MAX_BILLABLE_STAFF = STAFF_TIERS[-1][0]
 POA_CONTACT_EMAIL = "info@pubpulse.co.uk"
-STAFF_CAP_MESSAGE = (
-    f"Your team is over {MAX_BILLABLE_STAFF}. Contact us for pricing at {POA_CONTACT_EMAIL}."
-)
+# The cap message is billing.staff_cap_message(): the cap in force drops to
+# the highest band with a Stripe Price while a band's Price isn't set up yet.
 
 
 def apply(app):

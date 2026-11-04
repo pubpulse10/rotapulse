@@ -90,9 +90,46 @@ def has_staff_detail(db, membership_id: int) -> bool:
     ).fetchone() is not None
 
 
+def effective_max_staff() -> int:
+    """The most billable staff the app will take on. Normally the top band's
+    max (50); above it is price on application.
+
+    While a band's Stripe Price isn't configured yet, the cap drops to the
+    highest band that HAS one, so a venue can never grow into a band we can't
+    bill. It is told to contact us instead of being silently left on a
+    cheaper band, or meeting an error at checkout. Written for the 26-50 band,
+    deployed before its £68 Price existed (Nov 2026). With no band prices at
+    all (dev, tests without Stripe) there's nothing to protect, so the full
+    cap applies."""
+    priced = [
+        max_staff
+        for (max_staff, _pence), price in zip(config.STAFF_TIERS, config.STRIPE_PRICE_ROTA_BANDS)
+        if price
+    ]
+    return max(priced) if priced else config.MAX_BILLABLE_STAFF
+
+
+def staff_cap_message() -> str:
+    """'Your team is over N. Contact us for pricing at info@pubpulse.co.uk.',
+    N being the cap actually in force (see effective_max_staff)."""
+    return (
+        f"Your team is over {effective_max_staff()}. "
+        f"Contact us for pricing at {config.POA_CONTACT_EMAIL}."
+    )
+
+
+def band_contact_message(band: int) -> str:
+    """Shown instead of an error when a band has no Stripe Price yet."""
+    max_staff = config.STAFF_TIERS[band - 1][0]
+    return (
+        f"The band for up to {max_staff} staff isn't available to buy online yet. "
+        f"Contact us for pricing at {config.POA_CONTACT_EMAIL}."
+    )
+
+
 def staff_cap_reached(venue_id: int, membership_id: int | None = None) -> bool:
     """True when making one more person billable would take the venue past
-    config.MAX_BILLABLE_STAFF (50) — above that is price on application.
+    effective_max_staff() (normally 50) — above that is price on application.
 
     Pass the membership being activated so someone ALREADY counted (a
     re-save, a repeated Hub push) is never refused: they don't add to the
@@ -103,7 +140,7 @@ def staff_cap_reached(venue_id: int, membership_id: int | None = None) -> bool:
     db = get_db()
     if membership_id is not None and _is_billable(db, membership_id):
         return False
-    return count_billable_staff(venue_id) >= config.MAX_BILLABLE_STAFF
+    return count_billable_staff(venue_id) >= effective_max_staff()
 
 
 def tier_for_count(count: int) -> int:
@@ -397,6 +434,14 @@ def enforce_band(venue_id: int) -> None:
         return  # still within band — nothing to do
     new_price = _band_price(required)
     if not new_price:
+        # The band has no Stripe Price configured. staff_cap_reached stops the
+        # app growing a venue into such a band, so this only happens to a venue
+        # that was already there; leave it where it is rather than fail the
+        # staff change, and say so in the logs.
+        logger.warning(
+            "Venue %s needs band %s but STRIPE_PRICE_ROTA_BAND%s is unset; left on band %s",
+            venue_id, required, required, current,
+        )
         return
     stripe.Subscription.modify(
         sub["stripe_subscription_id"],
@@ -488,7 +533,8 @@ def upgrade():
         abort(400)
     price_id = _band_price(band)
     if not price_id:
-        abort(400)
+        flash(band_contact_message(band), "error")
+        return redirect(url_for("billing.subscription"))
 
     db = get_db()
     existing = get_rota_subscription(db, venue["id"])
@@ -601,7 +647,8 @@ def change_band():
         return redirect(url_for("billing.subscription"))
     new_price = _band_price(band)
     if not new_price:
-        abort(400)
+        flash(band_contact_message(band), "error")
+        return redirect(url_for("billing.subscription"))
     stripe.Subscription.modify(
         sub["stripe_subscription_id"],
         items=[{"id": sub["stripe_subscription_item_id"], "price": new_price, "quantity": 1}],
@@ -770,9 +817,11 @@ def subscription():
     sub = get_rota_subscription(get_db(), venue["id"])
     staff_count = count_billable_staff(venue["id"])
     bands = [
-        {"n": i + 1, "max": config.STAFF_TIERS[i][0], "price": config.STAFF_TIERS[i][1] / 100}
+        {"n": i + 1, "max": config.STAFF_TIERS[i][0], "price": config.STAFF_TIERS[i][1] / 100,
+         "available": bool(_band_price(i + 1))}
         for i in range(len(config.STAFF_TIERS))
     ]
+    required_band = tier_for_count(staff_count)
     return render_template(
         "billing/subscription.html",
         venue=venue,
@@ -784,13 +833,19 @@ def subscription():
             sub["current_period_end"] if sub else None,
         ),
         staff_count=staff_count,
-        required_band=tier_for_count(staff_count),
+        required_band=required_band,
+        # Whether the band this venue needs can actually be bought online. If
+        # not, the page says "contact us" instead of offering a button.
+        required_band_available=bool(_band_price(required_band)),
         current_band=(sub["current_tier"] if sub else None),
         bands=bands,
         max_staff=config.MAX_BILLABLE_STAFF,
         poa_email=config.POA_CONTACT_EMAIL,
         active=bool(sub and sub["stripe_subscription_id"]),
-        stripe_configured=all(config.STRIPE_PRICE_ROTA_BANDS),
+        # Billing works as soon as band 1 has a price. Requiring EVERY band
+        # meant one unconfigured band (band 5, Nov 2026) switched subscribing
+        # off for every venue; an unpriced band is now shown as "contact us".
+        stripe_configured=bool(_band_price(1)),
         # A returning customer is charged at Checkout with no trial, so the
         # page mustn't offer them one.
         returning_customer=is_returning_customer(sub),

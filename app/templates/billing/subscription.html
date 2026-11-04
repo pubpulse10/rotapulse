@@ -90,16 +90,22 @@
       <p>
         <label>
           <input type="radio" name="band" value="{{ b.n }}"
-                 {% if b.n == (current_band if active else required_band) %}checked{% endif %}
-                 {% if b.n < required_band %}disabled{% endif %}>
+                 {% if b.n == (current_band if active else required_band) and b.available %}checked{% endif %}
+                 {% if b.n < required_band or not b.available %}disabled{% endif %}>
           <strong>Band {{ b.n }}</strong>: up to {{ b.max }} staff — £{{ '%.2f'|format(b.price) }}/month + VAT
-          {% if b.n < required_band %}<span class="hint">(too small for your staff count)</span>{% endif %}
+          {% if b.n < required_band %}<span class="hint">(too small for your staff count)</span>
+          {% elif not b.available %}<span class="hint">(contact us for this band — <a href="mailto:{{ poa_email }}">{{ poa_email }}</a>)</span>{% endif %}
         </label>
       </p>
       {% endfor %}
       <p class="hint">{{ max_staff + 1 }}+ staff: price on application —
         <a href="mailto:{{ poa_email }}">{{ poa_email }}</a></p>
+      {% if required_band_available %}
       <button type="submit" class="btn-primary">{{ 'Change band' if active else 'Subscribe now' }}</button>
+      {% else %}
+      <p class="hint">Your team needs Band {{ required_band }}, which isn't available to buy online yet.
+        Contact us for pricing at <a href="mailto:{{ poa_email }}">{{ poa_email }}</a>.</p>
+      {% endif %}
     </form>
 
   {% endif %}

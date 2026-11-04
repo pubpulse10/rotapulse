@@ -69,21 +69,32 @@ App Costs page on pubpulse-web and the Hub guide (`pubpulse-hub/knowledge/rotapu
 Bands, ex VAT, monthly only: 1–5 £10 · 6–10 £20 · 11–17 £34 · 18–25 £48 · **26–50 £68** · **51+ price on
 application** (info@pubpulse.co.uk).
 
+> **STILL TO DO (Stripe was unreachable on 4 Nov 2026, so this shipped without it):** create the £68/month
+> RotaPulse Price for band 5 on product `prod_UyZF3oc3nIe0bK` — flat, `tax_behavior=exclusive`, monthly —
+> and set `STRIPE_PRICE_ROTA_BAND5` to it on the `rotapulse` Render service. No subscription moves and no Price
+> is archived. Until then the app is deliberately in a safe half-state: bands 1–4 work as before, band 5 shows
+> "contact us" instead of a button, and the staff cap is **25**, not 50 (`billing.effective_max_staff`), with
+> "Your team is over 25. Contact us for pricing at info@pubpulse.co.uk." Once the variable is set and the
+> service restarts, the cap rises to 50 by itself with no code change. Then remove this note and the matching
+> "until Band 5 can be bought online" sentence in `pubpulse-hub/knowledge/rotapulse.guide.md`.
+
 - **The app refuses a 51st billable staff member** (`billing.staff_cap_reached`, limit
-  `config.MAX_BILLABLE_STAFF` = the top band's max). It reverses the old "above 25, stay on the top band, never
+  `billing.effective_max_staff()` = the top band's max, or the highest *priced* band while one is unpriced). It reverses the old "above 25, stay on the top band, never
   block" rule. Every route that can make someone billable checks it first: invite (`create_staff`), approval
   (`approve_staff`), re-activation (`reinstate_staff`), the staff record (`edit_staff` — saving it creates the
   `rota_staff_detail` row that makes an active member billable, which is how a Hub-added person becomes billable)
   and the Hub push (`/internal/access` answers 409 and writes nothing). The message is
-  `config.STAFF_CAP_MESSAGE`: "Your team is over 50. Contact us for pricing at info@pubpulse.co.uk." A person
+  `billing.staff_cap_message()`: "Your team is over 50. Contact us for pricing at info@pubpulse.co.uk." A person
   already counted is never refused, and revoking/leaving is never refused. "Billable" is unchanged: active
   membership + active access + a `rota_staff_detail` row, so admin-only accounts still don't count.
   Tripwire: `tests/test_staff_cap.py`.
 - **Stripe is one flat monthly Price per band** (`STRIPE_PRICE_ROTA_BAND1..5`, quantity 1), not a tiered Price —
   the tiered one (`STRIPE_PRICE_STAFF_TIERED`, `scripts/create_stripe_price.py`) is retired. Adding a band means
   creating one new Price (`tax_behavior=exclusive`, or Managed Payments VAT goes wrong) and setting its env var on
-  Render **before** the deploy: the subscribe button is disabled unless every band slot has a price. Existing
-  subscriptions never move when a band is added above them.
+  Render. Order no longer matters: billing counts as configured once band 1 has a price, and a band with no price
+  is shown as "contact us" (upgrade/change-band flash that instead of a 400) and lowers the cap to the highest
+  priced band. It used to need every slot filled, so one missing band would have switched subscribing off for
+  everyone. Existing subscriptions never move when a band is added above them.
 
 ### 2026-10-13 — A notified week that changes can be re-sent, to the people affected only
 

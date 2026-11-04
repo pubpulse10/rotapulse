@@ -16,7 +16,7 @@ import hmac
 from flask import Blueprint, jsonify, request
 
 from app import config, notifications
-from app.billing import cancel_subscriptions_for_pub, enforce_band, has_staff_detail, set_comp, staff_cap_reached
+from app.billing import cancel_subscriptions_for_pub, enforce_band, has_staff_detail, set_comp, staff_cap_message, staff_cap_reached
 from app.db import get_db, get_app_id, delete_venue_by_pub_id
 from app.extensions import limiter
 from app.notification_settings import check_missed_clock_ins, check_missed_clock_outs, remind_staff_to_clock_in
@@ -205,7 +205,7 @@ def access():
             and has_staff_detail(db, membership["id"])
             and staff_cap_reached(venue_id, membership["id"])):
         db.rollback()
-        return jsonify({"error": "staff_cap", "message": config.STAFF_CAP_MESSAGE}), 409
+        return jsonify({"error": "staff_cap", "message": staff_cap_message()}), 409
 
     db.execute("UPDATE person SET name = ?, email = ? WHERE id = ?", (name, email, person_id))
     if membership is None:

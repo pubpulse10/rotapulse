@@ -12,7 +12,9 @@ import pytest
 
 from app import config
 from app import db as db_module
-from app.billing import count_billable_staff, staff_cap_reached, tier_for_count
+from app.billing import (
+    count_billable_staff, effective_max_staff, staff_cap_message, staff_cap_reached, tier_for_count,
+)
 from tests.conftest import login_as_pub
 
 CAP_TEXT = "Your team is over 50. Contact us for pricing"
@@ -140,9 +142,9 @@ def test_tier_boundaries_including_the_new_band():
     assert tier_for_count(51) == 5
 
 
-def test_the_cap_message_reads_as_agreed():
-    assert config.STAFF_CAP_MESSAGE.startswith(CAP_TEXT)
-    assert "info@pubpulse.co.uk" in config.STAFF_CAP_MESSAGE
+def test_the_cap_message_reads_as_agreed(app, band_prices):
+    with app.app_context():
+        assert staff_cap_message() == "Your team is over 50. Contact us for pricing at info@pubpulse.co.uk."
 
 
 # --- 25 -> 26 moves up to band 5, and back down, prorated both ways ---
@@ -419,3 +421,107 @@ def test_hub_push_of_a_brand_new_person_has_no_pay_record_so_is_not_counted(app,
     assert resp.status_code == 200
     with app.app_context():
         assert count_billable_staff(venue["id"]) == 50
+
+
+# --- deployed before the £68 band-5 Price exists (STRIPE_PRICE_ROTA_BAND5 unset) ---
+
+@pytest.fixture
+def four_band_prices(monkeypatch):
+    """Production as it stands until the band-5 Price is created: bands 1-4
+    priced, band 5 not."""
+    from app import billing as billing_module
+    monkeypatch.setattr(
+        billing_module.config, "STRIPE_PRICE_ROTA_BANDS",
+        ["price_band1", "price_band2", "price_band3", "price_band4", None],
+    )
+
+
+def test_cap_falls_to_25_while_band_5_is_unpriced(app, four_band_prices):
+    with app.app_context():
+        assert effective_max_staff() == 25
+        assert staff_cap_message() == "Your team is over 25. Contact us for pricing at info@pubpulse.co.uk."
+
+
+def test_cap_is_50_once_band_5_is_priced(app, band_prices):
+    with app.app_context():
+        assert effective_max_staff() == 50
+
+
+def test_subscribing_still_works_for_bands_1_to_4(app, client, venue, four_band_prices, monkeypatch):
+    import stripe
+    captured = {}
+    monkeypatch.setattr(
+        stripe.checkout.Session, "create",
+        lambda **kw: captured.update(kw) or SimpleNamespace(url="https://checkout.example/x"),
+    )
+    login_as_pub(client, venue["pub_id"])
+    html = client.get(f"/v/{venue['slug']}/billing/subscription").get_data(as_text=True)
+    assert "Billing isn't configured" not in html
+    assert "Subscribe now" in html
+    assert "contact us for this band" in html  # band 5 is shown, but not buyable
+
+    resp = client.post(f"/v/{venue['slug']}/billing/upgrade", data={"band": "1"})
+    assert resp.status_code == 303
+    assert captured["line_items"] == [{"price": "price_band1", "quantity": 1}]
+
+
+def test_choosing_unpriced_band_5_says_contact_us_not_an_error(app, client, venue, four_band_prices, monkeypatch):
+    import stripe
+    monkeypatch.setattr(stripe.checkout.Session, "create", lambda **kw: pytest.fail("no checkout for band 5"))
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(f"/v/{venue['slug']}/billing/upgrade", data={"band": "5"}, follow_redirects=True)
+    assert resp.status_code == 200
+    assert "Contact us for pricing at info@pubpulse.co.uk" in resp.get_data(as_text=True)
+
+
+def test_changing_to_unpriced_band_5_says_contact_us(app, client, venue, four_band_prices, stripe_modify):
+    _live_sub(app, venue["id"], band=1)
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(f"/v/{venue['slug']}/billing/change-band", data={"band": "5"}, follow_redirects=True)
+    assert "Contact us for pricing at info@pubpulse.co.uk" in resp.get_data(as_text=True)
+    assert stripe_modify == []
+    assert _current_tier(app, venue["id"]) == 1
+
+
+def test_band_4_changes_still_prorate_while_band_5_is_unpriced(app, client, venue, four_band_prices, stripe_modify):
+    _live_sub(app, venue["id"], band=3)
+    _bulk_staff(app, venue["id"], 17)
+    access_id, _m = _pending(app, venue["id"])
+    login_as_pub(client, venue["pub_id"])
+    client.post(f"/v/{venue['slug']}/admin/staff/{access_id}/approve")
+    assert stripe_modify[0]["items"] == [{"id": "si_live1", "price": "price_band4", "quantity": 1}]
+    assert stripe_modify[0]["proration_behavior"] == "always_invoice"
+
+
+def test_approving_the_26th_is_refused_while_band_5_is_unpriced(app, client, venue, four_band_prices, stripe_modify):
+    _live_sub(app, venue["id"], band=4)
+    _bulk_staff(app, venue["id"], 25)
+    access_id, membership_id = _pending(app, venue["id"])
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(f"/v/{venue['slug']}/admin/staff/{access_id}/approve", follow_redirects=True)
+    assert "Your team is over 25. Contact us for pricing" in resp.get_data(as_text=True)
+    assert _status(app, membership_id)["a"] == "pending_approval"
+    assert stripe_modify == []
+    assert _current_tier(app, venue["id"]) == 4
+
+
+def test_a_venue_already_over_25_is_left_on_band_4_without_an_error(app, client, venue, four_band_prices, stripe_modify):
+    # Can only arise from data the app didn't create itself; a staff change
+    # must still go through rather than fail on the missing band-5 Price.
+    _live_sub(app, venue["id"], band=4)
+    ids = _bulk_staff(app, venue["id"], 28)
+    login_as_pub(client, venue["pub_id"])
+    resp = client.post(f"/v/{venue['slug']}/admin/staff/{ids[0]}/leave")
+    assert resp.status_code == 302
+    assert stripe_modify == []
+    assert _current_tier(app, venue["id"]) == 4
+
+
+def test_unsubscribed_venue_needing_band_5_is_told_to_contact_us(app, client, venue, four_band_prices):
+    _bulk_staff(app, venue["id"], 30)
+    login_as_pub(client, venue["pub_id"])
+    html = client.get(f"/v/{venue['slug']}/billing/subscription").get_data(as_text=True)
+    assert "Subscribe now" not in html
+    assert "Your team needs Band 5, which isn&#39;t available to buy online yet" in html or \
+        "Your team needs Band 5, which isn't available to buy online yet" in html
+    assert "info@pubpulse.co.uk" in html
