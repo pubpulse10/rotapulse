@@ -14,7 +14,7 @@ import flask
 
 from app import config
 from app.extensions import by_venue, limiter
-from app.billing import enforce_band
+from app.billing import enforce_band, has_staff_detail, staff_cap_reached
 from app.consent import erase_person_sensitive_data
 from app.db import get_app_id, get_db
 from app.leave import carried_over_days, holiday_year_bounds, position, usual_daily_hours
@@ -572,6 +572,19 @@ def edit_staff(membership_id):
         if not name:
             flask.flash("Name is required.", "error")
             return flask.redirect(flask.url_for("admin_config.edit_staff", membership_id=membership_id))
+        # Saving this form creates the pay record (rota_staff_detail), and that
+        # record is what makes an active member billable. Someone without one
+        # yet — typically a person added from the Hub — becomes staff number
+        # N+1 here, so the 50-staff cap has to be checked before anything is
+        # written. Someone already counted is never refused.
+        would_become_billable = (
+            detail is None
+            and membership["status"] == "active"
+            and any(a["status"] == "active" for a in access_rows)
+        )
+        if would_become_billable and staff_cap_reached(venue_id, membership_id):
+            flask.flash(config.STAFF_CAP_MESSAGE, "error")
+            return flask.redirect(flask.url_for("admin_config.edit_staff", membership_id=membership_id))
 
         db.execute(
             "UPDATE person SET name = ?, email = ?, mobile = ?, date_of_birth = ? WHERE id = ?",
@@ -709,6 +722,12 @@ def create_staff():
     # approve the account themselves (found 2026-10-07).
     if permission_level == "rota_admin" and "app_admin" not in flask.g.permission_levels:
         flask.abort(403)
+    # Above 50 billable staff is price on application. An invite isn't billable
+    # yet, but refusing it here — rather than only at approval — saves the new
+    # starter filling in their profile for an account that can't be approved.
+    if staff_cap_reached(venue_id):
+        flask.flash(config.STAFF_CAP_MESSAGE, "error")
+        return flask.redirect(flask.url_for("admin_config.staff_list"))
 
     person_cur = db.execute("INSERT INTO person (name, email, mobile) VALUES (?, ?, ?)", (name, email, mobile))
     person_id = person_cur.lastrowid
@@ -864,7 +883,8 @@ def approve_staff(access_id):
     # needed here (not just for the UPDATE's WHERE) so there's contact detail
     # to actually send the welcome message to.
     row = db.execute(
-        """SELECT app_access.invite_method, person.name, person.email, person.mobile
+        """SELECT app_access.invite_method, app_access.status, venue_membership.id AS membership_id,
+                  person.name, person.email, person.mobile
            FROM app_access
            JOIN venue_membership ON venue_membership.id = app_access.venue_membership_id
            JOIN person ON person.id = venue_membership.person_id
@@ -874,6 +894,12 @@ def approve_staff(access_id):
     ).fetchone()
     if row is None:
         flask.abort(404)
+    # The 51st billable staff member is price on application — refuse before
+    # the access goes live. Only for a row still waiting: a doubled-up click
+    # on someone already approved falls through to the 404 below as before.
+    if row["status"] == "pending_approval" and staff_cap_reached(venue_id, row["membership_id"]):
+        flask.flash(config.STAFF_CAP_MESSAGE, "error")
+        return flask.redirect(flask.url_for("admin_config.pending_approval"))
 
     # status = 'pending_approval' in the WHERE stops a re-approve (e.g. a
     # doubled-up click) from re-sending the welcome message.
@@ -988,6 +1014,17 @@ def reinstate_staff(membership_id):
     able to log in and clock in immediately."""
     db = get_db()
     venue_id = flask.g.venue["id"]
+    leaver = db.execute(
+        "SELECT 1 FROM venue_membership WHERE id = ? AND venue_id = ? AND status = 'left'",
+        (membership_id, venue_id),
+    ).fetchone()
+    if leaver is None:
+        flask.abort(404)
+    # Bringing a leaver back with a pay record makes them billable again, so
+    # it is held to the same 50-staff cap as a new starter.
+    if has_staff_detail(db, membership_id) and staff_cap_reached(venue_id, membership_id):
+        flask.flash(config.STAFF_CAP_MESSAGE, "error")
+        return flask.redirect(flask.url_for("admin_config.staff_list"))
     cur = db.execute(
         "UPDATE venue_membership SET status = 'active' WHERE id = ? AND venue_id = ? AND status = 'left'",
         (membership_id, venue_id),

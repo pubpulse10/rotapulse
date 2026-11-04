@@ -108,13 +108,16 @@ STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 STRIPE_PRICE_STAFF_TIERED = os.environ.get("STRIPE_PRICE_STAFF_TIERED")  # legacy, retired
 # Fixed staff bands (the pick-a-band model): one flat monthly Stripe price per
-# band. Index 0..3 line up with STAFF_TIERS' four bands (1-5, 6-10, 11-17,
-# 18-25+). Replaces the old STRIPE_PRICE_STAFF_TIERED volume price.
+# band. Index 0..4 line up with STAFF_TIERS' five bands (1-5, 6-10, 11-17,
+# 18-25, 26-50). Replaces the old STRIPE_PRICE_STAFF_TIERED volume price.
+# BAND5 must be set on Render BEFORE a deploy that reads it: the subscribe
+# button is disabled unless every slot here has a price.
 STRIPE_PRICE_ROTA_BANDS = [
     os.environ.get("STRIPE_PRICE_ROTA_BAND1"),
     os.environ.get("STRIPE_PRICE_ROTA_BAND2"),
     os.environ.get("STRIPE_PRICE_ROTA_BAND3"),
     os.environ.get("STRIPE_PRICE_ROTA_BAND4"),
+    os.environ.get("STRIPE_PRICE_ROTA_BAND5"),
 ]
 
 # Same Brevo SMTP relay account as the sibling apps — see
@@ -149,14 +152,24 @@ WEATHER_CACHE_HOURS = int(os.environ.get("WEATHER_CACHE_HOURS", "6"))
 INVITE_TOKEN_EXPIRY_DAYS = int(os.environ.get("INVITE_TOKEN_EXPIRY_DAYS", "7"))
 
 # Staff-count pricing tiers (spec §9.1) — (max_staff_inclusive, monthly_pence).
-# A venue above the top band's max still pays the top band's price (per
-# user decision) rather than being blocked from adding more staff.
+# One table shared with HR-Pulse (decision Nov 2026) — change it in both.
+# Above the top band is "price on application": the app refuses to make a
+# 51st billable staff member active (see billing.staff_cap_reached) and
+# points the landlord at info@pubpulse.co.uk instead. This reverses the
+# earlier "cap at the top band, never block" rule, which made sense only
+# while the top band was open-ended.
 STAFF_TIERS = [
     (5, 1000),
     (10, 2000),
     (17, 3400),
     (25, 4800),
+    (50, 6800),
 ]
+MAX_BILLABLE_STAFF = STAFF_TIERS[-1][0]
+POA_CONTACT_EMAIL = "info@pubpulse.co.uk"
+STAFF_CAP_MESSAGE = (
+    f"Your team is over {MAX_BILLABLE_STAFF}. Contact us for pricing at {POA_CONTACT_EMAIL}."
+)
 
 
 def apply(app):

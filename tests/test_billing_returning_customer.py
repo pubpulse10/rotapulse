@@ -26,7 +26,7 @@ TRIAL_PROMISE = "Subscribing starts your free"
 def prices(monkeypatch):
     monkeypatch.setattr(
         billing_module.config, "STRIPE_PRICE_ROTA_BANDS",
-        ["price_band1", "price_band2", "price_band3", "price_band4"],
+        ["price_band1", "price_band2", "price_band3", "price_band4", "price_band5"],
     )
 
 

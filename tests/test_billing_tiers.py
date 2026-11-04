@@ -22,12 +22,12 @@ def _give_venue_a_live_stripe_subscription(app, venue_id, sub_id="sub_live1", it
 
 
 def _set_band_prices(monkeypatch):
-    """Point the four band price slots at fake ids so billing acts (they're
+    """Point the five band price slots at fake ids so billing acts (they're
     env-sourced and unset in tests)."""
     from app import billing as billing_module
     monkeypatch.setattr(
         billing_module.config, "STRIPE_PRICE_ROTA_BANDS",
-        ["price_band1", "price_band2", "price_band3", "price_band4"],
+        ["price_band1", "price_band2", "price_band3", "price_band4", "price_band5"],
     )
 
 
@@ -75,8 +75,14 @@ def test_tier_for_count_bands():
     assert tier_for_count(25) == 4
 
 
-def test_tier_caps_at_top_band_above_25():
-    assert tier_for_count(40) == 4
+def test_tier_for_count_new_26_to_50_band():
+    # 26-50 was added Nov 2026; above 50 is price on application (the app
+    # blocks the 51st — tests/test_staff_cap.py), priced at the top band if
+    # ever reached some other way.
+    assert tier_for_count(26) == 5
+    assert tier_for_count(40) == 5
+    assert tier_for_count(50) == 5
+    assert tier_for_count(80) == 5
 
 
 def test_count_billable_staff_excludes_admin_only_accounts(app, venue):

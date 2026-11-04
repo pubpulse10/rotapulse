@@ -60,6 +60,31 @@ re-deciding something already recorded here.
 
 ## Decisions
 
+### 2026-11-04 — Staff bands: 26–50 added, 51+ is price on application; one table shared with HR-Pulse
+
+**Decision (Nov 2026): RotaPulse and the planned HR-Pulse share ONE staff-band price table.** It lives in
+`app/config.py::STAFF_TIERS`; when HR-Pulse is built, copy it exactly and change both together, along with the
+App Costs page on pubpulse-web and the Hub guide (`pubpulse-hub/knowledge/rotapulse.guide.md`).
+
+Bands, ex VAT, monthly only: 1–5 £10 · 6–10 £20 · 11–17 £34 · 18–25 £48 · **26–50 £68** · **51+ price on
+application** (info@pubpulse.co.uk).
+
+- **The app refuses a 51st billable staff member** (`billing.staff_cap_reached`, limit
+  `config.MAX_BILLABLE_STAFF` = the top band's max). It reverses the old "above 25, stay on the top band, never
+  block" rule. Every route that can make someone billable checks it first: invite (`create_staff`), approval
+  (`approve_staff`), re-activation (`reinstate_staff`), the staff record (`edit_staff` — saving it creates the
+  `rota_staff_detail` row that makes an active member billable, which is how a Hub-added person becomes billable)
+  and the Hub push (`/internal/access` answers 409 and writes nothing). The message is
+  `config.STAFF_CAP_MESSAGE`: "Your team is over 50. Contact us for pricing at info@pubpulse.co.uk." A person
+  already counted is never refused, and revoking/leaving is never refused. "Billable" is unchanged: active
+  membership + active access + a `rota_staff_detail` row, so admin-only accounts still don't count.
+  Tripwire: `tests/test_staff_cap.py`.
+- **Stripe is one flat monthly Price per band** (`STRIPE_PRICE_ROTA_BAND1..5`, quantity 1), not a tiered Price —
+  the tiered one (`STRIPE_PRICE_STAFF_TIERED`, `scripts/create_stripe_price.py`) is retired. Adding a band means
+  creating one new Price (`tax_behavior=exclusive`, or Managed Payments VAT goes wrong) and setting its env var on
+  Render **before** the deploy: the subscribe button is disabled unless every band slot has a price. Existing
+  subscriptions never move when a band is added above them.
+
 ### 2026-10-13 — A notified week that changes can be re-sent, to the people affected only
 
 Customer report: after "Notify staff of this week's rota", a later change reached nobody and

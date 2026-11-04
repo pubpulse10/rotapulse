@@ -16,7 +16,7 @@ import hmac
 from flask import Blueprint, jsonify, request
 
 from app import config, notifications
-from app.billing import cancel_subscriptions_for_pub, enforce_band, set_comp
+from app.billing import cancel_subscriptions_for_pub, enforce_band, has_staff_detail, set_comp, staff_cap_reached
 from app.db import get_db, get_app_id, delete_venue_by_pub_id
 from app.extensions import limiter
 from app.notification_settings import check_missed_clock_ins, check_missed_clock_outs, remind_staff_to_clock_in
@@ -191,11 +191,23 @@ def access():
     if owner_row is not None and owner_row["pub_id"] is not None:
         return jsonify({"ok": True, "skipped": "venue owner"})
 
-    db.execute("UPDATE person SET name = ?, email = ? WHERE id = ?", (name, email, person_id))
-
     membership = db.execute(
         "SELECT id FROM venue_membership WHERE person_id = ? AND venue_id = ?",
         (person_id, venue_id)).fetchone()
+
+    # Above 50 billable staff is price on application. Only someone with a pay
+    # record counts, so a brand-new Hub person (no membership yet, so no
+    # rota_staff_detail) never trips this; re-activating a former member who
+    # has one does. Refused with nothing written — rolling back also drops any
+    # hub_person_id link _link_or_create_person staged — and a non-2xx makes
+    # the Hub say the app didn't confirm, with Re-sync to retry later.
+    if (aa_status == "active" and membership is not None
+            and has_staff_detail(db, membership["id"])
+            and staff_cap_reached(venue_id, membership["id"])):
+        db.rollback()
+        return jsonify({"error": "staff_cap", "message": config.STAFF_CAP_MESSAGE}), 409
+
+    db.execute("UPDATE person SET name = ?, email = ? WHERE id = ?", (name, email, person_id))
     if membership is None:
         cur = db.execute(
             "INSERT INTO venue_membership (person_id, venue_id, status) VALUES (?, ?, 'active')",

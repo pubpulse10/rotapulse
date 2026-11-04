@@ -97,6 +97,8 @@
         </label>
       </p>
       {% endfor %}
+      <p class="hint">{{ max_staff + 1 }}+ staff: price on application —
+        <a href="mailto:{{ poa_email }}">{{ poa_email }}</a></p>
       <button type="submit" class="btn-primary">{{ 'Change band' if active else 'Subscribe now' }}</button>
     </form>
 

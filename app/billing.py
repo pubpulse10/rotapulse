@@ -9,8 +9,13 @@ tiers_mode="volume" — volume mode charges the entire quantity at whichever
 single tier's flat_amount it falls into, which is exactly "1-5 staff = £10
 flat" rather than a per-seat multiplication. Quantity = count of active,
 billable ROTA_STAFF_DETAIL rows (admin-only accounts never count — spec
-§2.1/§9.1). A venue above the top tier's max still pays the top tier's
-price rather than being blocked (user decision).
+§2.1/§9.1). The top band is 26-50; above it is "price on application", so
+staff_cap_reached() stops a 51st billable staff member being made active
+(Nov 2026 — this replaced the old "cap at the top band, never block" rule).
+
+NOTE: live billing is NOT the tiered Price described above any more — it is
+one flat monthly Price per band (config.STRIPE_PRICE_ROTA_BANDS, quantity 1)
+and the band swap is done here. The tiered Price is retired.
 
 Tier changes call stripe.Subscription.modify(..., proration_behavior=
 "always_invoice") — this is what makes proration "immediate" per spec
@@ -63,9 +68,49 @@ def count_billable_staff(venue_id: int) -> int:
     return row["n"] if row else 0
 
 
+def _is_billable(db, membership_id: int) -> bool:
+    """Whether this membership is already counted by count_billable_staff."""
+    return db.execute(
+        """SELECT 1 FROM venue_membership
+           JOIN app_access ON app_access.venue_membership_id = venue_membership.id
+           JOIN rota_staff_detail ON rota_staff_detail.venue_membership_id = venue_membership.id
+           WHERE venue_membership.id = ? AND venue_membership.status = 'active'
+           AND app_access.status = 'active'
+           AND app_access.app_id = (SELECT id FROM app WHERE key = 'rotapulse')""",
+        (membership_id,),
+    ).fetchone() is not None
+
+
+def has_staff_detail(db, membership_id: int) -> bool:
+    """A rota_staff_detail row is what makes an active member billable — an
+    admin-only account has none. Callers use this to tell whether an action
+    is about to make someone billable at all."""
+    return db.execute(
+        "SELECT 1 FROM rota_staff_detail WHERE venue_membership_id = ?", (membership_id,)
+    ).fetchone() is not None
+
+
+def staff_cap_reached(venue_id: int, membership_id: int | None = None) -> bool:
+    """True when making one more person billable would take the venue past
+    config.MAX_BILLABLE_STAFF (50) — above that is price on application.
+
+    Pass the membership being activated so someone ALREADY counted (a
+    re-save, a repeated Hub push) is never refused: they don't add to the
+    total. The caller decides whether its action makes the person billable;
+    this only answers "is there room for one more?". Checked before every
+    route that turns a member active: invite, approval, reinstate, the staff
+    record (which creates the pay record) and the Hub access push."""
+    db = get_db()
+    if membership_id is not None and _is_billable(db, membership_id):
+        return False
+    return count_billable_staff(venue_id) >= config.MAX_BILLABLE_STAFF
+
+
 def tier_for_count(count: int) -> int:
-    """1-4, per spec §9.1's four bands. A count above the top band's max
-    still returns the top tier (capped, not blocked)."""
+    """1-5, per the five bands in config.STAFF_TIERS. A count above the top
+    band's max still returns the top tier: staff_cap_reached stops that
+    happening through the app, but a venue already over it (or a race) must
+    still be priced, not crash."""
     for index, (max_staff, _price_pence) in enumerate(config.STAFF_TIERS, start=1):
         if count <= max_staff:
             return index
@@ -322,7 +367,7 @@ def cancel_subscriptions_for_pub(db, pub_id) -> list:
 
 
 def _band_price(band: int) -> str | None:
-    """The flat monthly Stripe price id for a band (1-4), or None if unset."""
+    """The flat monthly Stripe price id for a band (1-5), or None if unset."""
     if 1 <= band <= len(config.STRIPE_PRICE_ROTA_BANDS):
         return config.STRIPE_PRICE_ROTA_BANDS[band - 1]
     return None
@@ -742,6 +787,8 @@ def subscription():
         required_band=tier_for_count(staff_count),
         current_band=(sub["current_tier"] if sub else None),
         bands=bands,
+        max_staff=config.MAX_BILLABLE_STAFF,
+        poa_email=config.POA_CONTACT_EMAIL,
         active=bool(sub and sub["stripe_subscription_id"]),
         stripe_configured=all(config.STRIPE_PRICE_ROTA_BANDS),
         # A returning customer is charged at Checkout with no trial, so the
