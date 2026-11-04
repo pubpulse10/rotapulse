@@ -48,6 +48,24 @@ def _monday_of(on_date: date) -> date:
     return on_date - timedelta(days=on_date.weekday())
 
 
+def week_visible_to_staff(db, venue_id, week_start: date) -> bool:
+    """Whether the staff screens may show this week's shifts. Always true
+    unless the venue has turned off "Staff can see shifts before the week
+    is notified" in Settings, in which case only a week with a
+    week_notification row is visible. Callers still show a shift dated
+    today or earlier regardless, so a forgotten Notify never stops
+    somebody clocking in or out."""
+    settings = db.execute(
+        "SELECT staff_see_unnotified_weeks FROM venue_settings WHERE venue_id = ?", (venue_id,)
+    ).fetchone()
+    if settings is None or settings["staff_see_unnotified_weeks"]:
+        return True
+    return db.execute(
+        "SELECT 1 FROM week_notification WHERE venue_id = ? AND week_start_date = ?",
+        (venue_id, week_start.isoformat()),
+    ).fetchone() is not None
+
+
 def _billable_staff(db, venue_id):
     return db.execute(
         """SELECT venue_membership.id AS membership_id, person.id AS person_id, person.name,

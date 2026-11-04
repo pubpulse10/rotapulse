@@ -76,6 +76,18 @@
       normal either way.
     </p>
 
+    <div class="checkbox-row">
+      <input type="checkbox" id="staff_see_unnotified_weeks" name="staff_see_unnotified_weeks"
+             {{ 'checked' if not settings or settings['staff_see_unnotified_weeks'] }}>
+      <label for="staff_see_unnotified_weeks">Staff can see shifts before the week is notified</label>
+    </div>
+    <p class="hint">
+      Untick this to keep a week's rota hidden from staff while you're still working on it. They'll see
+      that week's shifts, on their own list and on the full rota, once you press Notify staff for it.
+      A shift on today's date always shows, so nobody is stopped from clocking in if a week wasn't sent.
+      Open shifts you've posted can still be seen and claimed.
+    </p>
+
     <label for="target_staff_cost_percent">Target staff cost %</label>
     <input type="number" step="0.1" id="target_staff_cost_percent" name="target_staff_cost_percent"
            value="{{ settings['target_staff_cost_percent'] if settings else '' }}">

@@ -20,7 +20,8 @@ from app.media import save_attendance_photo
 from app.notification_settings import notify_admins
 from app.notifications import send_email, send_sms
 from app.rota_auth import register_identity, require_permission
-from app.rota_grid import WEEKDAY_KEYS, _approved_leave_on, _billable_staff, _monday_of, _week_dates
+from app.rota_grid import (WEEKDAY_KEYS, _approved_leave_on, _billable_staff, _monday_of, _week_dates,
+                           week_visible_to_staff)
 from app.uk_time import planned_datetime, uk_now, uk_now_iso, uk_today
 from app.venue_scope import register_venue_gate, register_venue_scope
 
@@ -65,6 +66,7 @@ def home():
            ORDER BY shift.shift_date, shift.start_time""",
         (venue["id"], person["id"], today.isoformat(), horizon.isoformat(), yesterday.isoformat()),
     ).fetchall()
+    shifts = [s for s in shifts if _shift_visible_to_staff(db, venue["id"], s)]
     # Governs whether "Start an unplanned shift" is offered (see
     # start_ad_hoc_shift) — an unfinished shift today, or last night's one
     # still clocked in (the only past shifts the query above returns), means
@@ -74,6 +76,16 @@ def home():
         "staff/home.html", shifts=shifts, today=today.isoformat(), has_open_shift_today=has_open_shift_today,
         show_leave=leave_applies(_own_staff_detail(db, flask.g.person["id"], flask.g.venue["id"])),
     )
+
+
+def _shift_visible_to_staff(db, venue_id, shift_row):
+    """A shift in a week the venue hasn't notified yet is hidden when it has
+    turned that off in Settings -- except one dated today or earlier, which
+    always shows so it can still be clocked in and out of."""
+    shift_date = date.fromisoformat(shift_row["shift_date"])
+    if shift_date <= uk_today():
+        return True
+    return week_visible_to_staff(db, venue_id, _monday_of(shift_date))
 
 
 def _own_staff_detail(db, person_id, venue_id):
@@ -102,6 +114,16 @@ def full_rota():
     week_start = _monday_of(date.fromisoformat(week_param)) if week_param else _monday_of(uk_today())
     dates = _week_dates(week_start)
     date_strs = [d.isoformat() for d in dates]
+
+    if not week_visible_to_staff(db, venue["id"], week_start):
+        return flask.render_template(
+            "staff/full_rota.html",
+            venue=venue,
+            week_start=week_start,
+            week_hidden=True,
+            prev_week=(week_start - timedelta(days=7)).isoformat(),
+            next_week=(week_start + timedelta(days=7)).isoformat(),
+        )
 
     staff = _billable_staff(db, venue["id"])
     shift_rows = db.execute(
@@ -172,7 +194,7 @@ def shift_detail(shift_id):
         "SELECT * FROM shift WHERE id = ? AND venue_id = ? AND person_id = ?",
         (shift_id, flask.g.venue["id"], flask.g.person["id"]),
     ).fetchone()
-    if shift_row is None:
+    if shift_row is None or not _shift_visible_to_staff(db, flask.g.venue["id"], shift_row):
         flask.abort(404)
     attendance = db.execute("SELECT * FROM attendance WHERE shift_id = ?", (shift_id,)).fetchone()
     # Real report, 2026-10-08: someone clocked in, then tapped Clock out
@@ -627,6 +649,8 @@ def request_swap(shift_id):
     ).fetchone()
     if shift_row is None or not to_person_id:
         flask.abort(400)
+    if not _shift_visible_to_staff(db, flask.g.venue["id"], shift_row):
+        flask.abort(404)
     # The swap target must be an active member of THIS venue — otherwise a
     # swap could be pointed at a person_id belonging to another venue.
     to_is_staff_here = db.execute(

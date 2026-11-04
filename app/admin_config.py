@@ -121,7 +121,7 @@ def settings():
                pay_period_anchor_date = ?, pay_period_month_end_day = ?, pay_day_offset = ?,
                holiday_year_start_date = ?, target_staff_cost_percent = ?,
                full_time_allowance_days = ?, full_time_days_per_week = ?,
-               leave_figures_provisional = ?
+               leave_figures_provisional = ?, staff_see_unnotified_weeks = ?
                WHERE venue_id = ?""",
             (
                 form.get("pay_period_type", "weekly"),
@@ -139,6 +139,7 @@ def settings():
                 form.get("full_time_allowance_days", type=float) or 28,
                 form.get("full_time_days_per_week", type=float) or 5,
                 1 if form.get("leave_figures_provisional") else 0,
+                1 if form.get("staff_see_unnotified_weeks") else 0,
                 venue_id,
             ),
         )

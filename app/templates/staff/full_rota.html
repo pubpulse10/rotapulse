@@ -8,6 +8,11 @@
   <a class="btn-secondary" href="{{ url_for('staff_portal.full_rota', week=next_week) }}">Next week &raquo;</a>
 </div>
 
+{% if week_hidden %}
+<div class="panel">
+  <p>This week's rota hasn't been sent out yet. You'll be able to see it here once your manager has notified staff.</p>
+</div>
+{% else %}
 <div class="panel">
   <table class="rota-table">
     <thead>
@@ -67,4 +72,5 @@
     </tbody>
   </table>
 </div>
+{% endif %}
 {% endblock %}

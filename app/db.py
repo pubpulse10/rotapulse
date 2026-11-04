@@ -537,6 +537,13 @@ def init_schema(conn=None):
         # that picks one while last March's rota still says who was on the
         # bar. See app/roles.py.
         _add_column_if_missing(conn, "venue_role", "archived_at", "TEXT")
+        # Whether staff see a week's shifts before an admin has pressed
+        # "Notify staff" for it (customer question, 2026-11-04: staff could
+        # see a rota that was still being drafted). Defaults to 1 -- how every
+        # venue has always worked -- so nobody's staff lose sight of their
+        # shifts on deploy. See rota_grid.week_visible_to_staff.
+        _add_column_if_missing(conn, "venue_settings", "staff_see_unnotified_weeks",
+                               "INTEGER NOT NULL DEFAULT 1")
         conn.commit()
     finally:
         if owns_conn:
