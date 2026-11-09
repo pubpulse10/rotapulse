@@ -58,7 +58,46 @@ re-deciding something already recorded here.
   activation carries on. Read Stripe objects with attribute access, never `.get()`. In tests, `tests/conftest.py`
   stubs the PricePulse lookup for every test so none can reach the real one.
 
+- **Pay is for the Owner and Managers only, and Staff get no pay figure from any route
+  (9 November 2026).** Hourly rates, per-staff costs, the day-cost ticker on the rota grid,
+  the cost dashboard, payroll and its exports are all behind
+  `require_permission("app_admin", "rota_admin")` in the route itself; hiding a link is never
+  the gate. Staff routes (`staff_portal.py`, `media.avatar`) may load the person's own
+  `rota_staff_detail` row but must never render a rate or cost, and no staff page carries a £
+  sign at all. Tripwire: `tests/test_staff_never_sees_pay.py`, which walks the WHOLE URL map
+  (GET and POST, both login paths) as Staff and fails on any planted pay figure, and fails
+  loudly if a new route argument appears that it doesn't know how to fill. A new route is
+  covered automatically; don't exempt one to make it pass.
+
 ## Decisions
+
+### 2026-11-09 — Pay stays with Owner + Manager; shared tablets get a Staff login
+
+**Why:** at The Cock the owner login was on the shared bar tablet, because only the owner
+could invite people, so anyone at the bar could see everyone's pay here. The owner and
+manager now have their own logins and the tablet gets a Staff one; the product change is in
+pubpulse-hub (D32): a Hub Manager can now invite Staff, and the invite screen says "Using a
+shared tablet? Give it its own Staff login, not the owner's."
+
+**Role mapping, Hub → RotaPulse** (also in pubpulse-hub CLAUDE.md):
+
+| Hub role | Recognised here by | `permission_level` | Pay / costs |
+|---|---|---|---|
+| Owner | `session['pub_id']` with no `person_id`, joined on `person.pub_id` | `app_admin` + `rota_admin` (only `venues.setup()` writes `app_admin`; `_restore_owner_access` repairs it) | see and edit |
+| Manager | Hub push `level == "manager"`, or a local invite at `rota_admin` | `rota_admin` | see; rate read-only |
+| Staff | Hub push `level == "staff"` (or any other value), or a local invite at `staff` | `staff` | never |
+
+**What was checked rather than changed:** every pay and cost route was already gated to
+`app_admin`/`rota_admin` server-side, billing (`/billing/*` subscribe, change band, portal,
+subscription page) is `app_admin` only (the Owner), and a manager can already only invite
+Staff locally (`test_manager_cannot_create_manager.py`). What was missing was proof that holds
+as routes are added, hence the sweep test in the invariant above. Its positive controls also
+check the Owner and a Manager DO see the figures, so the sweep can't pass by looking at
+empty pages.
+
+The same day's audit of the other apps found Staff seeing money in PricePulse (everything)
+and DiaryPulse (booking money), and Managers able to reach billing in TaskPulse and
+DiaryPulse — recorded in pubpulse-hub CLAUDE.md, not fixed here.
 
 ### 2026-11-04 — Staff bands: 26–50 added, 51+ is price on application; one table shared with HR-Pulse
 
