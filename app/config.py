@@ -104,6 +104,8 @@ ROTAPULSE_TRIAL_DAYS = int(os.environ.get("ROTAPULSE_TRIAL_DAYS", "30"))
 # not-yet-configured deployment should still start, just without the
 # subscribe button actually working.
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
+# Staff Suite: the one 25% coupon shared with HR-Pulse (app/staff_suite.py).
+STRIPE_BUNDLE_COUPON_ID = os.environ.get("STRIPE_BUNDLE_COUPON_ID")
 STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 STRIPE_PRICE_STAFF_TIERED = os.environ.get("STRIPE_PRICE_STAFF_TIERED")  # legacy, retired

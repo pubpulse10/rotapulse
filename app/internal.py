@@ -297,6 +297,32 @@ def venues_comp():
     return jsonify({"ok": True, "venues": venue_ids, "created": created})
 
 
+@internal_bp.route("/staff-suite", methods=["POST"])
+@limiter.limit("60 per minute")
+def staff_suite():
+    """The Hub saying whether this pub has the Staff Suite (RotaPulse AND
+    HR-Pulse): put the 25% coupon on every venue subscription it has, or take
+    it off. See app/staff_suite.py."""
+    from app import staff_suite as suite
+
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    pub_id = data.get("pub_id")
+    if pub_id is None or not isinstance(data.get("on"), bool):
+        return jsonify({"error": "pub_id and on are required"}), 400
+    if not config.STRIPE_BUNDLE_COUPON_ID:
+        return jsonify({"error": "STRIPE_BUNDLE_COUPON_ID is not set"}), 503
+    rows = get_db().execute(
+        "SELECT s.stripe_subscription_id FROM rota_subscription s JOIN venue v ON v.id = s.venue_id "
+        "WHERE v.pub_id = ? AND s.stripe_subscription_id IS NOT NULL", (pub_id,)).fetchall()
+    results = [suite.set_discount(r["stripe_subscription_id"], config.STRIPE_BUNDLE_COUPON_ID, data["on"])
+               for r in rows]
+    if any(r is None for r in results):
+        return jsonify({"ok": False, "changed": sum(1 for r in results if r)}), 502
+    return jsonify({"ok": True, "changed": sum(1 for r in results if r)})
+
+
 @internal_bp.route("/mail-status", methods=["GET"])
 @limiter.limit("30 per minute")
 def mail_status():
