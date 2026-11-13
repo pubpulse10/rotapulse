@@ -18,6 +18,10 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="link-button">Delete</button>
         </form>
+        {% if s['id'] not in released_open_ids %}
+          <p class="hint">Not yet released to staff. They'll see it and be able to claim it once you press
+            Notify staff here, or send out this week's rota.</p>
+        {% endif %}
       </div>
     {% endfor %}
   </div>

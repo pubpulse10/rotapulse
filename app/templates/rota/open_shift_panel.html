@@ -6,6 +6,10 @@
 <div class="panel">
   <p><strong>{{ shift['start_time'] }}-{{ shift['end_time'] }}</strong> — {{ shift['role_name'] or 'any role' }}</p>
   <p class="hint">No one has claimed this shift yet.</p>
+  {% if not released %}
+    <p class="hint">Not yet released to staff. They'll see it and be able to claim it once you press
+      Notify staff here, or send out this week's rota.</p>
+  {% endif %}
 
   <form method="post" action="{{ url_for('rota_grid.notify_open_shift', shift_id=shift['id']) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

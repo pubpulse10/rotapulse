@@ -71,6 +71,51 @@ re-deciding something already recorded here.
 
 ## Decisions
 
+### 2026-11-12 — An open shift is held back with the rest of an unnotified week
+
+**Why:** "Staff can see shifts before the week is notified" (4 November) hid a draft week's
+rostered shifts but not its open ones. `staff_portal.open_shifts`, `claim_open_shift_prompt` and
+`claim_open_shift` looked only at `status = 'open'`, so staff could see and claim an open shift
+while the manager was still drafting the rota, and the Settings hint said so on purpose.
+
+**Rule:** staff can see and claim an open shift only when it is **released**, which means either
+
+- its week is visible to staff (`rota_grid.week_visible_to_staff`: always while the tickbox is
+  ticked, otherwise only once the week has a `week_notification` row), or
+- its own **Notify staff** alert has gone out (a `shift_open_notification` row).
+
+One function decides it, `rota_grid.released_open_shift_ids`, and the staff Open shifts list, the
+claim page, the claim POST and the staff Full rota all call it. The POST is checked too because
+its URL is guessable from a shift id. A refused claim flashes "That shift isn't available to
+claim yet." and leaves the shift open.
+
+- **A venue with the tickbox ticked (the default) is unchanged.** Every week is visible to its
+  staff, so every open shift is released, alert or no alert. The stricter reading (alert or week
+  notification needed everywhere) was rejected: it would have emptied the Open shifts list at
+  every venue that posts open shifts without pressing Notify.
+- **No "today always shows" exception**, unlike a person's own shift: nobody needs an unreleased
+  open shift in order to clock in.
+- **The staff pages show the staff view to everyone**, a manager included. The admin grid still
+  shows every open shift, and marks an unreleased one "Not yet released to staff" on the chip and
+  in both open-shift panels.
+- **No schema change.** A shift re-opened after being alerted and claimed keeps its old alert row,
+  so it counts as released again; it was already public once.
+- **Claiming needs the shift's job role (owner said yes, same day).** When an open shift has a
+  `venue_role_id`, only someone whose own `venue_membership.job_role_id` is that role can claim
+  it: the same people `notify_open_shift` texts. `staff_portal._role_can_claim` decides, on the
+  list, the claim page and the POST. This one DOES change released shifts at every venue: before,
+  anyone could claim any open shift and the role only narrowed who was told.
+  - A shift with no role is open to everyone, as before.
+  - **Somebody with no job role set can't claim a role-specific shift.** The owner was asked how
+    this case should behave and answered only "add the check", so the literal rule stands. If a
+    venue reports "nobody can claim", look for staff with no job role on their record first.
+  - Managers and the owner get the same rule on the staff pages. On the grid they can still drag
+    a role-specific open shift onto anyone (`move_shift` has no role rule, on purpose).
+  - Another role's shift stays on the staff Open shifts list, with "Kitchen only" where Claim
+    would be. A refused claim flashes "That shift is for Kitchen only, so you can't claim it…".
+
+`tests/test_unreleased_open_shifts.py`. Hub guide: `pubpulse-hub/knowledge/rotapulse.guide.md`.
+
 ### 2026-11-09 — Pay stays with Owner + Manager; shared tablets get a Staff login
 
 **Why:** at The Cock the owner login was on the shared bar tablet, because only the owner

@@ -14,14 +14,14 @@ import flask
 from app.db import get_db
 from app.geo_distance import distance_metres
 from app.date_format import format_uk_date
-from app.leave import (LEAVE_TYPES, leave_applies, leave_type_for_colleagues, PORTIONS, STAFF_REQUESTABLE_TYPES, blocked_dates_for,
-                       describe_blocked_dates, position, upcoming_blocks_for)
+from app.leave import (LEAVE_TYPES, job_role_id_for, leave_applies, leave_type_for_colleagues, PORTIONS,
+                       STAFF_REQUESTABLE_TYPES, blocked_dates_for, describe_blocked_dates, position, upcoming_blocks_for)
 from app.media import save_attendance_photo
 from app.notification_settings import notify_admins
 from app.notifications import send_email, send_sms
 from app.rota_auth import register_identity, require_permission
 from app.rota_grid import (WEEKDAY_KEYS, _approved_leave_on, _billable_staff, _monday_of, _week_dates,
-                           week_visible_to_staff)
+                           released_open_shift_ids, week_visible_to_staff)
 from app.uk_time import planned_datetime, uk_now, uk_now_iso, uk_today
 from app.venue_scope import register_venue_gate, register_venue_scope
 
@@ -148,9 +148,14 @@ def full_rota():
            ORDER BY shift.shift_date, shift.start_time""",
         (venue["id"], date_strs[0], date_strs[-1]),
     ).fetchall()
+    # Same rule as the Open shifts list. In practice a week that reaches this
+    # point is visible, so every open shift in it is released; filtering
+    # anyway keeps this page from ever showing one the list would refuse.
+    released = released_open_shift_ids(db, venue["id"], open_shifts)
     open_shifts_by_date = {}
     for s in open_shifts:
-        open_shifts_by_date.setdefault(s["shift_date"], []).append(s)
+        if s["id"] in released:
+            open_shifts_by_date.setdefault(s["shift_date"], []).append(s)
 
     grid = []
     for member in staff:
@@ -593,7 +598,33 @@ def open_shifts():
            ORDER BY shift.shift_date, shift.start_time""",
         (flask.g.venue["id"], uk_today().isoformat()),
     ).fetchall()
-    return flask.render_template("staff/open_shifts.html", shifts=rows)
+    # An open shift in a week the venue is still drafting stays off this list
+    # until it is released (rota_grid.released_open_shift_ids). Everyone who
+    # uses this page gets the staff view, a manager included: the admin grid
+    # is where a manager sees and assigns the unreleased ones.
+    released = released_open_shift_ids(db, flask.g.venue["id"], rows)
+    rows = [r for r in rows if r["id"] in released]
+    # A shift for another job role is still listed (it shows on the Full rota
+    # anyway) but says who it is for instead of offering Claim.
+    own_role_id = job_role_id_for(db, flask.g.venue["id"], flask.g.person["id"])
+    claimable_ids = {r["id"] for r in rows if _role_can_claim(own_role_id, r)}
+    return flask.render_template("staff/open_shifts.html", shifts=rows, claimable_ids=claimable_ids)
+
+
+def _role_can_claim(own_role_id, shift_row) -> bool:
+    """An open shift given a job role can only be claimed by someone whose
+    own job role (venue_membership.job_role_id) is that role — the same
+    people notify_open_shift texts about it. A shift with no role is open to
+    everyone. Somebody with no job role set therefore can't claim a
+    role-specific shift; a manager can still drag it onto anyone on the grid
+    (move_shift has no role rule)."""
+    return not shift_row["venue_role_id"] or own_role_id == shift_row["venue_role_id"]
+
+
+def _wrong_role_message(db, shift_row) -> str:
+    role = db.execute("SELECT name FROM venue_role WHERE id = ?", (shift_row["venue_role_id"],)).fetchone()
+    who = f"{role['name']} only" if role else "another job role"
+    return f"That shift is for {who}, so you can't claim it. Ask your manager if you should be able to."
 
 
 @staff_bp.route("/open-shifts/<int:shift_id>")
@@ -606,13 +637,36 @@ def claim_open_shift_prompt(shift_id):
     if shift_row is None:
         flask.flash("That shift has already been claimed.", "error")
         return flask.redirect(flask.url_for("staff_portal.open_shifts"))
+    if shift_id not in released_open_shift_ids(db, flask.g.venue["id"], [shift_row]):
+        flask.flash(OPEN_SHIFT_NOT_RELEASED, "error")
+        return flask.redirect(flask.url_for("staff_portal.open_shifts"))
+    if not _role_can_claim(job_role_id_for(db, flask.g.venue["id"], flask.g.person["id"]), shift_row):
+        flask.flash(_wrong_role_message(db, shift_row), "error")
+        return flask.redirect(flask.url_for("staff_portal.open_shifts"))
     return flask.render_template("staff/claim_prompt.html", shift=shift_row)
+
+
+OPEN_SHIFT_NOT_RELEASED = "That shift isn't available to claim yet."
 
 
 @staff_bp.route("/open-shifts/<int:shift_id>/claim", methods=["POST"])
 @require_permission("staff", "rota_admin", "app_admin")
 def claim_open_shift(shift_id):
     db = get_db()
+    # Checked here as well as on the list and the claim page: the POST is
+    # what actually hands the shift over, and its URL is guessable from a
+    # shift id, so hiding the button alone would not stop a claim.
+    open_row = db.execute(
+        "SELECT * FROM shift WHERE id = ? AND venue_id = ? AND status = 'open'", (shift_id, flask.g.venue["id"])
+    ).fetchone()
+    if open_row is not None and shift_id not in released_open_shift_ids(db, flask.g.venue["id"], [open_row]):
+        flask.flash(OPEN_SHIFT_NOT_RELEASED, "error")
+        return flask.redirect(flask.url_for("staff_portal.open_shifts"))
+    if open_row is not None and not _role_can_claim(
+        job_role_id_for(db, flask.g.venue["id"], flask.g.person["id"]), open_row
+    ):
+        flask.flash(_wrong_role_message(db, open_row), "error")
+        return flask.redirect(flask.url_for("staff_portal.open_shifts"))
     # Atomic, first-tap-wins (spec §5.4): the UPDATE's own WHERE clause is
     # the compare-and-swap — SQLite's single-writer serialization makes a
     # rowcount of 1 a reliable "I won the claim" signal with no extra locking.

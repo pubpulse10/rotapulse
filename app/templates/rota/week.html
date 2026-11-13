@@ -121,6 +121,7 @@
                         data-href="{{ url_for('rota_grid.open_shift_day', on_date=d_str) }}"
                         tabindex="0" role="link">
                     {{ s['start_time'] }}-{{ s['end_time'] }}{% if s['role_name'] %} ({{ s['role_name'] }}){% endif %}
+                    {% if s['id'] not in released_open_ids %}<span class="open-shift-unreleased">Not yet released to staff</span>{% endif %}
                   </span>
                 {% endfor %}
               </div>

@@ -66,6 +66,34 @@ def week_visible_to_staff(db, venue_id, week_start: date) -> bool:
     ).fetchone() is not None
 
 
+def released_open_shift_ids(db, venue_id, shift_rows) -> set:
+    """Which of these open shifts staff may see and claim (12 November 2026).
+
+    An open shift is released when its week is visible to staff (see
+    week_visible_to_staff: always, unless the venue hides unnotified weeks,
+    and then only once the week has a week_notification row) OR its own
+    "Notify staff" alert has gone out (a shift_open_notification row). So a
+    venue that hides its drafts no longer has the open shifts in that draft
+    claimed before the rota is finished, while one it has deliberately
+    texted round stays claimable in an unnotified week.
+
+    Unlike a person's own shift there is no "today always shows" exception:
+    nobody needs an unreleased open shift in order to clock in. The staff
+    list, the claim page, the claim itself and the staff Full rota all use
+    this one function; the admin grid uses it only to label a shift."""
+    week_visible = {}
+    released = set()
+    for row in shift_rows:
+        week_start = _monday_of(date.fromisoformat(row["shift_date"]))
+        if week_start not in week_visible:
+            week_visible[week_start] = week_visible_to_staff(db, venue_id, week_start)
+        if week_visible[week_start] or db.execute(
+            "SELECT 1 FROM shift_open_notification WHERE shift_id = ?", (row["id"],)
+        ).fetchone() is not None:
+            released.add(row["id"])
+    return released
+
+
 def _billable_staff(db, venue_id):
     return db.execute(
         """SELECT venue_membership.id AS membership_id, person.id AS person_id, person.name,
@@ -241,6 +269,7 @@ def week():
         grid=grid,
         open_shifts=open_shifts,
         open_shifts_by_date=open_shifts_by_date,
+        released_open_ids=released_open_shift_ids(db, venue["id"], open_shifts),
         roles=roles,
         tags_by_date=tags_by_date,
         blocked_by_date=blocked_by_date,
@@ -892,7 +921,8 @@ def open_shift_panel(shift_id):
     ).fetchone()
     if shift_row is None:
         flask.abort(404)
-    return flask.render_template("rota/open_shift_panel.html", shift=shift_row)
+    released = shift_row["id"] in released_open_shift_ids(db, flask.g.venue["id"], [shift_row])
+    return flask.render_template("rota/open_shift_panel.html", shift=shift_row, released=released)
 
 
 @rota_bp.route("/open-shift/day/<on_date>")
@@ -915,7 +945,10 @@ def open_shift_day(on_date):
         (venue["id"], on_date),
     ).fetchall()
     roles = active_roles(db, venue["id"])
-    return flask.render_template("rota/open_shift_day.html", on_date=on_date, shifts=shifts, roles=roles)
+    return flask.render_template(
+        "rota/open_shift_day.html", on_date=on_date, shifts=shifts, roles=roles,
+        released_open_ids=released_open_shift_ids(db, venue["id"], shifts),
+    )
 
 
 @rota_bp.route("/shift/<int:shift_id>/open", methods=["POST"])
