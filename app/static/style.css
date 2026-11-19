@@ -347,7 +347,18 @@ th, td { padding: 6px; text-align: left; border-bottom: 1px solid var(--color-bo
 /* Rostered hours for the week, on their own line under the name. Tight line
    spacing on purpose: a photo wraps a long name onto two lines, and with the
    hours that is three lines to fit inside the 64px row. */
-.rota-name-text { line-height: 1.15; }
+.rota-name-text { line-height: 1.15; min-width: 0; overflow-wrap: break-word; }
+/* Phones: eight equal columns leave the Staff column 95px, and a photo plus
+   a surname like "Howard" ran over the dashed line into Monday (owner's
+   screenshot, 2026-11-19). The name column takes a little width from the
+   seven day columns and the photo shrinks. break-word above is the last
+   resort for a surname longer than even that; NOT `anywhere`, which split
+   "Howard" itself across two lines. */
+@media (max-width: 640px) {
+  .rota-table th:first-child { width: 124px; }
+  .rota-name-fill { gap: 6px; }
+  .rota-name-cell .avatar { width: 28px; height: 28px; }
+}
 .rota-week-hours { display: block; font-size: 0.72rem; line-height: 1.2; color: var(--color-muted); white-space: nowrap; }
 /* Same dashed frame as .cell-empty above: Off/Hol are both "nobody is
    working this slot" states, so they belong to the same visual family as
