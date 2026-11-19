@@ -69,6 +69,13 @@
   </dialog>
 {% endif %}
 
+{% if leave_clash_count %}
+  <p class="leave-clash-note">
+    {{ leave_clash_count }} shift{{ ' is' if leave_clash_count == 1 else 's are' }} on a day that person has approved leave.
+    {{ 'It is' if leave_clash_count == 1 else 'They are' }} outlined in purple below.
+  </p>
+{% endif %}
+
 <div class="panel">
   <table class="rota-table">
     <thead>
@@ -138,7 +145,13 @@
               {% if row['member']['avatar_url'] %}
                 <img class="avatar" src="{{ url_for('media.avatar', stored_filename=row['member']['avatar_url']) }}" alt="">
               {% endif %}
-              {{ row['member']['name'] }}
+              {# Name and hours share one text block so the photo stays
+                 centred against both. Nothing at all for somebody with no
+                 shifts this week (owner's call, 2026-11-19). #}
+              <span class="rota-name-text">
+                {{ row['member']['name'] }}
+                {% if row['hours'] %}<span class="rota-week-hours" title="Rostered hours this week">{{ '%g'|format(row['hours']) }} hr{{ '' if row['hours'] == 1 else 's' }}</span>{% endif %}
+              </span>
             </span>
           </td>
           {% for cell in row['cells'] %}
@@ -164,11 +177,13 @@
                        the shift panel (variance_label). Admin grid only: the
                        staff Full rota never shows who was late. #}
                     {% set late = s['clock_in_at']|variance_label(s['start_time'], s['shift_date'], late_after_minutes=LATE_START_MINUTES) == 'Late' %}
-                    <span class="shift-chip{{ ' shift-chip-late' if late }}" data-shift-id="{{ s['id'] }}"
+                    {% set on_leave = s['id'] in cell['leave_clash_ids'] %}
+                    <span class="shift-chip{{ ' shift-chip-late' if late }}{{ ' shift-chip-on-leave' if on_leave }}" data-shift-id="{{ s['id'] }}"
                           data-href="{{ url_for('rota_grid.cell', person_id=row['member']['person_id'], on_date=d_str) }}"
                           tabindex="0" role="link">
                       {{ s['start_time'] }}-{{ s['end_time'] }}
                       {% if late %}<span class="badge badge-over-target" title="Clocked in at {{ s['clock_in_at']|uk_time }}, due at {{ s['start_time'] }}">Late</span>{% endif %}
+                      {% if on_leave %}<span class="leave-badge leave-badge-{{ cell['leave']['leave_type'] or 'paid' }}" title="On approved leave this day: {{ leave_type_labels[cell['leave']['leave_type'] or 'paid'] }}">{{ leave_type_short[cell['leave']['leave_type'] or 'paid'] }}</span>{% endif %}
                       {% if s['approval_status'] == 'pending' %}<span class="badge badge-unnotified" title="Needs approval">!</span>{% endif %}
                     </span>
                   {% endfor %}

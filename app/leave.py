@@ -687,6 +687,67 @@ def paid_leave_in_period(db, venue_id: int, start_date: str, end_date: str):
     return out
 
 
+# ---------- Shifts left on the rota inside somebody's leave ----------
+#
+# Customer report, 2026-11-19: leave approved AFTER the rota was made left the
+# shift sitting on the grid with nothing to say the person was now off. A
+# shift is never removed automatically -- whether to delete it, hand it to
+# somebody else or open it up is the manager's call -- so the job here is only
+# to make the clash impossible to miss.
+
+def shift_clashes_with_leave(shift, leave_row) -> bool:
+    """Is this shift inside this leave?
+
+    A half day at either end of a longer booking leaves half that day
+    workable: "from midday" on the first day is fine with a shift that has
+    finished by 12:00, and "until midday" on the last day with one starting at
+    12:00 or later. A single half day doesn't say which half, so any shift
+    that day counts -- a warning too many beats one too few.
+    """
+    on = shift["shift_date"]
+    if not (leave_row["start_date"] <= on <= leave_row["end_date"]):
+        return False
+    if leave_row["start_date"] == leave_row["end_date"]:
+        return True
+    start, end = shift["start_time"], shift["end_time"]
+    if on == leave_row["start_date"] and (leave_row["start_portion"] or "full") == "half":
+        return not (start < end <= "12:00")
+    if on == leave_row["end_date"] and (leave_row["end_portion"] or "full") == "half":
+        return start < "12:00"
+    return True
+
+
+def shifts_during_leave(db, leave_row, from_date=None):
+    """The person's rostered shifts that fall inside this leave, oldest first.
+
+    from_date (ISO) leaves out anything earlier: a shift already worked is a
+    matter of record, not something the manager can still re-cover.
+    """
+    first = leave_row["start_date"]
+    if from_date and from_date > first:
+        first = from_date
+    rows = db.execute(
+        """SELECT id, shift_date, start_time, end_time FROM shift
+           WHERE venue_id = ? AND person_id = ? AND status = 'scheduled'
+           AND shift_date BETWEEN ? AND ?
+           ORDER BY shift_date, start_time""",
+        (leave_row["venue_id"], leave_row["person_id"], first, leave_row["end_date"]),
+    ).fetchall()
+    return [s for s in rows if shift_clashes_with_leave(s, leave_row)]
+
+
+def describe_shifts(shifts) -> str:
+    """"Tue 24 November (10:30-17:00) and Wed 25 November (15:00-19:00)"."""
+    def one(s):
+        on = date.fromisoformat(s["shift_date"])
+        return f"{on.strftime('%a')} {on.day} {on.strftime('%B')} ({s['start_time']}-{s['end_time']})"
+    if len(shifts) > 4:
+        return (f"{len(shifts)} shifts between {format_uk_date(shifts[0]['shift_date'])} "
+                f"and {format_uk_date(shifts[-1]['shift_date'])}")
+    parts = [one(s) for s in shifts]
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
 def describe_booking(row) -> str:
     """"3 August 2026 to 5 August 2026", with any half days spelled out.
     Plain ASCII: this text goes out by SMS as well as email."""

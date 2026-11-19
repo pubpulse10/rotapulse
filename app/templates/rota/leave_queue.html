@@ -21,6 +21,12 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="link-button">Decline</button>
       </form>
+      {% if rostered.get(r['id']) %}
+        <p class="leave-clash-note">
+          On the rota in these dates: {{ describe_shifts(rostered[r['id']]) }}.
+          <a href="{{ url_for('rota_grid.week', week=rostered[r['id']][0]['shift_date']) }}">Open that week</a>
+        </p>
+      {% endif %}
     </div>
   {% endfor %}
 </div>
@@ -40,6 +46,12 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="link-button">Cancel</button>
       </form>
+      {% if rostered.get(r['id']) %}
+        <p class="leave-clash-note">
+          Still on the rota: {{ describe_shifts(rostered[r['id']]) }}.
+          <a href="{{ url_for('rota_grid.week', week=rostered[r['id']][0]['shift_date']) }}">Open that week</a>
+        </p>
+      {% endif %}
     </div>
   {% endfor %}
 </div>

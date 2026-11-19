@@ -18,13 +18,13 @@ from datetime import date, timedelta
 import flask
 
 from app.extensions import by_venue, limiter
-from app.costs import predicted_cost
+from app.costs import predicted_cost, shift_hours
 from app.date_format import format_uk_date
 from app.db import get_db
-from app.leave import (BLOCK_NOTE_MAX, LEAVE_TYPE_KEYS, LEAVE_TYPE_LABELS, LEAVE_TYPES,
+from app.leave import (BLOCK_NOTE_MAX, LEAVE_TYPE_KEYS, LEAVE_TYPE_LABELS, LEAVE_TYPE_SHORT, LEAVE_TYPES,
                        PORTIONS, blocked_dates_for, blocks_by_date, blocks_in_range,
-                       describe_blocked_dates, freeze_counts, leave_applies, notify_decision,
-                       position)
+                       describe_blocked_dates, describe_shifts, freeze_counts, leave_applies,
+                       notify_decision, position, shift_clashes_with_leave, shifts_during_leave)
 from app.notifications import send_email, send_sms
 from app.roles import active_roles
 from app.rota_auth import register_identity, require_permission
@@ -231,9 +231,14 @@ def week():
     week_cost = predicted_cost(venue["id"], date_strs[0], date_strs[-1])
 
     grid = []
+    leave_clash_count = 0
     for member in staff:
         availability = json.loads(member["availability"]) if member["availability"] else {}
         row_cells = []
+        # Rostered hours for the week, shown under the name (customer request,
+        # 2026-11-19). Planned, not clocked: the same shift_hours() the day-cost
+        # figures use, so a 20:00-02:00 late shift counts as six hours.
+        week_hours = 0.0
         for d, d_str in zip(dates, date_strs):
             # Real report, 2026-08-27: a shift check ranked below the leave
             # check meant a genuine, real shift became invisible on the grid
@@ -247,7 +252,20 @@ def week():
             # leave record notwithstanding -- the leave itself is untouched
             # and still cancellable from the leave queue/cell panel.
             if shifts_by_person_date.get((member["person_id"], d_str)):
-                cell = {"state": "shift", "shifts": shifts_by_person_date[(member["person_id"], d_str)]}
+                day_shifts = shifts_by_person_date[(member["person_id"], d_str)]
+                week_hours += sum(shift_hours(s["start_time"], s["end_time"]) for s in day_shifts)
+                cell = {"state": "shift", "shifts": day_shifts, "leave": None, "leave_clash_ids": set()}
+                # The shift still wins the cell, but a shift left standing on
+                # a day of approved leave is now flagged rather than hiding
+                # the leave completely (customer report, 2026-11-19: leave
+                # approved after the rota was made simply didn't show).
+                leave_row = _approved_leave_on(db, member["person_id"], d_str)
+                if leave_row is not None:
+                    clash_ids = {s["id"] for s in day_shifts if shift_clashes_with_leave(s, leave_row)}
+                    if clash_ids:
+                        cell["leave"] = leave_row
+                        cell["leave_clash_ids"] = clash_ids
+                        leave_clash_count += len(clash_ids)
             elif (leave_row := _approved_leave_on(db, member["person_id"], d_str)) is not None:
                 cell = {"state": "leave", "leave": leave_row}
             elif (member["person_id"], d_str) in override_set:
@@ -257,12 +275,14 @@ def week():
             else:
                 cell = {"state": "empty"}
             row_cells.append(cell)
-        grid.append({"member": member, "cells": row_cells})
+        grid.append({"member": member, "cells": row_cells, "hours": round(week_hours, 2)})
 
     return flask.render_template(
         "rota/week.html",
         venue=venue,
         leave_type_labels=LEAVE_TYPE_LABELS,
+        leave_type_short=LEAVE_TYPE_SHORT,
+        leave_clash_count=leave_clash_count,
         week_start=week_start,
         dates=dates,
         date_strs=date_strs,
@@ -1178,8 +1198,17 @@ def leave_queue():
     ).fetchall()
     staff = _billable_staff(db, flask.g.venue["id"])
     today = uk_today()
+    # Shifts still on the rota inside each request, so the clash is in front
+    # of the manager BEFORE they approve, and stays listed against approved
+    # leave until the rota is changed.
+    rostered = {}
+    for r in list(rows) + list(current_or_upcoming_leave):
+        clashing = shifts_during_leave(db, r, today.isoformat())
+        if clashing:
+            rostered[r["id"]] = clashing
     return flask.render_template(
         "rota/leave_queue.html", requests=rows, current_or_upcoming_leave=current_or_upcoming_leave,
+        rostered=rostered, describe_shifts=describe_shifts,
         staff=staff, leave_types=[(key, label) for key, label, _r, _a in LEAVE_TYPES],
         leave_type_labels=LEAVE_TYPE_LABELS,
         blocks=blocks_in_range(db, flask.g.venue["id"], today.isoformat(), "9999-12-31"),
@@ -1239,7 +1268,28 @@ def create_leave():
                     "error")
     else:
         flask.flash("Leave added.")
+    _flash_shifts_during_leave(db, cur.lastrowid)
     return flask.redirect(flask.url_for("rota_grid.leave_queue"))
+
+
+def _flash_shifts_during_leave(db, leave_id) -> None:
+    """Say so when leave that has just been approved or added still has
+    shifts inside it. The shifts are left alone: deleting, reassigning or
+    opening them up is the manager's decision, but they must not be able to
+    approve a holiday and never learn the person was on the rota."""
+    row = db.execute(
+        """SELECT leave_request.*, person.name FROM leave_request
+           JOIN person ON person.id = leave_request.person_id
+           WHERE leave_request.id = ? AND leave_request.venue_id = ?""",
+        (leave_id, flask.g.venue["id"]),
+    ).fetchone()
+    if row is None:
+        return
+    shifts = shifts_during_leave(db, row, uk_today().isoformat())
+    if shifts:
+        flask.flash(
+            f"{row['name']} is still on the rota during this leave: {describe_shifts(shifts)}. "
+            "Change the rota so the shift is covered.", "error")
 
 
 @rota_bp.route("/leave/<int:leave_id>/approve", methods=["POST"])
@@ -1268,6 +1318,7 @@ def approve_leave(leave_id):
     ).fetchone()
     if row is not None:
         notify_decision(db, flask.g.venue, row, "approved")
+    _flash_shifts_during_leave(db, leave_id)
     return flask.redirect(flask.url_for("rota_grid.leave_queue"))
 
 
@@ -1570,7 +1621,8 @@ def create_bulk_leave():
         flask.flash("Choose a type of leave.", "error")
         return flask.redirect(flask.url_for("rota_grid.leave_queue"))
 
-    added, skipped = 0, []
+    added, skipped, still_rostered = 0, [], 0
+    today_iso = uk_today().isoformat()
     for member in _billable_staff(db, venue_id):
         # Casual staff with leave switched off are not part of "everyone":
         # a shutdown must not hand paid leave to somebody who has none.
@@ -1597,6 +1649,8 @@ def create_bulk_leave():
         )
         freeze_counts(db, cur.lastrowid)
         added += 1
+        new_row = db.execute("SELECT * FROM leave_request WHERE id = ?", (cur.lastrowid,)).fetchone()
+        still_rostered += len(shifts_during_leave(db, new_row, today_iso))
     db.commit()
 
     if not added and not skipped:
@@ -1607,6 +1661,10 @@ def create_bulk_leave():
             message += (f" Skipped {len(skipped)} who already had leave booked over those dates: "
                         f"{', '.join(skipped)}.")
         flask.flash(message)
+        if still_rostered:
+            flask.flash(
+                f"{still_rostered} shift{' is' if still_rostered == 1 else 's are'} still on the rota "
+                "in those dates. They are listed below against each person's leave.", "error")
     return flask.redirect(flask.url_for("rota_grid.leave_queue"))
 
 

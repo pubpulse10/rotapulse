@@ -71,6 +71,26 @@ re-deciding something already recorded here.
 
 ## Decisions
 
+### 2026-11-19 — A shift inside approved leave is flagged, never removed; weekly hours under the name
+
+**Why:** a customer approved holiday after the rota was made and nothing showed it. Since 27 August
+a real shift wins the grid cell over leave (so a claimed open shift is never hidden), which meant
+leave arriving later was invisible, and neither approving nor adding leave looked at existing shifts.
+
+**What holds now:**
+- The shift still wins the cell and is **never deleted or moved automatically**; what to do with it
+  is the manager's call. It gets `.shift-chip-on-leave` plus the leave-type badge, and a note above
+  the grid counts them. Admin grid only: the staff Full rota must not show it (it would leak sick
+  and maternity to colleagues).
+- One rule decides a clash everywhere: `leave.shift_clashes_with_leave` (half days at either end of
+  a longer booking leave that half workable; a single half day flags any shift). The leave screen
+  and the flash after approve / add / add-for-everyone use `leave.shifts_during_leave` from TODAY
+  onwards, so recording sick leave over a shift already worked says nothing.
+- The hours under each name are **rostered** hours for the viewed week via `costs.shift_hours`
+  (same figure the day-cost uses, no breaks). Nothing is shown at zero (owner's call).
+- Row height: don't thicken a chip's border to flag it (use box-shadow); a 2px border made the row
+  taller than 64px. Tripwire: `tests/test_leave_shift_clash.py`.
+
 ### 2026-11-12 — An open shift is held back with the rest of an unnotified week
 
 **Why:** "Staff can see shifts before the week is notified" (4 November) hid a draft week's
