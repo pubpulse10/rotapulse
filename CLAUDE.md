@@ -90,6 +90,11 @@ leave arriving later was invisible, and neither approving nor adding leave looke
   (same figure the day-cost uses, no breaks). Nothing is shown at zero (owner's call).
 - Row height: don't thicken a chip's border to flag it (use box-shadow); a 2px border made the row
   taller than 64px. Tripwire: `tests/test_leave_shift_clash.py`.
+- Payroll never added leave to gross pay, but a shift CLOCKED on a day of approved paid leave is in
+  the pay AND still in "Paid leave in this period" and the allowance. "Check these before you run
+  payroll" now lists it (`payroll._worked_on_paid_leave`, also in the CSV and PDF). It warns only:
+  the leave is not shortened automatically, because its days are frozen at approval and whether the
+  day was holiday or work is the manager's decision.
 
 ### 2026-11-12 — An open shift is held back with the rest of an unnotified week
 

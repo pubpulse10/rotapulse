@@ -16,7 +16,7 @@ import flask
 from app.costs import shift_ends_at
 from app.date_format import format_uk_date, format_uk_time
 from app.db import get_db
-from app.leave import paid_leave_in_period
+from app.leave import describe_booking, paid_leave_in_period, shift_clashes_with_leave
 from app.pay_periods import period_containing
 from app.rota_auth import register_identity, require_permission
 from app.uk_time import uk_now, uk_today
@@ -162,7 +162,8 @@ def _needs_attention(db, venue_id, start_date, end_date, by_person, now):
         (venue_id, start_date, end_date),
     ).fetchall()
 
-    attention = {"no_clock_out": [], "clock_out_only": [], "no_clock_in": [], "no_pay_rate": []}
+    attention = {"no_clock_out": [], "clock_out_only": [], "no_clock_in": [], "no_pay_rate": [],
+                 "worked_on_leave": _worked_on_paid_leave(db, venue_id, start_date, end_date, by_person)}
     for row in rows:
         ad_hoc = row["origin"] == "ad_hoc"
         item = {
@@ -198,6 +199,71 @@ def _needs_attention(db, venue_id, start_date, end_date, by_person, now):
                 "fix_url": flask.url_for("admin_config.edit_staff", membership_id=entry["membership_id"]),
             })
     return attention
+
+
+def _worked_on_paid_leave(db, venue_id, start_date, end_date, by_person):
+    """Shifts that were clocked on a day the person was on approved PAID leave.
+
+    Found 2026-11-19, following the customer report about leave approved after
+    the rota was made. The hours and pay above count the shift, and the "Paid
+    leave in this period" table still counts the same day as holiday, with
+    nothing on the report connecting the two: whoever runs the wages pays the
+    day twice, and the person loses a day of allowance they worked.
+
+    This only says so. It deliberately does not shorten the leave: whether
+    that day was holiday or work is the manager's call, and a booking's days
+    are frozen at approval (leave.freeze_counts). Paid leave only -- it is
+    the one type that is paid and comes off the allowance.
+
+    Half days follow the same rule as the rota grid (leave.shift_clashes_
+    with_leave), using the times actually clocked.
+    """
+    leave_rows = db.execute(
+        """SELECT * FROM leave_request
+           WHERE venue_id = ? AND status = 'approved' AND leave_type = 'paid'
+           AND end_date >= ? AND start_date <= ?
+           ORDER BY start_date""",
+        (venue_id, start_date, end_date),
+    ).fetchall()
+    leave_by_person = {}
+    for row in leave_rows:
+        leave_by_person.setdefault(row["person_id"], []).append(row)
+
+    found = []
+    for person_id, entry in by_person.items():
+        for day in entry["days"]:
+            worked = {
+                "shift_date": day["date"],
+                "start_time": format_uk_time(day["clock_in_at"]),
+                "end_time": format_uk_time(day["clock_out_at"]),
+            }
+            for leave_row in leave_by_person.get(person_id, []):
+                if shift_clashes_with_leave(worked, leave_row):
+                    found.append({
+                        "name": entry["name"],
+                        "shift_date": day["date"],
+                        "clock_in_at": day["clock_in_at"],
+                        "clock_out_at": day["clock_out_at"],
+                        "hours": day["hours"],
+                        "leave": describe_booking(leave_row),
+                        "fix_url": flask.url_for("rota_grid.cell", person_id=person_id, on_date=day["date"]),
+                    })
+                    break
+    found.sort(key=lambda r: (r["shift_date"], r["name"]))
+    return found
+
+
+def _worked_on_leave_export_rows(attention):
+    """The same warning for the CSV and PDF. ASCII only, like the rows below."""
+    return [[r["name"], format_uk_date(r["shift_date"]),
+             format_uk_time(r["clock_in_at"]) or "", format_uk_time(r["clock_out_at"]) or "",
+             f"{r['hours']:.2f}", r["leave"]]
+            for r in attention["worked_on_leave"]]
+
+
+WORKED_ON_LEAVE_EXPORT_NOTE = (
+    "WORKED ON A DAY OF PAID LEAVE - these hours are in the pay above AND the day is still counted "
+    "as paid leave. Check before paying both.")
 
 
 def _attention_export_rows(attention):
@@ -326,6 +392,13 @@ def export_csv():
             writer.writerow([r["name"], "", "", "", "",
                              f"No pay rate set, so their {r['hours']} hours above are paid at 0.00"])
 
+    worked_on_leave = _worked_on_leave_export_rows(attention)
+    if worked_on_leave:
+        writer.writerow([])
+        writer.writerow([WORKED_ON_LEAVE_EXPORT_NOTE])
+        writer.writerow(["Name", "Date", "Clocked in", "Clocked out", "Hours", "Paid leave booked"])
+        writer.writerows(worked_on_leave)
+
     resp = flask.Response(buffer.getvalue(), mimetype="text/csv")
     resp.headers["Content-Disposition"] = f"attachment; filename=payroll_{start_date}_to_{end_date}.csv"
     return resp
@@ -367,6 +440,15 @@ def export_pdf():
         elements.append(Paragraph(
             f"<b>{len(missing)} {noun} not included in these totals</b> because a clock time is missing. "
             "They are listed at the end of this report.",
+            styles["Normal"],
+        ))
+
+    worked_on_leave = _worked_on_leave_export_rows(attention)
+    if worked_on_leave:
+        noun = "shift was" if len(worked_on_leave) == 1 else "shifts were"
+        elements.append(Paragraph(
+            f"<b>{len(worked_on_leave)} {noun} worked on a day of paid leave.</b> "
+            "They are listed at the end of this report: check before paying both.",
             styles["Normal"],
         ))
 
@@ -466,6 +548,21 @@ def export_pdf():
                 f"{escape(r['name'])} has no pay rate set, so their {r['hours']} hours above are paid at £0.00.",
                 styles["Normal"],
             ))
+
+    if worked_on_leave:
+        elements.append(Paragraph("Worked on a day of paid leave", styles["Heading2"]))
+        elements.append(Paragraph(
+            "These hours are in the pay above, and the same day is still counted as paid leave. "
+            "Check before paying both.",
+            styles["Normal"],
+        ))
+        on_leave_table = Table(
+            [["Name", "Date", "Clocked in", "Clocked out", "Hours", "Paid leave booked"]]
+            + [[escape(str(cell)) for cell in row] for row in worked_on_leave],
+            colWidths=[90, 78, 50, 54, 40, 150],
+        )
+        on_leave_table.setStyle(TableStyle(navy_header + [("FONTSIZE", (0, 0), (-1, -1), 9)]))
+        elements.append(on_leave_table)
     doc.build(elements)
 
     resp = flask.Response(buffer.getvalue(), mimetype="application/pdf")

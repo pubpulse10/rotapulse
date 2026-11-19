@@ -23,7 +23,7 @@
      seen before a file goes to whoever runs the wages. See
      payroll._needs_attention. #}
   {% set shifts_missing = attention.no_clock_out|length + attention.clock_out_only|length + attention.no_clock_in|length %}
-  {% if shifts_missing or attention.no_pay_rate %}
+  {% if shifts_missing or attention.no_pay_rate or attention.worked_on_leave %}
     <div class="payroll-attention">
       <h2>Check these before you run payroll</h2>
       {% if shifts_missing %}
@@ -94,6 +94,25 @@
             <li>
               <span><strong>{{ r.name }}</strong> · {{ r.hours }} hours at £0.00</span>
               <a class="btn-secondary" href="{{ r.fix_url }}">Set pay rate</a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+
+      {# Not missing from the totals: counted twice between the two halves of
+         this report. See payroll._worked_on_paid_leave. #}
+      {% if attention.worked_on_leave %}
+        <h3>Worked on a day of paid leave</h3>
+        <p class="hint">These hours are in the pay below, and the same day is still counted under "Paid leave in this period" and against their holiday allowance. If they worked instead of taking the day, open the day, cancel the leave and add it again without that day. RotaPulse doesn't change the leave for you.</p>
+        <ul class="attention-list">
+          {% for r in attention.worked_on_leave %}
+            <li>
+              <span>
+                <strong>{{ r.name }}</strong> · {{ r.shift_date|uk_date }} ·
+                clocked {{ r.clock_in_at|uk_time }}–{{ r.clock_out_at|uk_time }} ({{ '%g'|format(r.hours) }} hours)
+                · paid leave booked {{ r.leave }}
+              </span>
+              <a class="btn-secondary" href="{{ r.fix_url }}">Open the day</a>
             </li>
           {% endfor %}
         </ul>

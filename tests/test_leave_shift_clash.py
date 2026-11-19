@@ -292,3 +292,104 @@ def test_nobody_with_no_shifts_gets_an_hours_line(app, client, venue):
 
     assert "Jane Howard" in html
     assert "rota-week-hours" not in html
+
+
+# --------------------------------------------------------------------------- #
+# Payroll: a shift worked on a day of paid leave
+# --------------------------------------------------------------------------- #
+#
+# Gross pay never included leave, so the total itself was always right. The
+# gap was that the clocked hours and the same day's paid leave both appear on
+# the report with nothing connecting them, so the day could be paid twice.
+
+MARCH = "start=2026-03-01&end=2026-03-31"
+
+
+def _worked(app, venue, person_id, on, clock_in="10:00", clock_out="16:00"):
+    with app.app_context():
+        conn = db_module.get_db()
+        shift_id = conn.execute(
+            "INSERT INTO shift (venue_id, person_id, shift_date, start_time, end_time, status) "
+            "VALUES (?, ?, ?, ?, ?, 'scheduled')", (venue["id"], person_id, on, clock_in, clock_out)).lastrowid
+        conn.execute("INSERT INTO attendance (shift_id, clock_in_at, clock_out_at) VALUES (?, ?, ?)",
+                     (shift_id, f"{on}T{clock_in}:00", f"{on}T{clock_out}:00"))
+        conn.commit()
+
+
+def _march_leave(app, venue, person_id, start, end, **kw):
+    from datetime import date
+    return _leave(app, venue, person_id, date.fromisoformat(start), date.fromisoformat(end), **kw)
+
+
+def _payroll(client, venue, fmt=""):
+    login_as_pub(client, venue["pub_id"])
+    return client.get(f"/v/{venue['slug']}/payroll/{fmt}?{MARCH}")
+
+
+def test_payroll_lists_a_shift_worked_on_a_day_of_paid_leave(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Worked Holiday")
+    _march_leave(app, venue, person_id, "2026-03-02", "2026-03-06")
+    _worked(app, venue, person_id, "2026-03-03")
+    _worked(app, venue, person_id, "2026-03-10")   # not on leave
+
+    html = _payroll(client, venue).data.decode("utf-8")
+
+    assert "Check these before you run payroll" in html
+    block = html[html.index("Worked on a day of paid leave"):html.index("<h2>Summary</h2>")]
+    assert "Worked Holiday" in block
+    assert "3 March 2026" in block
+    assert "10:00–16:00 (6 hours)" in block
+    assert "2 March 2026 to 6 March 2026" in block
+    assert "10 March 2026" not in block
+    assert "Nothing missing" not in html
+    # Nothing is changed for them: the leave is exactly as it was.
+    with app.app_context():
+        row = db_module.get_db().execute(
+            "SELECT start_date, end_date, status FROM leave_request WHERE person_id = ?", (person_id,)).fetchone()
+        assert (row["start_date"], row["end_date"], row["status"]) == ("2026-03-02", "2026-03-06", "approved")
+
+
+def test_payroll_says_nothing_when_no_leave_day_was_worked(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Proper Holiday")
+    _march_leave(app, venue, person_id, "2026-03-02", "2026-03-06")
+    _worked(app, venue, person_id, "2026-03-10")
+
+    html = _payroll(client, venue).data.decode("utf-8")
+
+    assert "Worked on a day of paid leave" not in html
+    assert "Nothing missing" in html
+
+
+def test_only_approved_paid_leave_counts_for_the_payroll_warning(app, client, venue):
+    """Unpaid and sick leave aren't paid and don't come off the allowance, and
+    a request nobody has approved isn't leave yet."""
+    unpaid, _m, _e = create_active_staff(app, venue["id"], name="Unpaid Una")
+    asked, _m2, _e2 = create_active_staff(app, venue["id"], name="Only Asked")
+    _march_leave(app, venue, unpaid, "2026-03-03", "2026-03-03", leave_type="unpaid")
+    _march_leave(app, venue, asked, "2026-03-03", "2026-03-03", status="pending")
+    _worked(app, venue, unpaid, "2026-03-03")
+    _worked(app, venue, asked, "2026-03-03")
+
+    assert "Worked on a day of paid leave" not in _payroll(client, venue).data.decode("utf-8")
+
+
+def test_a_morning_worked_before_leave_from_midday_is_not_listed(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Half Day Hal")
+    _march_leave(app, venue, person_id, "2026-03-03", "2026-03-06", start_portion="half")
+    _worked(app, venue, person_id, "2026-03-03", "08:00", "12:00")
+
+    assert "Worked on a day of paid leave" not in _payroll(client, venue).data.decode("utf-8")
+
+
+def test_the_payroll_warning_is_in_the_csv_and_the_pdf(app, client, venue):
+    person_id, _m, _e = create_active_staff(app, venue["id"], name="Worked Holiday")
+    _march_leave(app, venue, person_id, "2026-03-02", "2026-03-06")
+    _worked(app, venue, person_id, "2026-03-03")
+
+    text = _payroll(client, venue, "export.csv").data.decode("utf-8")
+    assert "WORKED ON A DAY OF PAID LEAVE" in text
+    assert "Worked Holiday,3 March 2026,10:00,16:00,6.00,2 March 2026 to 6 March 2026" in text
+
+    pdf = _payroll(client, venue, "export.pdf")
+    assert pdf.status_code == 200
+    assert pdf.data[:4] == b"%PDF"
